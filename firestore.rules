@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Logged-in users can read and write all data.
+    // TODO: Implement more granular security rules. For example, only players
+    // of a game should be able to write to it. Any authenticated user should
+    // be able to read it (for spectator mode).
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
