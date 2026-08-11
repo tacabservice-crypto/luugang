@@ -3358,12 +3358,13 @@ app.get("/api/agent/profile", isAgent, (req, res) => {
   res.json(agent);
 });
 app.get("/api/agent/player-lookup", isAgent, (req, res) => {
+  const agent = req.agent;
   const { query } = req.query;
   if (!query || typeof query !== "string" || query.length < 2) {
     return res.status(400).json({ error: "A search query of at least 2 characters is required." });
   }
   const lowerCaseQuery = query.toLowerCase();
-  const results = Object.values(store.users).filter((u) => u.username.toLowerCase().includes(lowerCaseQuery) && !u.id.startsWith("bot_")).map((u) => ({ id: u.id, username: u.username, avatar: u.avatar })).slice(0, 10);
+  const results = Object.values(store.users).filter((u) => u.username.toLowerCase().includes(lowerCaseQuery) && !u.id.startsWith("bot_")).filter((u) => !u.linkedAgentId || u.linkedAgentId === agent.id).map((u) => ({ id: u.id, username: u.username, avatar: u.avatar })).slice(0, 10);
   res.json(results);
 });
 app.get("/api/agent/transactions", isAgent, async (req, res) => {
@@ -3390,6 +3391,9 @@ app.post("/api/agent/deposit", isAgent, async (req, res) => {
   const player = store.users[playerId];
   if (!player) {
     return res.status(404).json({ error: "Player not found." });
+  }
+  if (player.linkedAgentId && player.linkedAgentId !== agent.id) {
+    return res.status(400).json({ error: "This player is linked to a different agent via promo code." });
   }
   try {
     const agentRef = db.collection("agents").doc(agent.id);
@@ -3510,6 +3514,9 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
   const user = store.users[tx.userId];
   if (!user) {
     return res.status(404).json({ error: "User associated with transaction not found." });
+  }
+  if (user.linkedAgentId && user.linkedAgentId !== agent.id) {
+    return res.status(400).json({ error: "This player is locked to a different agent via promo code." });
   }
   let newAgentFloat;
   try {

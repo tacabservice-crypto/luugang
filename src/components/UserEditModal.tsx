@@ -12,7 +12,7 @@ interface UserEditModalProps {
     onClose: () => void;
     onSave: (updatedUser: Partial<UserProfile>) => Promise<void>;
     isAdmin?: boolean;
-    roles: Role[];
+    roles?: Role[];
 }
 
 const AVATARS = ['😀', '😎', '🚀', '🧠', '👑', '💪', '🎉', '🔥', '💯', '🎲', '🤔','😂','😃','😄','😅','😆','😉','😊','😋','😌','😍','😏','😐','😑','😒','😓','pensive','😕','😖','😗','😘','😙','😚','😛','😜','😝','😞','😟','😠','😡','😢','😣','😤','😥','😦','😧','😨','😩','😪','😫','😬','😭','😮','😯','😰','😱','😲','😳','😴','😵','😶','😷'];

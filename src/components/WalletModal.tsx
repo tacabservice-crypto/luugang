@@ -50,10 +50,20 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
         try {
           const agentsRes = await fetch(`/api/agents?location=${user.location || ''}`);
           if (agentsRes.ok) {
-            const data = await agentsRes.json();
-            setAgents(data);
-            if (data.length > 0 && !selectedAgentId) {
-              setSelectedAgentId(data[0].id);
+            const data: Agent[] = await agentsRes.json();
+            if (user.linkedAgentId) {
+              const linkedAgent = data.find(a => a.id === user.linkedAgentId);
+              if (linkedAgent) {
+                setAgents([linkedAgent]);
+              } else {
+                setAgents(data);
+              }
+              setSelectedAgentId(user.linkedAgentId);
+            } else {
+              setAgents(data);
+              if (data.length > 0 && !selectedAgentId) {
+                setSelectedAgentId(data[0].id);
+              }
             }
           }
         } catch (err) {
@@ -77,6 +87,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   }, [user.id, user.location, activeTab]);
 
   const handleRequestConfirmation = async () => {
+    if (confirmationLoading || confirmationRequested) return;
     setConfirmationLoading(true);
     setError('');
     try {
@@ -96,6 +107,12 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
         const data = await response.json();
         if (response.ok) {
             setConfirmationRequested(true);
+            if (onBalanceUpdated) {
+              onBalanceUpdated();
+            }
+            setTimeout(() => {
+              onClose();
+            }, 2000);
         } else {
             setError(data.error || 'Failed to submit confirmation request.');
         }
@@ -243,11 +260,19 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                           </>
                         ) : (
                           <>
-                            <p className="text-xs text-slate-300 font-semibold">After sending, press Please Confirm to notify admin.</p>
-                            <button onClick={handleRequestConfirmation} disabled={confirmationLoading} className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-black text-sm py-3 px-4 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2">
-                              {confirmationLoading ? <><RefreshCw className="w-4 h-4 animate-spin" /> Submitting...</> : 'Please Confirm'}
-                            </button>
-                            {confirmationRequested && <div className="text-green-400 text-xs">Request submitted for review.</div>}
+                            {!confirmationRequested ? (
+                              <>
+                                <p className="text-xs text-slate-300 font-semibold">After sending, press Please Confirm to notify admin.</p>
+                                <button onClick={handleRequestConfirmation} disabled={confirmationLoading} className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-black text-sm py-3 px-4 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
+                                  {confirmationLoading ? <><RefreshCw className="w-4 h-4 animate-spin" /> Submitting...</> : 'Please Confirm'}
+                                </button>
+                              </>
+                            ) : (
+                              <div className="bg-green-500/20 border border-green-500/30 text-green-400 p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in">
+                                <CheckCircle className="w-4 h-4 shrink-0" />
+                                <span>{language === 'so' ? 'Codsiga waa loo diray maamulka. Waxaa dib loogu laabanayaa bogga hore...' : 'Request submitted for review. Returning home...'}</span>
+                              </div>
+                            )}
                           </>
                         )}
                        </div>
@@ -261,13 +286,18 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                            <div className="flex justify-between"><span>Provider:</span><span className="uppercase">{provider}</span></div>
                          </div>
                          {confirmationRequested ? (
-                            <div className="text-green-400 text-xs">Request submitted. Admin will review.</div>
+                            <div className="bg-green-500/20 border border-green-500/30 text-green-400 p-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 animate-in fade-in">
+                              <CheckCircle className="w-4 h-4 shrink-0" />
+                              <span>{language === 'so' ? 'Codsiga waa loo diray maamulka. Waxaa dib loogu laabanayaa bogga hore...' : 'Request submitted. Admin will review. Returning home...'}</span>
+                            </div>
                          ) : (
-                            <button onClick={handleRequestConfirmation} disabled={confirmationLoading} className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-black text-sm py-3 px-4 rounded-xl disabled:opacity-50">
-                              {confirmationLoading ? 'Submitting...' : 'Please Confirm'}
-                            </button>
+                            <>
+                              <button onClick={handleRequestConfirmation} disabled={confirmationLoading} className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 text-white font-black text-sm py-3 px-4 rounded-xl disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2">
+                                {confirmationLoading ? <><RefreshCw className="w-4 h-4 animate-spin" /> Submitting...</> : 'Please Confirm'}
+                              </button>
+                              <button type="button" onClick={onClose} className="bg-gray-800 text-white font-black text-xs py-3 px-6 rounded-xl cursor-pointer">Go back home</button>
+                            </>
                          )}
-                         <button type="button" onClick={onClose} className="bg-gray-800 text-white font-black text-xs py-3 px-6 rounded-xl">Go back home</button>
                        </div>
                     )}
                 </div>
@@ -276,15 +306,40 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 
                 {(activeTab === 'deposit' || activeTab === 'withdraw') && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                      {activeTab === 'deposit' ? 'Deposit to Agent' : 'Withdraw from Agent'}
-                    </label>
-                    <select value={selectedAgentId} onChange={(e) => setSelectedAgentId(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white">
-                      {agents.length === 0 && <option>Loading agents...</option>}
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                        {activeTab === 'deposit' ? 'Deposit to Agent' : 'Withdraw from Agent'}
+                      </label>
+                      {user.linkedAgentId && (
+                        <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                          {language === 'so' ? 'Agent-kaaga gaarka ah (Locked)' : 'Assigned Agent (Locked)'}
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={selectedAgentId}
+                      onChange={(e) => !user.linkedAgentId && setSelectedAgentId(e.target.value)}
+                      disabled={!!user.linkedAgentId}
+                      className={`w-full bg-black/40 border rounded-xl px-4 py-2.5 text-sm text-white ${
+                        user.linkedAgentId
+                          ? 'border-purple-500/40 bg-purple-950/20 text-purple-200 cursor-not-allowed opacity-90'
+                          : 'border-white/10'
+                      }`}
+                    >
+                      {agents.length === 0 && <option value="">Loading agent...</option>}
                       {agents.map(agent => (
-                        <option key={agent.id} value={agent.id}>{agent.username} ({agent.location || 'N/A'})</option>
+                        <option key={agent.id} value={agent.id}>
+                          {agent.username} ({agent.location || 'N/A'})
+                        </option>
                       ))}
                     </select>
+                    {user.linkedAgentId && (
+                      <p className="text-[11px] text-purple-300/80 italic">
+                        {language === 'so'
+                          ? 'Koontadaada waxay ku xiran tahay agent-ka promo code-kiisa aad adeegsatay.'
+                          : 'Your account is locked to the agent whose promo code you registered with.'}
+                      </p>
+                    )}
                   </div>
                 )}
                 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit } from 'lucide-react';
+import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy } from 'lucide-react';
 
 const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children }) => {
   const navigationItems = [
@@ -9,6 +9,7 @@ const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children })
     { name: 'transactions', label: 'Transactions', icon: Code, permission: 'transactions' },
     { name: 'manual-transactions', label: 'Manual Transactions', icon: Edit, permission: 'transactions' },
     { name: 'agents', label: 'Agents', icon: ShieldCheck, permission: 'agents' },
+    { name: 'tournaments', label: 'Tournaments', icon: Trophy, permission: 'stats' },
     { name: 'settings', label: 'Settings', icon: Settings, permission: 'settings' },
   ];
 

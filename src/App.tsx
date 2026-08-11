@@ -122,6 +122,8 @@ export default function App() {
           console.error("Auth session restore error:", err);
           setUser(null); // Ensure user is logged out on error
         }
+      } else {
+        setUser(null);
       }
       setAuthLoading(false);
     });
@@ -422,7 +424,7 @@ export default function App() {
 
   const handleLogout = () => {
     signOut(auth).catch((error) => console.error('Sign out error', error));
-    // onAuthStateChanged will handle setting user to null
+    setUser(null);
     setActiveRoom(null);
     setMatchmakingState({ isQueued: false, betAmount: 0 });
     localStorage.removeItem('ludo_active_room_id');

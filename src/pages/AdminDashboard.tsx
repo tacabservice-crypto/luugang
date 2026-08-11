@@ -13,8 +13,9 @@ import CreateAgentModal from '../components/CreateAgentModal';
 import EditAgentModal from '../components/EditAgentModal';
 import CreditAgentModal from '../components/CreditAgentModal';
 import EditRoleModal from '../components/EditRoleModal';
-import { Agent, AgentRequest, ManualTransaction, UserProfile } from '../types/game';
+import { Agent, AgentRequest, ManualTransaction, UserProfile, Tournament } from '../types/game';
 import AgentRequestsTable from '../components/admin/AgentRequestsTable';
+import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
 
 
@@ -45,7 +46,7 @@ const AdminDashboard: React.FC = () => {
     const adminId = adminUser?.id;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'agents' | 'settings' | 'agent-requests'>('stats');
+    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'agents' | 'tournaments' | 'settings' | 'agent-requests'>('stats');
     const [error, setError] = useState<string | null>(null);
     
     // Data states
@@ -57,6 +58,7 @@ const AdminDashboard: React.FC = () => {
     const [paymentSettings, setPaymentSettings] = useState<any>(null);
     const [adminSettings, setAdminSettings] = useState<any>(null);
     const [agents, setAgents] = useState<Agent[]>([]);
+    const [tournamentsList, setTournamentsList] = useState<Tournament[]>([]);
     const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
     const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
 
@@ -142,7 +144,7 @@ const AdminDashboard: React.FC = () => {
         }
     };
 
-    const fetchData = useCallback(async (type: 'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'payment-settings' | 'agents' | 'settings', showerror = true) => {
+    const fetchData = useCallback(async (type: 'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'payment-settings' | 'agents' | 'tournaments' | 'settings', showerror = true) => {
         if (!adminUser) return;
         if(showerror) setError(null);
         try {
@@ -169,6 +171,7 @@ const AdminDashboard: React.FC = () => {
                 case 'manual-transactions': setManualTransactions(data); break;
                 case 'payment-settings': setPaymentSettings(data); break;
                 case 'agents': setAgents(data); break;
+                case 'tournaments': setTournamentsList(data); break;
                 case 'settings': setAdminSettings(data); break;
             }
         } catch (err: any) {
@@ -600,6 +603,41 @@ const AdminDashboard: React.FC = () => {
             case 'manual-transactions': return <ManualTransactionsTable transactions={manualTransactions} onApprove={handleApproveTransaction} onReject={handleRejectTransaction} />;
             case 'agents': return <AgentsTable agents={agents} onEdit={setEditingAgent} onCredit={setCreditingAgent} onDelete={handleDeleteAgent} onToggleStatus={handleToggleAgentStatus} onCreate={() => setCreateAgentModalOpen(true)} />;
             case 'agent-requests': return <AgentRequestsTable requests={agentRequests} onApprove={handleApproveAgentRequest} onReject={handleRejectAgentRequest} isProcessing={(id) => processingRequestId === id} />;
+            case 'tournaments': return <TournamentsTable
+                tournaments={tournamentsList}
+                onCreate={async (data) => {
+                  const response = await fetch(`/api/admin/tournaments/create?userId=${adminUser.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                  });
+                  if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to create tournament');
+                  }
+                  await fetchData('tournaments');
+                }}
+                onCancel={async (id) => {
+                  const response = await fetch(`/api/admin/tournaments/${id}/cancel?userId=${adminUser.id}`, {
+                    method: 'POST',
+                  });
+                  if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to cancel tournament');
+                  }
+                  await fetchData('tournaments');
+                }}
+                onDelete={async (id) => {
+                  const response = await fetch(`/api/admin/tournaments/${id}?userId=${adminUser.id}`, {
+                    method: 'DELETE',
+                  });
+                  if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to delete tournament');
+                  }
+                  await fetchData('tournaments');
+                }}
+            />;
             case 'settings': return <Settings 
                 adminSettings={{...adminSettings, usersByRole}}
                 paymentSettings={paymentSettings} 
