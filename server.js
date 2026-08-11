@@ -103,9 +103,34 @@ function getFirebaseServiceAccount() {
   const envValue = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_ADMIN_CREDENTIALS;
   if (envValue) {
     try {
-      const parsed = JSON.parse(envValue);
-      if (parsed && parsed.project_id && parsed.private_key) {
-        return parsed;
+      let rawEnv = envValue.trim();
+      if (rawEnv.startsWith("'") && rawEnv.endsWith("'") || rawEnv.startsWith('"') && rawEnv.endsWith('"')) {
+        rawEnv = rawEnv.slice(1, -1).trim();
+      }
+      if (rawEnv.startsWith("\\{") || rawEnv.includes('\\"')) {
+        rawEnv = rawEnv.replace(/\\([{}":,\[\]\\])/g, "$1");
+      }
+      let parsed = null;
+      try {
+        parsed = JSON.parse(rawEnv);
+      } catch (e1) {
+        try {
+          const decoded = Buffer.from(rawEnv, "base64").toString("utf8");
+          if (decoded.includes("{")) {
+            parsed = JSON.parse(decoded);
+          }
+        } catch (e2) {
+          const unescaped = rawEnv.replace(/\\/g, "");
+          parsed = JSON.parse(unescaped);
+        }
+      }
+      if (parsed && typeof parsed === "object") {
+        if (parsed.private_key && typeof parsed.private_key === "string") {
+          parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+        }
+        if (parsed.project_id && parsed.private_key) {
+          return parsed;
+        }
       }
       console.warn(
         "Firebase credentials did not contain project_id/private_key."
