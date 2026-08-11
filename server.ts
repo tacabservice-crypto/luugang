@@ -113,7 +113,8 @@ app.use(cors({
   credentials: true
 }));
 
-const PORT = Number(process.env.PORT) || 3002;
+const rawPort = process.env.PORT || 3002;
+const PORT = typeof rawPort === 'string' && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
 const DB_FILE = path.join(process.cwd(), 'db_store.json');
 
 app.use(express.json());
@@ -4751,9 +4752,13 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Betting Ludo Game Full-Stack App listening at http://localhost:${PORT}`);
-  });
+  const server = typeof PORT === 'number'
+    ? app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Betting Ludo Game Full-Stack App listening at http://localhost:${PORT}`);
+      })
+    : app.listen(PORT, () => {
+        console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
+      });
 
   // Handle Vite HMR WebSocket upgrade requests
   server.on('upgrade', (req, socket, head) => {
