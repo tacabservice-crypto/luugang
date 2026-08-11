@@ -8,7 +8,12 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import { createServer as createViteServer, ViteDevServer } from 'vite'; // Keep this if Vite is used later
+
+// Load environment variables from .env files
+dotenv.config();
+dotenv.config({ path: path.join(process.cwd(), '.env.production') });
 
 const appDir = typeof __dirname !== 'undefined'
   ? __dirname
@@ -224,11 +229,19 @@ function getFirebaseServiceAccount() {
     }
   }
 
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
-    ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH
-    : path.join(process.cwd(), 'firebase-admin-key.json');
+  const possiblePaths = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    ? [process.env.FIREBASE_SERVICE_ACCOUNT_PATH]
+    : [
+        path.join(process.cwd(), 'firebase-admin-key.json'),
+        path.join(appDir, 'firebase-admin-key.json'),
+        path.join(process.cwd(), 'dist', 'firebase-admin-key.json'),
+        path.join(process.cwd(), 'service-account.json'),
+        path.join(process.cwd(), 'firebase-key.json'),
+      ];
 
-  if (!fs.existsSync(serviceAccountPath)) {
+  const serviceAccountPath = possiblePaths.find(p => fs.existsSync(p));
+
+  if (!serviceAccountPath) {
     return null;
   }
 

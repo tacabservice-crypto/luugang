@@ -27,11 +27,14 @@ var import_cors = __toESM(require("cors"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_fs = __toESM(require("fs"), 1);
 var import_url = require("url");
+var import_dotenv = __toESM(require("dotenv"), 1);
 var import_vite = require("vite");
 var import_app = require("firebase-admin/app");
 var import_firestore = require("firebase-admin/firestore");
 var import_auth = require("firebase-admin/auth");
 var import_meta = {};
+import_dotenv.default.config();
+import_dotenv.default.config({ path: import_path.default.join(process.cwd(), ".env.production") });
 var appDir = typeof __dirname !== "undefined" ? __dirname : import_meta && import_meta.url ? import_path.default.dirname((0, import_url.fileURLToPath)(import_meta.url)) : process.cwd();
 function getDistDirectory() {
   const cwdDist = import_path.default.join(process.cwd(), "dist");
@@ -161,8 +164,15 @@ function getFirebaseServiceAccount() {
       console.error("Failed to parse Firebase credentials JSON:", error);
     }
   }
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH : import_path.default.join(process.cwd(), "firebase-admin-key.json");
-  if (!import_fs.default.existsSync(serviceAccountPath)) {
+  const possiblePaths = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? [process.env.FIREBASE_SERVICE_ACCOUNT_PATH] : [
+    import_path.default.join(process.cwd(), "firebase-admin-key.json"),
+    import_path.default.join(appDir, "firebase-admin-key.json"),
+    import_path.default.join(process.cwd(), "dist", "firebase-admin-key.json"),
+    import_path.default.join(process.cwd(), "service-account.json"),
+    import_path.default.join(process.cwd(), "firebase-key.json")
+  ];
+  const serviceAccountPath = possiblePaths.find((p) => import_fs.default.existsSync(p));
+  if (!serviceAccountPath) {
     return null;
   }
   try {
