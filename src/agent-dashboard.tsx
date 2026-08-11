@@ -3,76 +3,183 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import { Agent, AgentTransaction, AgentRequest, PlayerAgentRequest, UserProfile } from './types/game';
 import toast, { Toaster } from 'react-hot-toast';
+import {
+    Wallet,
+    TrendingUp,
+    Users,
+    Copy,
+    Check,
+    Search,
+    RefreshCw,
+    LogOut,
+    ArrowUpRight,
+    ArrowDownLeft,
+    Clock,
+    DollarSign,
+    Filter,
+    Sparkles,
+    AlertCircle,
+    ChevronRight,
+    ChevronLeft,
+    PlusCircle,
+    Layers,
+    Send,
+    Info,
+    CreditCard,
+    ShieldCheck,
+    History as HistoryIcon,
+    Eye,
+    EyeOff,
+    X
+} from 'lucide-react';
 
 // Transaction Detail Modal Component
 const TransactionDetailModal: React.FC<{ transaction: AgentTransaction; onClose: () => void }> = ({ transaction, onClose }) => {
+    const [copiedId, setCopiedId] = useState(false);
+
+    const handleCopyId = () => {
+        navigator.clipboard.writeText(transaction.id);
+        setCopiedId(true);
+        toast.success('Transaction ID copied!');
+        setTimeout(() => setCopiedId(false), 2000);
+    };
+
+    const isPositive = transaction.type === 'PlayerDeposit' || (transaction.type as string) === 'deposit' || transaction.type === 'FloatPurchase';
+
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 p-6 rounded-lg shadow-xl w-full max-w-md relative border border-slate-700">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700/80 p-6 rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden text-slate-100">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500" />
+                
                 <button
                     onClick={onClose}
-                    className="absolute top-3 right-3 text-gray-400 hover:text-gray-200 text-2xl"
+                    className="absolute top-4 right-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 >
-                    &times;
+                    <X className="w-5 h-5" />
                 </button>
-                <h3 className="text-2xl font-bold text-purple-400 mb-4">Transaction Details</h3>
-                <div className="space-y-3 text-slate-300">
-                    <p><strong>ID:</strong> <span className="font-mono text-sm">{transaction.id}</span></p>
-                    <p><strong>Type:</strong> <span className={`font-semibold ${transaction.type === 'PlayerDeposit' || (transaction.type as string) === 'deposit' ? 'text-green-400' : 'text-red-400'}`}>{transaction.type}</span></p>
-                    <p><strong>Amount:</strong> <span className="font-mono">${transaction.amount.toFixed(2)}</span></p>
-                    {transaction.discountAmount && <p><strong>Discount:</strong> <span className="font-mono">${transaction.discountAmount.toFixed(2)}</span></p>}
-                    <p><strong>Date:</strong> {new Date(transaction.timestamp).toLocaleString()}</p>
-                    {transaction.description && <p><strong>Description:</strong> {transaction.description}</p>}
-                    {transaction.playerId && <p><strong>Player ID:</strong> <span className="font-mono text-sm">{transaction.playerId}</span></p>}
-                    {transaction.playerName && <p><strong>Player Name:</strong> {transaction.playerName}</p>}
-                    {transaction.agentId && <p><strong>Agent ID:</strong> <span className="font-mono text-sm">{transaction.agentId}</span></p>}
+
+                <div className="flex items-center gap-3 mb-6">
+                    <div className={`p-3 rounded-xl ${isPositive ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                        {isPositive ? <ArrowDownLeft className="w-6 h-6" /> : <ArrowUpRight className="w-6 h-6" />}
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold text-slate-100">Transaction Details</h3>
+                        <p className="text-xs text-slate-400">Recorded on {new Date(transaction.timestamp).toLocaleString()}</p>
+                    </div>
+                </div>
+
+                <div className="space-y-4 bg-slate-850/60 p-4 rounded-xl border border-slate-800 text-sm">
+                    <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                        <span className="text-slate-400">Transaction ID</span>
+                        <div className="flex items-center gap-2 font-mono text-xs text-purple-300">
+                            <span>{transaction.id.slice(0, 12)}...</span>
+                            <button onClick={handleCopyId} className="p-1 hover:text-white text-slate-400 transition-colors">
+                                {copiedId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                        <span className="text-slate-400">Type</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                            isPositive ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        }`}>
+                            {transaction.type}
+                        </span>
+                    </div>
+
+                    <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                        <span className="text-slate-400">Amount</span>
+                        <span className="text-lg font-bold font-mono text-slate-100">${transaction.amount.toFixed(2)}</span>
+                    </div>
+
+                    {transaction.discountAmount !== undefined && transaction.discountAmount > 0 && (
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                            <span className="text-slate-400">Commission Discount</span>
+                            <span className="font-mono text-emerald-400 font-semibold">${transaction.discountAmount.toFixed(2)}</span>
+                        </div>
+                    )}
+
+                    {transaction.playerName && (
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                            <span className="text-slate-400">Player Name</span>
+                            <span className="font-semibold text-slate-200">{transaction.playerName}</span>
+                        </div>
+                    )}
+
+                    {transaction.playerId && (
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+                            <span className="text-slate-400">Player ID</span>
+                            <span className="font-mono text-xs text-slate-300">{transaction.playerId}</span>
+                        </div>
+                    )}
+
+                    {transaction.description && (
+                        <div>
+                            <span className="text-slate-400 block mb-1">Description</span>
+                            <p className="text-xs text-slate-300 bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 leading-relaxed">
+                                {transaction.description}
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                    <button
+                        onClick={onClose}
+                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 rounded-xl transition-all border border-slate-700"
+                    >
+                        Close
+                    </button>
                 </div>
             </div>
         </div>
     );
 };
 
-
-// A simple API client
 const AgentDashboard = () => {
+    // Core state
     const [agent, setAgent] = useState<Agent | null>(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [transactions, setTransactions] = useState<AgentTransaction[]>([]);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [requestAmount, setRequestAmount] = useState('');
     const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
-    const [playerRequests, setPlayerRequests] =useState<PlayerAgentRequest[]>([]);
+    const [playerRequests, setPlayerRequests] = useState<PlayerAgentRequest[]>([]);
     const [currentPage, setCurrentPage] = useState(1);
     const [lastFetchedRequestIds, setLastFetchedRequestIds] = useState<Set<string>>(new Set());
-    const [selectedTransaction, setSelectedTransaction] = useState<AgentTransaction | null>(null); // New state
+    const [selectedTransaction, setSelectedTransaction] = useState<AgentTransaction | null>(null);
     const [paymentInstructions, setPaymentInstructions] = useState('');
     const [cashToSend, setCashToSend] = useState(0);
     const [linkedPlayers, setLinkedPlayers] = useState<UserProfile[]>([]);
 
-    const fetchLinkedPlayers = async (agentId: string) => {
-        try {
-            const response = await fetch(`/api/agent/my-players?agentId=${agentId}`);
-            if (!response.ok) throw new Error('Failed to fetch linked players');
-            const data = await response.json();
-            setLinkedPlayers(data);
-        } catch (err: any) {
-            setError(err.message);
-        }
-    };
+    // Navigation and filtering state
+    const [activeTab, setActiveTab] = useState<'overview' | 'requests' | 'requestFloat' | 'players' | 'history' | 'floatHistory'>('overview');
+    const [requestFilter, setRequestFilter] = useState<'all' | 'pending' | 'deposit' | 'withdrawal' | 'approved' | 'rejected'>('all');
+    const [requestSearch, setRequestSearch] = useState('');
+    const [playerSearch, setPlayerSearch] = useState('');
+    const [txTypeFilter, setTxTypeFilter] = useState<string>('all');
+    const [copiedPromo, setCopiedPromo] = useState(false);
+    const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+    const ITEMS_PER_PAGE = 10;
+
+    // Commission Cash calculation
     useEffect(() => {
         if (agent && requestAmount) {
             const amount = parseFloat(requestAmount);
             if (!isNaN(amount) && amount > 0) {
-                const cash = amount * (1 - agent.commissionRate);
+                const cash = amount * (1 - (agent.commissionRate || 0));
                 setCashToSend(cash);
             } else {
                 setCashToSend(0);
@@ -82,39 +189,50 @@ const AgentDashboard = () => {
         }
     }, [requestAmount, agent]);
 
+    // Copy promo code
+    const handleCopyPromo = () => {
+        if (agent?.promoCode) {
+            navigator.clipboard.writeText(agent.promoCode);
+            setCopiedPromo(true);
+            toast.success(`Promo Code "${agent.promoCode}" copied!`);
+            setTimeout(() => setCopiedPromo(false), 2000);
+        }
+    };
+
+    // API calls
+    const fetchLinkedPlayers = async (agentId: string) => {
+        try {
+            const response = await fetch(`/api/agent/my-players?agentId=${agentId}`);
+            if (!response.ok) throw new Error('Failed to fetch linked players');
+            const data = await response.json();
+            setLinkedPlayers(data || []);
+        } catch (err: any) {
+            console.error('Error fetching linked players:', err.message);
+        }
+    };
+
     const fetchPaymentInstructions = async () => {
         try {
             const response = await fetch('/api/agent/payment-instructions');
-            if (!response.ok) {
-                console.error('Could not fetch payment instructions');
-                return;
-            }
+            if (!response.ok) return;
             const data = await response.json();
-            setPaymentInstructions(data.instructions);
+            setPaymentInstructions(data.instructions || '');
         } catch (err) {
             console.error('Error fetching payment instructions:', err);
         }
     };
 
-
-
-    const ITEMS_PER_PAGE = 10;
-    const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
-    const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
-    const currentTransactions = transactions.slice(indexOfFirstItem, indexOfLastItem);
-    const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
-
     const fetchAgentRequests = async (agentId: string) => {
         try {
             const response = await fetch(`/api/agent/requests?agentId=${agentId}`);
-            if (!response.ok) throw new Error('Failed to fetch agent requests');
+            if (!response.ok) throw new Error('Failed to fetch float requests');
             const data = await response.json();
-            setAgentRequests(data);
+            setAgentRequests(data || []);
         } catch (err: any) {
-            setError(err.message);
+            console.error('Error fetching float requests:', err.message);
         }
     };
-    
+
     const fetchPlayerRequests = async (agentId: string) => {
         try {
             const response = await fetch(`/api/agent/player-requests?agentId=${agentId}`);
@@ -123,56 +241,103 @@ const AgentDashboard = () => {
             
             const currentPendingRequestIds = new Set(data.filter(req => req.status === 'pending').map(req => req.id));
             
-            // Check for new requests only if lastFetchedRequestIds has been initialized
             if (lastFetchedRequestIds.size > 0) {
                 const newRequestIds = [...currentPendingRequestIds].filter(id => !lastFetchedRequestIds.has(id));
                 if (newRequestIds.length > 0) {
-                    toast.success(`You have ${newRequestIds.length} new player transaction request(s)!`);
+                    toast.success(`You have ${newRequestIds.length} new player transaction request(s)!`, {
+                        icon: '🔔',
+                        duration: 5000,
+                    });
                 }
             }
     
             setLastFetchedRequestIds(currentPendingRequestIds);
-            setPlayerRequests(data);
+            setPlayerRequests(data || []);
         } catch (err: any) {
-            // Avoid spamming errors on polling failures
-            console.error(err.message);
+            console.error('Error polling player requests:', err.message);
         }
     };
 
+    const fetchTransactions = async (agentId: string) => {
+        try {
+            const response = await fetch(`/api/agent/transactions?agentId=${agentId}`);
+            if (!response.ok) throw new Error('Failed to fetch transactions');
+            const data = await response.json();
+            setTransactions(data || []);
+        } catch (err: any) {
+            console.error('Error fetching transactions:', err.message);
+        }
+    };
+
+    const fetchProfile = async (agentId: string, showToast = false) => {
+        setRefreshing(true);
+        try {
+            const response = await fetch(`/api/agent/profile?agentId=${agentId}`);
+            if (!response.ok) {
+                handleLogout();
+                throw new Error('Session expired or invalid.');
+            }
+            const data = await response.json();
+            setAgent(data);
+            setIsLoggedIn(true);
+            
+            await Promise.all([
+                fetchTransactions(data.id),
+                fetchAgentRequests(data.id),
+                fetchPaymentInstructions(),
+                fetchLinkedPlayers(data.id)
+            ]);
+
+            if (showToast) {
+                toast.success('Dashboard refreshed');
+            }
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    // Actions
     const handleApprove = async (requestId: string) => {
         const agentId = localStorage.getItem('agentId');
         if (!agentId) return;
-        setLoading(true);
+        setActionLoadingId(requestId);
         try {
             const response = await fetch(`/api/agent/player-requests/${requestId}/approve?agentId=${agentId}`, {
                 method: 'POST',
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to approve request');
+            
+            toast.success('Request approved successfully!');
             await fetchPlayerRequests(agentId);
-            await fetchProfile(agentId); // Re-fetch agent profile to update float balance
+            await fetchProfile(agentId);
         } catch (err: any) {
-            setError(err.message);
+            toast.error(err.message || 'Failed to approve request');
         } finally {
-            setLoading(false);
+            setActionLoadingId(null);
         }
     };
 
     const handleReject = async (requestId: string) => {
         const agentId = localStorage.getItem('agentId');
         if (!agentId) return;
-        setLoading(true);
+        setActionLoadingId(requestId);
         try {
             const response = await fetch(`/api/agent/player-requests/${requestId}/reject?agentId=${agentId}`, {
                 method: 'POST',
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to reject request');
+            
+            toast.success('Request rejected');
             await fetchPlayerRequests(agentId);
         } catch (err: any) {
-            setError(err.message);
+            toast.error(err.message || 'Failed to reject request');
         } finally {
-            setLoading(false);
+            setActionLoadingId(null);
         }
     };
 
@@ -180,8 +345,8 @@ const AgentDashboard = () => {
         e.preventDefault();
         const agentId = localStorage.getItem('agentId');
         if (!requestAmount || parseFloat(requestAmount) <= 0 || !agentId) {
-          setError('Please enter a valid amount to request.');
-          return;
+            toast.error('Please enter a valid float amount to request.');
+            return;
         }
         setLoading(true);
         setError(null);
@@ -189,20 +354,19 @@ const AgentDashboard = () => {
             const response = await fetch(`/api/agent/request-float?agentId=${agentId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    amount: requestAmount,
-                }),
+                body: JSON.stringify({ amount: requestAmount }),
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.error || 'Float request failed');
             
-            alert(`Success! Your request for $${requestAmount} has been submitted.`);
-            await fetchAgentRequests(agentId); // Refresh requests
+            toast.success(`Float request for $${parseFloat(requestAmount).toFixed(2)} submitted!`);
+            await fetchAgentRequests(agentId);
             setRequestAmount('');
+            setActiveTab('floatHistory');
         } catch (err: any) {
-          setError(err.message);
+            toast.error(err.message || 'Failed to request float');
         } finally {
-          setLoading(false);
+            setLoading(false);
         }
     };
 
@@ -218,15 +382,16 @@ const AgentDashboard = () => {
             });
             const data = await response.json();
             if (!response.ok) {
-                throw new Error(data.error || 'Login failed');
+                throw new Error(data.error || 'Invalid credentials');
             }
             localStorage.setItem('agentId', data.agent.id);
             setAgent(data.agent);
             setIsLoggedIn(true);
-            await fetchTransactions(data.agent.id);
-            await fetchAgentRequests(data.agent.id);
+            toast.success(`Welcome back, ${data.agent.username}!`);
+            await fetchProfile(data.agent.id);
         } catch (err: any) {
             setError(err.message);
+            toast.error(err.message);
         } finally {
             setLoading(false);
         }
@@ -239,42 +404,10 @@ const AgentDashboard = () => {
         setTransactions([]);
         setUsername('');
         setPassword('');
+        toast.success('Logged out successfully');
     };
 
-    const fetchTransactions = async (agentId: string) => {
-        try {
-            const response = await fetch(`/api/agent/transactions?agentId=${agentId}`);
-            if (!response.ok) throw new Error('Failed to fetch transactions');
-            const data = await response.json();
-            setTransactions(data);
-        } catch (err: any) {
-            setError(err.message);
-        }
-    };
-    
-    const fetchProfile = async (agentId: string) => {
-        setLoading(true);
-        try {
-            const response = await fetch(`/api/agent/profile?agentId=${agentId}`);
-            if (!response.ok) {
-                handleLogout();
-                throw new Error('Session expired or invalid.');
-            }
-            const data = await response.json();
-            setAgent(data);
-            setIsLoggedIn(true);
-            await fetchTransactions(data.id);
-            await fetchAgentRequests(data.id);
-            await fetchPaymentInstructions();
-            await fetchLinkedPlayers(data.id);
-            // No longer fetching player requests here, the polling useEffect will handle it
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
+    // Initial auth check
     useEffect(() => {
         const storedAgentId = localStorage.getItem('agentId');
         if (storedAgentId) {
@@ -284,332 +417,1198 @@ const AgentDashboard = () => {
         }
     }, []);
 
-    // Effect for polling player requests
+    // Polling player requests every 5s
     useEffect(() => {
         const agentId = agent?.id;
         if (isLoggedIn && agentId) {
-            // Initial fetch to populate the list and IDs
             fetchPlayerRequests(agentId);
-
             const intervalId = setInterval(() => {
                 fetchPlayerRequests(agentId);
-            }, 5000); // Poll every 5 seconds
-
-            return () => clearInterval(intervalId); // Cleanup on unmount or when agent logs out
+            }, 5000);
+            return () => clearInterval(intervalId);
         }
     }, [isLoggedIn, agent?.id]);
 
-    if (loading && !isLoggedIn) {
-        return <div className="h-screen bg-gray-900 text-white flex items-center justify-center"><div>Loading...</div></div>;
-    }
+    // Computed Stats & Filtering
+    const pendingRequestsCount = useMemo(() => {
+        return playerRequests.filter(req => req.status === 'pending').length;
+    }, [playerRequests]);
 
-    if (!isLoggedIn || !agent) {
+    const filteredPlayerRequests = useMemo(() => {
+        return playerRequests.filter(req => {
+            const matchesFilter = 
+                requestFilter === 'all' ? true :
+                requestFilter === 'pending' ? req.status === 'pending' :
+                requestFilter === 'approved' ? req.status === 'approved' :
+                requestFilter === 'rejected' ? req.status === 'rejected' :
+                requestFilter === 'deposit' ? req.type === 'deposit' :
+                requestFilter === 'withdrawal' ? (req.type === 'withdrawal' || req.type === 'withdraw') : true;
+
+            const query = requestSearch.toLowerCase().trim();
+            const matchesSearch = !query || 
+                req.playerUsername.toLowerCase().includes(query) ||
+                (req.playerPhone && req.playerPhone.includes(query)) ||
+                (req.senderPhone && req.senderPhone.includes(query)) ||
+                (req.provider && req.provider.toLowerCase().includes(query));
+
+            return matchesFilter && matchesSearch;
+        });
+    }, [playerRequests, requestFilter, requestSearch]);
+
+    const filteredLinkedPlayers = useMemo(() => {
+        const query = playerSearch.toLowerCase().trim();
+        if (!query) return linkedPlayers;
+        return linkedPlayers.filter(p => 
+            p.username.toLowerCase().includes(query) || 
+            (p.phone && p.phone.includes(query)) ||
+            (p.id && p.id.includes(query))
+        );
+    }, [linkedPlayers, playerSearch]);
+
+    const totalLinkedPlayerBalance = useMemo(() => {
+        return linkedPlayers.reduce((acc, p) => acc + (p.balance || 0), 0);
+    }, [linkedPlayers]);
+
+    const filteredTransactions = useMemo(() => {
+        if (txTypeFilter === 'all') return transactions;
+        return transactions.filter(tx => tx.type === txTypeFilter);
+    }, [transactions, txTypeFilter]);
+
+    const totalTxPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE) || 1;
+    const currentTransactions = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredTransactions.slice(start, start + ITEMS_PER_PAGE);
+    }, [filteredTransactions, currentPage]);
+
+    // Preset float amounts helper
+    const handleSetPresetAmount = (amt: number) => {
+        setRequestAmount(amt.toString());
+    };
+
+    // Render Login Screen if not authenticated
+    if (loading && !isLoggedIn) {
         return (
-            <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-                <div className="w-full max-w-sm p-6 bg-slate-800 border border-slate-700 rounded-xl">
-                    <h1 className="text-2xl font-bold text-center text-purple-400">Agent Login</h1>
-                    <form onSubmit={handleLogin} className="mt-4">
-                        <div className="mb-4">
-                            <label className="block text-gray-400 mb-2" htmlFor="username">Username</label>
-                            <input
-                                id="username"
-                                type="text"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                placeholder="Enter Username"
-                                className="w-full bg-slate-700 p-2 rounded-lg border border-slate-600"
-                                required
-                            />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block text-gray-400 mb-2" htmlFor="password">Password</label>
-                            <input
-                                id="password"
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                placeholder="Enter Password"
-                                className="w-full bg-slate-700 p-2 rounded-lg border border-slate-600"
-                                required
-                            />
-                        </div>
-                        {error && <p className="mt-4 text-center text-red-400">{error}</p>}
-                        <button 
-                            type="submit"
-                            disabled={loading}
-                            className="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-bold disabled:bg-slate-500"
-                        >
-                            {loading ? 'Logging in...' : 'Login'}
-                        </button>
-                    </form>
+            <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="relative w-16 h-16">
+                        <div className="absolute inset-0 rounded-full border-4 border-purple-500/20 animate-ping" />
+                        <div className="absolute inset-0 rounded-full border-4 border-t-purple-500 border-r-transparent border-b-indigo-500 border-l-transparent animate-spin" />
+                        <ShieldCheck className="w-8 h-8 text-purple-400 absolute inset-0 m-auto" />
+                    </div>
+                    <p className="text-slate-400 font-medium text-sm animate-pulse">Loading Agent Portal...</p>
                 </div>
             </div>
         );
     }
 
-    return (
-        <div className="bg-slate-900 text-white min-h-screen p-4 md:p-8">
-            <Toaster />
-          <div className="max-w-4xl mx-auto">
-            <div className="flex justify-between items-center">
-              <h1 className="text-3xl font-bold text-purple-400">Agent Dashboard</h1>
-              <button onClick={handleLogout} className="text-sm text-red-400 hover:underline">Logout</button>
-            </div>
-            
-            <div className="mt-4 text-lg">
-              Welcome, <span className="font-bold">{agent?.username}</span>!
-            </div>
-            {agent?.promoCode && (
-                <div className="mt-2 text-sm text-slate-400">
-                    Your Promo Code: <span className="font-bold text-purple-400 p-1 bg-slate-700 rounded-md">{agent.promoCode}</span>
-                </div>
-            )}
-            <div className="mt-2 p-4 bg-green-800/50 border border-green-500 rounded-xl">
-              Float Balance: <span className="font-mono text-2xl font-bold">${agent?.floatBalance.toFixed(2)}</span>
-            </div>
-    
-            {error && <div className="mt-4 p-3 bg-red-800/50 border border-red-500 rounded-xl text-white">{error}</div>}
-            
-            <div className="mt-8 p-6 bg-slate-800 border border-slate-700 rounded-xl">
-              <h2 className="text-2xl font-semibold">Player Transaction Requests</h2>
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-700 text-xs text-slate-300 uppercase">
-                        <tr>
-                            <th className="px-4 py-3">Date</th>
-                            <th className="px-4 py-3">Player</th>
-                            <th className="px-4 py-3">Phone</th>
-                            <th className="px-4 py-3">Type</th>
-                            <th className="px-4 py-3 text-right">Amount</th>
-                            <th className="px-4 py-3 text-center">Status</th>
-                            <th className="px-4 py-3 text-center">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {playerRequests.map(req => (
-                            <tr key={req.id} className="border-b border-slate-700 last:border-b-0">
-                                <td className="px-4 py-3 text-slate-400">{new Date(req.createdAt).toLocaleString()}</td>
-                                <td className="px-4 py-3 font-medium flex items-center gap-2">
-                                    <span className="text-xl">{req.playerAvatar}</span>
-                                    {req.playerUsername}
-                                </td>
-                                <td className="px-4 py-3 font-mono">
-                                    {req.type === 'deposit' ? req.senderPhone : req.playerPhone}
-                                </td>
-                                <td className="px-4 py-3">
-                                    <span className={`font-semibold ${req.type === 'deposit' ? 'text-green-400' : 'text-red-400'}`}>
-                                        {req.type.toUpperCase()}
-                                    </span>
-                                </td>
-                                <td className="px-4 py-3 font-mono text-right">${req.amount.toFixed(2)}</td>
-                                <td className="px-4 py-3 text-center">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                        req.status === 'pending' ? 'bg-yellow-900 text-yellow-200' :
-                                        req.status === 'approved' ? 'bg-green-900 text-green-200' :
-                                        'bg-red-900 text-red-200'
-                                    }`}>
-                                        {req.status}
-                                    </span>
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                    {req.status === 'pending' && (
-                                        <div className="flex gap-2 justify-center">
-                                            <button 
-                                                onClick={() => handleApprove(req.id)} 
-                                                disabled={loading}
-                                                className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded font-bold text-xs disabled:bg-slate-500">
-                                                Approve
-                                            </button>
-                                            <button 
-                                                onClick={() => handleReject(req.id)} 
-                                                disabled={loading}
-                                                className="bg-red-600 hover:bg-red-700 px-3 py-1 rounded font-bold text-xs disabled:bg-slate-500">
-                                                Reject
-                                            </button>
-                                        </div>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-              </div>
-            </div>
+    if (!isLoggedIn || !agent) {
+        return (
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden text-slate-100">
+                <Toaster position="top-center" />
+                
+                {/* Background decorative glows */}
+                <div className="absolute -top-40 -left-40 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
 
-            <div className="mt-8 p-6 bg-slate-800 border border-slate-700 rounded-xl">
-              <h2 className="text-2xl font-semibold">Request Float</h2>
-              <form onSubmit={handleRequestFloat} className="mt-4">
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    value={requestAmount}
-                    onChange={(e) => setRequestAmount(e.target.value)}
-                    placeholder="Enter amount to request"
-                    className="flex-grow bg-slate-700 p-2 rounded-lg border border-slate-600"
-                    required
-                  />
-                  <button type="submit" disabled={loading} className="bg-purple-600 hover:bg-purple-700 px-5 py-2 rounded-lg font-bold disabled:bg-slate-500">
-                    {loading ? 'Submitting...' : 'Submit Request'}
-                  </button>
-                </div>
-              </form>
-                <div className="mt-4 p-4 bg-slate-700 rounded-lg">
-                        <h3 className="text-lg font-semibold text-purple-400">Payment Instructions</h3>
-                        {paymentInstructions ? (
-                            <p className="text-slate-300 whitespace-pre-wrap">{paymentInstructions}</p>
-                        ) : (
-                            <p className="text-slate-400 italic">No payment instructions available. Please contact an admin to have them set up.</p>
-                        )}
+                <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10">
+                    <div className="text-center mb-8">
+                        <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-2xl shadow-lg shadow-purple-500/30 mb-4 border border-purple-400/30">
+                            <ShieldCheck className="w-9 h-9 text-white" />
+                        </div>
+                        <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-indigo-300 to-emerald-400 bg-clip-text text-transparent">
+                            Agent Dashboard
+                        </h1>
+                        <p className="text-xs text-slate-400 mt-1">Authorized Agent Login Portal</p>
                     </div>
-                <div className="mt-4 bg-gray-700 p-3 rounded-lg space-y-2">
-                    <div className="flex justify-between text-sm">
-                        <span className="text-gray-400">Your Commission Rate:</span>
-                        <span className="text-white font-mono">{(agent.commissionRate * 100).toFixed(2)}%</span>
-                    </div>
-                    <div className="flex justify-between text-lg font-bold">
-                        <span className="text-purple-400">Cash You Send to Admin:</span>
-                        <span className="text-purple-400 font-mono">${cashToSend.toFixed(2)}</span>
-                    </div>
-                </div>
-            </div>
-    
-            <div className="mt-8">
-                <h2 className="text-2xl font-semibold">My Linked Players</h2>
-                <div className="mt-4 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-700 text-xs text-slate-300 uppercase">
-                            <tr>
-                                <th className="px-4 py-3">Player</th>
-                                <th className="px-4 py-3 text-right">Balance</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {linkedPlayers.map(player => (
-                                <tr key={player.id} className="border-b border-slate-700 last:border-b-0">
-                                    <td className="px-4 py-3 font-medium flex items-center gap-2">
-                                        <span className="text-xl">{player.avatar}</span>
-                                        {player.username}
-                                    </td>
-                                    <td className="px-4 py-3 font-mono text-right">${player.balance.toFixed(2)}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
 
-            <div className="mt-8">
-                <h2 className="text-2xl font-semibold">Transaction History</h2>
-                <div className="mt-4 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-700 text-xs text-slate-300 uppercase">
-                            <tr>
-                                <th className="px-4 py-3">Date</th>
-                                <th className="px-4 py-3">Type</th>
-                                <th className="px-4 py-3">Description</th>
-                                <th className="px-4 py-3 text-right">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {currentTransactions.map(tx => (
-                                <tr key={tx.id} 
-                                    className="border-b border-slate-700 last:border-b-0 cursor-pointer hover:bg-slate-700"
-                                    onClick={() => setSelectedTransaction(tx)}
+                    {error && (
+                        <div className="mb-6 p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-xs flex items-center gap-2.5">
+                            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                            <span>{error}</span>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleLogin} className="space-y-5">
+                        <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                                Agent Username
+                            </label>
+                            <input
+                                id="username"
+                                type="text"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                placeholder="Enter username"
+                                className="w-full bg-slate-950/80 text-slate-100 px-4 py-3 rounded-xl border border-slate-800 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all placeholder:text-slate-600 text-sm"
+                                required
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                                Password
+                            </label>
+                            <div className="relative">
+                                <input
+                                    id="password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Enter password"
+                                    className="w-full bg-slate-950/80 text-slate-100 px-4 py-3 rounded-xl border border-slate-800 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all placeholder:text-slate-600 text-sm pr-11"
+                                    required
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-1"
                                 >
-                                    <td className="px-4 py-3 text-slate-400">{new Date(tx.timestamp).toLocaleString()}</td>
-                                    <td className="px-4 py-3">
-                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                            tx.type === 'PlayerDeposit' || tx.type === 'FloatPurchase' ? 'bg-blue-900 text-blue-200' : 
-                                            tx.type === 'PlayerWithdrawal' ? 'bg-yellow-900 text-yellow-200' : 
-                                            'bg-green-900 text-green-200'
-                                        }`}>
-                                            {tx.type}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3">{tx.description}</td>
-                                    <td className={`px-4 py-3 font-mono text-right ${tx.type === 'PlayerDeposit' ? 'text-red-400' : 'text-green-400'}`}>
-                                        {tx.type === 'PlayerDeposit' ? '-' : '+'}${tx.amount.toFixed(2)}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-                {totalPages > 1 && (
-                    <div className="mt-4 flex justify-center items-center gap-2">
-                        <button
-                            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                            disabled={currentPage === 1}
-                            className="px-3 py-1 bg-slate-700 rounded disabled:opacity-50"
+                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                        </div>
+
+                        <button 
+                            type="submit"
+                            disabled={loading}
+                            className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-purple-600/30 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm mt-2"
                         >
-                            &laquo;
+                            {loading ? (
+                                <>
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    <span>Authenticating...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>Sign In to Dashboard</span>
+                                    <ChevronRight className="w-4 h-4" />
+                                </>
+                            )}
                         </button>
-                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                            <button
-                                key={page}
-                                onClick={() => setCurrentPage(page)}
-                                className={`px-3 py-1 rounded ${currentPage === page ? 'bg-purple-600' : 'bg-slate-700'}`}
-                            >
-                                {page}
-                            </button>
-                        ))}
+                    </form>
+
+                    <div className="mt-8 text-center text-xs text-slate-500 border-t border-slate-800/80 pt-4">
+                        Contact platform support if you forgot your credentials or need agent status assistance.
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Main Authenticated Dashboard Layout
+    return (
+        <div className="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-purple-500 selection:text-white">
+            <Toaster position="top-right" />
+
+            {/* Top Navigation Bar */}
+            <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 lg:px-8 py-3.5">
+                <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+                    
+                    {/* Brand */}
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-600/20 border border-purple-400/20">
+                            <ShieldCheck className="w-6 h-6 text-white" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-lg font-bold bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent">
+                                    Agent Portal
+                                </h1>
+                                <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    Active
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-400 flex items-center gap-1">
+                                <span>{agent.username}</span>
+                                {agent.location && <span className="text-slate-500">• {agent.location}</span>}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Quick Stats Header Actions */}
+                    <div className="flex items-center gap-3">
+                        {/* Refresh button */}
                         <button
-                            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                            disabled={currentPage === totalPages}
-                            className="px-3 py-1 bg-slate-700 rounded disabled:opacity-50"
+                            onClick={() => fetchProfile(agent.id, true)}
+                            disabled={refreshing}
+                            className="p-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-700/80 transition-all flex items-center gap-2 text-xs font-medium"
+                            title="Refresh Dashboard"
                         >
-                            &raquo;
+                            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-purple-400' : ''}`} />
+                            <span className="hidden sm:inline">Refresh</span>
+                        </button>
+
+                        {/* Logout button */}
+                        <button
+                            onClick={handleLogout}
+                            className="p-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/20 transition-all flex items-center gap-2 text-xs font-semibold"
+                        >
+                            <LogOut className="w-4 h-4" />
+                            <span className="hidden sm:inline">Logout</span>
+                        </button>
+                    </div>
+
+                </div>
+            </header>
+
+            {/* Sub-header Navigation Tabs */}
+            <div className="bg-slate-900/50 border-b border-slate-800/60 px-4 lg:px-8 overflow-x-auto scrollbar-none">
+                <div className="max-w-7xl mx-auto flex items-center gap-2 py-2 text-xs font-medium">
+                    <button
+                        onClick={() => setActiveTab('overview')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            activeTab === 'overview'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <Layers className="w-4 h-4" />
+                        <span>Overview</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab('requests')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap relative ${
+                            activeTab === 'requests'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <CreditCard className="w-4 h-4" />
+                        <span>Player Requests</span>
+                        {pendingRequestsCount > 0 && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950 animate-bounce">
+                                {pendingRequestsCount}
+                            </span>
+                        )}
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab('requestFloat')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            activeTab === 'requestFloat'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <PlusCircle className="w-4 h-4" />
+                        <span>Request Float</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab('players')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            activeTab === 'players'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <Users className="w-4 h-4" />
+                        <span>My Players ({linkedPlayers.length})</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab('history')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            activeTab === 'history'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <HistoryIcon className="w-4 h-4" />
+                        <span>Transaction History</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab('floatHistory')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            activeTab === 'floatHistory'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <Clock className="w-4 h-4" />
+                        <span>Float Requests Log</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* Main Content Body */}
+            <main className="max-w-7xl mx-auto px-4 lg:px-8 py-6 space-y-6">
+
+                {/* Top Metrics Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    
+                    {/* Float Balance Card */}
+                    <div className="bg-gradient-to-br from-slate-900 to-slate-900/90 border border-emerald-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all" />
+                        <div className="flex justify-between items-start mb-3">
+                            <div>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Available Float</span>
+                                <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-emerald-400 mt-1">
+                                    ${(agent.floatBalance ?? agent.balance ?? 0).toFixed(2)}
+                                </h3>
+                            </div>
+                            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                                <Wallet className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800/80 text-slate-400">
+                            <span>Ready for player deposits</span>
+                            <button
+                                onClick={() => setActiveTab('requestFloat')}
+                                className="text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1"
+                            >
+                                Top Up <ChevronRight className="w-3 h-3" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Commission Rate Card */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-3">
+                            <div>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Commission Rate</span>
+                                <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-purple-400 mt-1">
+                                    {((agent.commissionRate || 0) * 100).toFixed(1)}%
+                                </h3>
+                            </div>
+                            <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
+                                <TrendingUp className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div className="text-xs pt-2 border-t border-slate-800/80 text-slate-400">
+                            Discount on float purchases
+                        </div>
+                    </div>
+
+                    {/* Pending Player Requests Card */}
+                    <div 
+                        onClick={() => setActiveTab('requests')}
+                        className="bg-slate-900 border border-slate-800 hover:border-amber-500/40 cursor-pointer transition-all rounded-2xl p-5 shadow-xl relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-3">
+                            <div>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Pending Player Requests</span>
+                                <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-amber-400 mt-1 flex items-center gap-2">
+                                    <span>{pendingRequestsCount}</span>
+                                    {pendingRequestsCount > 0 && (
+                                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                                    )}
+                                </h3>
+                            </div>
+                            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                                <Clock className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div className="text-xs pt-2 border-t border-slate-800/80 text-slate-400 flex items-center justify-between">
+                            <span>Requires your review</span>
+                            <span className="text-amber-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5 font-semibold">
+                                View <ChevronRight className="w-3 h-3" />
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Promo Code Quick Share Card */}
+                    <div className="bg-gradient-to-br from-indigo-950/60 to-purple-950/60 border border-indigo-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <span className="text-xs uppercase tracking-wider text-indigo-300 font-semibold">My Promo Code</span>
+                                <div className="mt-1 flex items-center gap-2">
+                                    <span className="text-lg font-bold font-mono text-white bg-slate-900/80 px-3 py-1 rounded-lg border border-indigo-500/30">
+                                        {agent.promoCode || 'N/A'}
+                                    </span>
+                                    {agent.promoCode && (
+                                        <button
+                                            onClick={handleCopyPromo}
+                                            className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors shadow"
+                                            title="Copy Promo Code"
+                                        >
+                                            {copiedPromo ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
+                                <Sparkles className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div className="text-[11px] text-slate-400 border-t border-slate-800/80 pt-2">
+                            Players get auto-linked when registering with this code
+                        </div>
+                    </div>
+
+                </div>
+
+                {/* Error Banner */}
+                {error && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-300 text-sm flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                            <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                            <span>{error}</span>
+                        </div>
+                        <button onClick={() => setError(null)} className="text-slate-400 hover:text-white">
+                            <X className="w-4 h-4" />
                         </button>
                     </div>
                 )}
-            </div>
 
-            <div className="mt-8">
-                <h2 className="text-2xl font-semibold">My Float Requests</h2>
-                <div className="mt-4 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-700 text-xs text-slate-300 uppercase">
-                            <tr>
-                                <th className="px-4 py-3">Date</th>
-                                <th className="px-4 py-3">Amount</th>
-                                <th className="px-4 py-3">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {agentRequests.map(req => (
-                                <tr key={req.id} className="border-b border-slate-700 last:border-b-0">
-                                    <td className="px-4 py-3 text-slate-400">{new Date(req.createdAt).toLocaleString()}</td>
-                                    <td className="px-4 py-3 font-mono">${req.amount.toFixed(2)}</td>
-                                    <td className="px-4 py-3">
-                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                            req.status === 'pending' ? 'bg-yellow-900 text-yellow-200' :
-                                            req.status === 'approved' ? 'bg-green-900 text-green-200' :
-                                            'bg-red-900 text-red-200'
-                                        }`}>
-                                            {req.status}
-                                        </span>
-                                    </td>
-                                </tr>
+                {/* TAB 1: OVERVIEW */}
+                {activeTab === 'overview' && (
+                    <div className="space-y-6">
+                        {/* Quick Action Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            
+                            {/* Payment Instructions & Setup */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="p-2 bg-purple-500/10 text-purple-400 rounded-xl">
+                                            <Info className="w-5 h-5" />
+                                        </div>
+                                        <h2 className="text-base font-bold text-slate-100">Payment Instructions for Float</h2>
+                                    </div>
+                                    <span className="text-xs text-slate-400">Admin Instructions</span>
+                                </div>
+
+                                {paymentInstructions ? (
+                                    <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800/80 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap font-mono">
+                                        {paymentInstructions}
+                                    </div>
+                                ) : (
+                                    <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800 text-slate-400 text-xs italic text-center">
+                                        No platform payment instructions configured by admin yet.
+                                    </div>
+                                )}
+
+                                <div className="pt-2 flex justify-end">
+                                    <button
+                                        onClick={() => setActiveTab('requestFloat')}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-2"
+                                    >
+                                        <span>Request Float Top-Up</span>
+                                        <ChevronRight className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Linked Players Summary Card */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl">
+                                            <Users className="w-5 h-5" />
+                                        </div>
+                                        <h2 className="text-base font-bold text-slate-100">Linked Players Overview</h2>
+                                    </div>
+                                    <span className="text-xs text-slate-400 font-mono font-semibold">
+                                        Total: {linkedPlayers.length}
+                                    </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                                        <span className="text-xs text-slate-400 block">Total Player Balances</span>
+                                        <span className="text-lg font-bold font-mono text-emerald-400">${totalLinkedPlayerBalance.toFixed(2)}</span>
+                                    </div>
+                                    <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                                        <span className="text-xs text-slate-400 block">Active Player Requests</span>
+                                        <span className="text-lg font-bold font-mono text-amber-400">{pendingRequestsCount}</span>
+                                    </div>
+                                </div>
+
+                                {/* Preview mini list */}
+                                {linkedPlayers.length > 0 ? (
+                                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1 text-xs">
+                                        {linkedPlayers.slice(0, 4).map(p => (
+                                            <div key={p.id} className="flex items-center justify-between p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-base">{p.avatar || '👤'}</span>
+                                                    <span className="font-semibold text-slate-200">{p.username}</span>
+                                                </div>
+                                                <span className="font-mono text-slate-300 font-medium">${(p.balance || 0).toFixed(2)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-slate-400 text-center py-4">No players linked to your promo code yet.</p>
+                                )}
+
+                                <div className="pt-2 flex justify-end">
+                                    <button
+                                        onClick={() => setActiveTab('players')}
+                                        className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold flex items-center gap-1"
+                                    >
+                                        View All Linked Players ({linkedPlayers.length}) <ChevronRight className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        {/* Recent Player Requests Section */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-800 pb-4">
+                                <div>
+                                    <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                                        <span>Recent Player Requests</span>
+                                        {pendingRequestsCount > 0 && (
+                                            <span className="px-2 py-0.5 rounded-full text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                                                {pendingRequestsCount} Pending
+                                            </span>
+                                        )}
+                                    </h2>
+                                    <p className="text-xs text-slate-400">Incoming deposit and withdrawal requests from players</p>
+                                </div>
+                                <button
+                                    onClick={() => setActiveTab('requests')}
+                                    className="text-xs bg-slate-800 hover:bg-slate-700 px-3.5 py-2 rounded-xl text-slate-200 font-semibold transition-all border border-slate-700 flex items-center gap-1.5"
+                                >
+                                    <span>Manage All Requests</span>
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            {/* Table */}
+                            {playerRequests.length > 0 ? (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-slate-950/80 text-slate-400 uppercase font-semibold text-[11px] tracking-wider border-b border-slate-800">
+                                            <tr>
+                                                <th className="px-4 py-3">Date</th>
+                                                <th className="px-4 py-3">Player</th>
+                                                <th className="px-4 py-3">Provider & Phone</th>
+                                                <th className="px-4 py-3">Type</th>
+                                                <th className="px-4 py-3 text-right">Amount</th>
+                                                <th className="px-4 py-3 text-center">Status</th>
+                                                <th className="px-4 py-3 text-right">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800/60">
+                                            {playerRequests.slice(0, 5).map(req => (
+                                                <tr key={req.id} className="hover:bg-slate-850/50 transition-colors">
+                                                    <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                                                        {new Date(req.createdAt).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3 font-semibold text-slate-200">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-base">{req.playerAvatar || '👤'}</span>
+                                                            <span>{req.playerUsername}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-mono text-slate-300">
+                                                        <div className="flex flex-col">
+                                                            <span className="font-semibold text-purple-300 uppercase text-[10px]">{req.provider || 'Mobile Money'}</span>
+                                                            <span>{req.type === 'deposit' ? req.senderPhone : req.playerPhone}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                                            req.type === 'deposit'
+                                                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                                : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                                                        }`}>
+                                                            {req.type}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right font-mono font-bold text-slate-100 text-sm">
+                                                        ${req.amount.toFixed(2)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                                            req.status === 'pending' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                                            req.status === 'approved' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                                            'bg-red-500/20 text-red-300 border border-red-500/30'
+                                                        }`}>
+                                                            {req.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        {req.status === 'pending' ? (
+                                                            <div className="flex items-center justify-end gap-2">
+                                                                <button
+                                                                    onClick={() => handleApprove(req.id)}
+                                                                    disabled={actionLoadingId === req.id}
+                                                                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all flex items-center gap-1 shadow-sm disabled:opacity-50"
+                                                                >
+                                                                    {actionLoadingId === req.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                                                    Approve
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleReject(req.id)}
+                                                                    disabled={actionLoadingId === req.id}
+                                                                    className="bg-red-600 hover:bg-red-500 text-white px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all flex items-center gap-1 shadow-sm disabled:opacity-50"
+                                                                >
+                                                                    {actionLoadingId === req.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                                                                    Reject
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-slate-500 text-[11px]">—</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="p-8 text-center text-slate-400 text-xs bg-slate-950/40 rounded-xl border border-slate-800">
+                                    No player transaction requests received yet.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* TAB 2: PLAYER REQUESTS MANAGER */}
+                {activeTab === 'requests' && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                                    <CreditCard className="w-5 h-5 text-purple-400" />
+                                    <span>Player Transaction Requests</span>
+                                </h2>
+                                <p className="text-xs text-slate-400">Review, approve, or decline deposit and withdrawal requests from players</p>
+                            </div>
+
+                            {/* Search bar */}
+                            <div className="relative w-full md:w-64">
+                                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    value={requestSearch}
+                                    onChange={(e) => setRequestSearch(e.target.value)}
+                                    placeholder="Search player, phone, provider..."
+                                    className="w-full bg-slate-950 text-xs px-3.5 pl-9 py-2 rounded-xl border border-slate-800 focus:border-purple-500 outline-none text-slate-200"
+                                />
+                                {requestSearch && (
+                                    <button onClick={() => setRequestSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Filter pills */}
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+                            {[
+                                { id: 'all', label: 'All Requests', count: playerRequests.length },
+                                { id: 'pending', label: 'Pending', count: pendingRequestsCount },
+                                { id: 'deposit', label: 'Deposits', count: playerRequests.filter(r => r.type === 'deposit').length },
+                                { id: 'withdrawal', label: 'Withdrawals', count: playerRequests.filter(r => r.type === 'withdrawal' || r.type === 'withdraw').length },
+                                { id: 'approved', label: 'Approved', count: playerRequests.filter(r => r.status === 'approved').length },
+                                { id: 'rejected', label: 'Rejected', count: playerRequests.filter(r => r.status === 'rejected').length },
+                            ].map(f => (
+                                <button
+                                    key={f.id}
+                                    onClick={() => setRequestFilter(f.id as any)}
+                                    className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap font-medium flex items-center gap-1.5 ${
+                                        requestFilter === f.id
+                                            ? 'bg-purple-600 text-white font-semibold shadow'
+                                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                                    }`}
+                                >
+                                    <span>{f.label}</span>
+                                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                                        requestFilter === f.id ? 'bg-purple-800 text-white' : 'bg-slate-800 text-slate-400'
+                                    }`}>
+                                        {f.count}
+                                    </span>
+                                </button>
                             ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-    
-          </div>
-          {selectedTransaction && (
+                        </div>
+
+                        {/* Requests Table */}
+                        {filteredPlayerRequests.length > 0 ? (
+                            <div className="overflow-x-auto rounded-xl border border-slate-800">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px] tracking-wider border-b border-slate-800">
+                                        <tr>
+                                            <th className="px-4 py-3.5">Date & Time</th>
+                                            <th className="px-4 py-3.5">Player Info</th>
+                                            <th className="px-4 py-3.5">Payment Details</th>
+                                            <th className="px-4 py-3.5">Type</th>
+                                            <th className="px-4 py-3.5 text-right">Amount</th>
+                                            <th className="px-4 py-3.5 text-center">Status</th>
+                                            <th className="px-4 py-3.5 text-right">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/70 bg-slate-900/40">
+                                        {filteredPlayerRequests.map(req => (
+                                            <tr key={req.id} className="hover:bg-slate-850/60 transition-colors">
+                                                <td className="px-4 py-3.5 text-slate-400 font-mono text-[11px]">
+                                                    {new Date(req.createdAt).toLocaleString()}
+                                                </td>
+                                                <td className="px-4 py-3.5">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <span className="text-xl bg-slate-800 p-1 rounded-lg">{req.playerAvatar || '👤'}</span>
+                                                        <div>
+                                                            <div className="font-semibold text-slate-100">{req.playerUsername}</div>
+                                                            <div className="text-[10px] text-slate-500 font-mono">ID: {req.playerId}</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3.5">
+                                                    <div className="font-mono text-slate-200">
+                                                        <div className="font-bold text-purple-300 uppercase text-[10px]">{req.provider || 'Mobile Wallet'}</div>
+                                                        <div className="text-xs">{req.type === 'deposit' ? req.senderPhone : req.playerPhone}</div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3.5">
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                                        req.type === 'deposit'
+                                                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                                                    }`}>
+                                                        {req.type}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3.5 text-right font-mono font-extrabold text-slate-100 text-sm">
+                                                    ${req.amount.toFixed(2)}
+                                                </td>
+                                                <td className="px-4 py-3.5 text-center">
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
+                                                        req.status === 'pending' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                                        req.status === 'approved' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                                        'bg-red-500/20 text-red-300 border border-red-500/30'
+                                                    }`}>
+                                                        {req.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3.5 text-right">
+                                                    {req.status === 'pending' ? (
+                                                        <div className="flex items-center justify-end gap-2">
+                                                            <button
+                                                                onClick={() => handleApprove(req.id)}
+                                                                disabled={actionLoadingId === req.id}
+                                                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow flex items-center gap-1 disabled:opacity-50"
+                                                            >
+                                                                {actionLoadingId === req.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                                                Approve
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleReject(req.id)}
+                                                                disabled={actionLoadingId === req.id}
+                                                                className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow flex items-center gap-1 disabled:opacity-50"
+                                                            >
+                                                                {actionLoadingId === req.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                                                                Reject
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-slate-500 text-xs">Processed</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-2">
+                                <CreditCard className="w-10 h-10 text-slate-600 mx-auto" />
+                                <p className="text-sm font-medium text-slate-300">No requests found matching criteria</p>
+                                <p className="text-xs text-slate-500">Try adjusting your filters or search keywords.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* TAB 3: REQUEST FLOAT */}
+                {activeTab === 'requestFloat' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        
+                        {/* Form & Calculator */}
+                        <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                                    <PlusCircle className="w-5 h-5 text-purple-400" />
+                                    <span>Request Float Top-Up</span>
+                                </h2>
+                                <p className="text-xs text-slate-400">Request additional float balance from admin to process player deposits</p>
+                            </div>
+
+                            {/* Preset Buttons */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                                    Quick Select Amount
+                                </label>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {[50, 100, 200, 500, 1000].map(amt => (
+                                        <button
+                                            key={amt}
+                                            type="button"
+                                            onClick={() => handleSetPresetAmount(amt)}
+                                            className={`py-2 px-1 rounded-xl font-mono text-xs font-bold transition-all border ${
+                                                requestAmount === amt.toString()
+                                                    ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                                                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-purple-500/50'
+                                            }`}
+                                        >
+                                            ${amt}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <form onSubmit={handleRequestFloat} className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                                        Float Amount Requested ($)
+                                    </label>
+                                    <div className="relative">
+                                        <DollarSign className="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                                        <input
+                                            type="number"
+                                            value={requestAmount}
+                                            onChange={(e) => setRequestAmount(e.target.value)}
+                                            placeholder="Enter amount (e.g. 100)"
+                                            min="1"
+                                            step="any"
+                                            className="w-full bg-slate-950 text-slate-100 pl-10 pr-4 py-3 rounded-xl border border-slate-800 focus:border-purple-500 outline-none text-base font-mono font-bold"
+                                            required
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Calculation Box */}
+                                <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
+                                    <div className="flex justify-between text-slate-400">
+                                        <span>Your Agent Commission Rate:</span>
+                                        <span className="font-mono text-slate-200 font-semibold">{((agent.commissionRate || 0) * 100).toFixed(1)}%</span>
+                                    </div>
+                                    <div className="flex justify-between text-slate-400">
+                                        <span>Commission Discount Savings:</span>
+                                        <span className="font-mono text-emerald-400 font-semibold">
+                                            -${((parseFloat(requestAmount) || 0) * (agent.commissionRate || 0)).toFixed(2)}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-base font-bold pt-2 border-t border-slate-800 text-purple-300">
+                                        <span>Net Cash to Send Admin:</span>
+                                        <span className="font-mono text-xl text-emerald-400">${cashToSend.toFixed(2)}</span>
+                                    </div>
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={loading || !requestAmount || parseFloat(requestAmount) <= 0}
+                                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                >
+                                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                    <span>Submit Float Request (${cashToSend.toFixed(2)})</span>
+                                </button>
+                            </form>
+                        </div>
+
+                        {/* Payment Instructions Card */}
+                        <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                            <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
+                                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl">
+                                    <Info className="w-5 h-5" />
+                                </div>
+                                <h3 className="text-base font-bold text-slate-100">Payment Instructions</h3>
+                            </div>
+
+                            {paymentInstructions ? (
+                                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">
+                                    {paymentInstructions}
+                                </div>
+                            ) : (
+                                <div className="p-6 bg-slate-950/50 rounded-xl border border-slate-800 text-center text-xs text-slate-400 italic">
+                                    No payment instructions available. Please contact an admin.
+                                </div>
+                            )}
+
+                            <div className="p-4 bg-purple-950/20 border border-purple-500/20 rounded-xl text-xs text-purple-300 space-y-1">
+                                <span className="font-bold block">💡 How Float Works:</span>
+                                <p className="text-slate-400">
+                                    After transferring cash to admin according to the instructions above, your float request will be approved and added directly to your Agent Float balance.
+                                </p>
+                            </div>
+                        </div>
+
+                    </div>
+                )}
+
+                {/* TAB 4: LINKED PLAYERS */}
+                {activeTab === 'players' && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                                    <Users className="w-5 h-5 text-indigo-400" />
+                                    <span>My Linked Players</span>
+                                </h2>
+                                <p className="text-xs text-slate-400">Players registered using your promo code ({agent.promoCode})</p>
+                            </div>
+
+                            {/* Search */}
+                            <div className="relative w-full sm:w-64">
+                                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    value={playerSearch}
+                                    onChange={(e) => setPlayerSearch(e.target.value)}
+                                    placeholder="Search player name..."
+                                    className="w-full bg-slate-950 text-xs px-3.5 pl-9 py-2 rounded-xl border border-slate-800 focus:border-indigo-500 outline-none text-slate-200"
+                                />
+                                {playerSearch && (
+                                    <button onClick={() => setPlayerSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Stats Banner */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                <span className="text-xs text-slate-400 block">Total Linked Players</span>
+                                <span className="text-lg font-bold font-mono text-indigo-400">{linkedPlayers.length}</span>
+                            </div>
+                            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                <span className="text-xs text-slate-400 block">Combined Balance</span>
+                                <span className="text-lg font-bold font-mono text-emerald-400">${totalLinkedPlayerBalance.toFixed(2)}</span>
+                            </div>
+                            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
+                                <span className="text-xs text-slate-400 block">Your Promo Code</span>
+                                <span className="text-lg font-bold font-mono text-purple-400">{agent.promoCode || 'None'}</span>
+                            </div>
+                        </div>
+
+                        {/* Players List */}
+                        {filteredLinkedPlayers.length > 0 ? (
+                            <div className="overflow-x-auto rounded-xl border border-slate-800">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px] tracking-wider border-b border-slate-800">
+                                        <tr>
+                                            <th className="px-4 py-3">Player</th>
+                                            <th className="px-4 py-3">User ID</th>
+                                            <th className="px-4 py-3 text-right">Wallet Balance</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/70 bg-slate-900/40">
+                                        {filteredLinkedPlayers.map(player => (
+                                            <tr key={player.id} className="hover:bg-slate-850/60 transition-colors">
+                                                <td className="px-4 py-3 font-semibold text-slate-100">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <span className="text-xl bg-slate-800 p-1.5 rounded-xl">{player.avatar || '👤'}</span>
+                                                        <span>{player.username}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3 font-mono text-slate-400 text-[11px]">{player.id}</td>
+                                                <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400 text-sm">
+                                                    ${(player.balance || 0).toFixed(2)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-2">
+                                <Users className="w-10 h-10 text-slate-600 mx-auto" />
+                                <p className="text-sm font-medium text-slate-300">No linked players found</p>
+                                <p className="text-xs text-slate-500">Share your promo code "{agent.promoCode}" with players to link them to your dashboard.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* TAB 5: TRANSACTION HISTORY */}
+                {activeTab === 'history' && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                                    <HistoryIcon className="w-5 h-5 text-purple-400" />
+                                    <span>Agent Transaction Log</span>
+                                </h2>
+                                <p className="text-xs text-slate-400">Complete record of deposits, withdrawals, and float purchases</p>
+                            </div>
+
+                            {/* Filter dropdown */}
+                            <div className="flex items-center gap-2">
+                                <Filter className="w-4 h-4 text-slate-500" />
+                                <select
+                                    value={txTypeFilter}
+                                    onChange={(e) => {
+                                        setTxTypeFilter(e.target.value);
+                                        setCurrentPage(1);
+                                    }}
+                                    className="bg-slate-950 text-xs px-3 py-2 rounded-xl border border-slate-800 focus:border-purple-500 text-slate-200 outline-none"
+                                >
+                                    <option value="all">All Types</option>
+                                    <option value="FloatPurchase">Float Purchase</option>
+                                    <option value="PlayerDeposit">Player Deposit</option>
+                                    <option value="PlayerWithdrawal">Player Withdrawal</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Transactions table */}
+                        {currentTransactions.length > 0 ? (
+                            <div className="overflow-x-auto rounded-xl border border-slate-800">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px] tracking-wider border-b border-slate-800">
+                                        <tr>
+                                            <th className="px-4 py-3">Date</th>
+                                            <th className="px-4 py-3">Type</th>
+                                            <th className="px-4 py-3">Description</th>
+                                            <th className="px-4 py-3 text-right">Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/70 bg-slate-900/40">
+                                        {currentTransactions.map(tx => {
+                                            const isDeposit = tx.type === 'PlayerDeposit' || (tx.type as string) === 'deposit';
+                                            return (
+                                                <tr
+                                                    key={tx.id}
+                                                    onClick={() => setSelectedTransaction(tx)}
+                                                    className="hover:bg-slate-800/80 cursor-pointer transition-colors"
+                                                >
+                                                    <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                                                        {new Date(tx.timestamp).toLocaleString()}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                                            isDeposit
+                                                                ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                                                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                        }`}>
+                                                            {tx.type}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-slate-300">{tx.description || '—'}</td>
+                                                    <td className={`px-4 py-3 text-right font-mono font-bold text-sm ${
+                                                        isDeposit ? 'text-red-400' : 'text-emerald-400'
+                                                    }`}>
+                                                        {isDeposit ? '-' : '+'}${tx.amount.toFixed(2)}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800">
+                                No transactions found for selected filter.
+                            </div>
+                        )}
+
+                        {/* Pagination */}
+                        {totalTxPages > 1 && (
+                            <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                                <span className="text-slate-400">
+                                    Showing page <strong className="text-slate-200">{currentPage}</strong> of <strong className="text-slate-200">{totalTxPages}</strong>
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                                        disabled={currentPage === 1}
+                                        className="p-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-lg border border-slate-800 disabled:opacity-40"
+                                    >
+                                        <ChevronLeft className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.min(p + 1, totalTxPages))}
+                                        disabled={currentPage === totalTxPages}
+                                        className="p-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-lg border border-slate-800 disabled:opacity-40"
+                                    >
+                                        <ChevronRight className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* TAB 6: FLOAT REQUEST HISTORY */}
+                {activeTab === 'floatHistory' && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                                    <Clock className="w-5 h-5 text-purple-400" />
+                                    <span>My Float Requests Log</span>
+                                </h2>
+                                <p className="text-xs text-slate-400">History of float top-up requests submitted to platform admin</p>
+                            </div>
+                            <button
+                                onClick={() => setActiveTab('requestFloat')}
+                                className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs px-3.5 py-2 rounded-xl transition-all shadow flex items-center gap-1.5"
+                            >
+                                <PlusCircle className="w-4 h-4" />
+                                <span>New Float Request</span>
+                            </button>
+                        </div>
+
+                        {agentRequests.length > 0 ? (
+                            <div className="overflow-x-auto rounded-xl border border-slate-800">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px] tracking-wider border-b border-slate-800">
+                                        <tr>
+                                            <th className="px-4 py-3">Date Submitted</th>
+                                            <th className="px-4 py-3">Requested Amount</th>
+                                            <th className="px-4 py-3">Status</th>
+                                            <th className="px-4 py-3 text-right">Resolved Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/70 bg-slate-900/40">
+                                        {agentRequests.map(req => (
+                                            <tr key={req.id} className="hover:bg-slate-850/60 transition-colors">
+                                                <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                                                    {new Date(req.createdAt).toLocaleString()}
+                                                </td>
+                                                <td className="px-4 py-3 font-mono font-bold text-slate-100 text-sm">
+                                                    ${req.amount.toFixed(2)}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
+                                                        req.status === 'pending' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                                        req.status === 'approved' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                                        'bg-red-500/20 text-red-300 border border-red-500/30'
+                                                    }`}>
+                                                        {req.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-slate-400 font-mono text-[11px]">
+                                                    {req.resolvedAt ? new Date(req.resolvedAt).toLocaleString() : '—'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="p-12 text-center text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-2">
+                                <Clock className="w-10 h-10 text-slate-600 mx-auto" />
+                                <p className="text-sm font-medium text-slate-300">No float requests recorded yet</p>
+                                <p className="text-xs text-slate-500">Submit a request whenever you need to replenish your agent float balance.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+            </main>
+
+            {/* Modal for viewing detailed transaction info */}
+            {selectedTransaction && (
                 <TransactionDetailModal
                     transaction={selectedTransaction}
                     onClose={() => setSelectedTransaction(null)}
                 />
             )}
         </div>
-      );
+    );
 };
 
-
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <AgentDashboard />
-  </React.StrictMode>
+    <React.StrictMode>
+        <AgentDashboard />
+    </React.StrictMode>
 );
