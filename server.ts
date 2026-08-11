@@ -1223,6 +1223,10 @@ const checkVipStatus = (req: any, res: any, next: any) => {
   next();
 };
 
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true });
+});
+
 // Debug Firebase endpoint
 app.get('/api/debug/firebase', async (req, res) => {
   if (!db) {
