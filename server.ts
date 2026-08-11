@@ -87,6 +87,8 @@ const configuredAllowedOrigins = [
 
 const allowedOrigins = Array.from(new Set([
   'https://ludosom.com',
+  'https://www.ludosom.com',
+  'https://ludo31.onrender.com',
   'https://dhili-dhili-ludo.onrender.com',
   'https://dhilidhili.onrender.com',
   'http://localhost:3000',
@@ -100,10 +102,10 @@ const allowedOrigins = Array.from(new Set([
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.includes('ludosom.com')) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, true);
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -1446,11 +1448,145 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   res.json(newUser);
 });
 
-// Retrieve single profile
-app.get('/api/users/:userId', (req, res, next) => {
-  if (req.params.userId === 'online' || req.params.userId === 'leaderboard') {
-    return next();
+// Dynamic Leaderboard (Global Earnings Board) from active store data
+app.get('/api/users/leaderboard', (req, res) => {
+  const allUsers = Object.values(store.users).filter(u => !u.id.startsWith('user_sim_') && !u.id.startsWith('bot_'));
+
+  allUsers.forEach(u => {
+    const userTransactions = store.transactions.filter(t => t.userId === u.id);
+    const totalWins = userTransactions.filter(t => t.type === 'win_payout').reduce((sum, t) => sum + t.amount, 0);
+    const totalCommission = userTransactions.filter(t => t.type === 'app_commission').reduce((sum, t) => sum + t.amount, 0);
+    u.earnings = totalWins - totalCommission;
+  });
+
+  // Sort users by earnings descending
+  const sorted = [...allUsers]
+    .sort((a, b) => {
+      const aEarnings = a.earnings || 0;
+      const bEarnings = b.earnings || 0;
+      return bEarnings - aEarnings;
+    })
+    .slice(0, 5);
+
+  let rank = 1;
+  const result = sorted.map(u => {
+    return {
+      rank: rank++,
+      name: u.username,
+      avatar: u.avatar || '🎮',
+      wins: u.winCount || 0,
+      earnings: u.earnings || 0
+    };
+  });
+
+  res.json(result);
+});
+
+// Get active online & registered players (real users)
+app.get('/api/users/online', async (req, res) => {
+  const currentUserId = req.query.userId as string;
+  if (!currentUserId) {
+    return res.status(400).json({ error: 'Missing userId parameter' });
   }
+
+  cleanupMatchmakingQueues();
+
+  // Sync matchmaking queue from Firestore if db is available to support multi-instance
+  if (db) {
+    try {
+      const qs = await db.collection('matchmaking').get();
+      qs.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data && data.status === 'WAITING_FOR_MATCH') {
+          const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
+          if (!store.matchmakingQueues[qKey]) {
+            store.matchmakingQueues[qKey] = [];
+          }
+          if (!store.matchmakingQueues[qKey].includes(data.userId)) {
+            store.matchmakingQueues[qKey].push(data.userId);
+            // Reconstruct user in store if not present
+            if (!store.users[data.userId]) {
+              store.users[data.userId] = {
+                id: data.userId,
+                username: data.username,
+                avatar: data.avatar,
+                balance: 100, // Fallback
+                winCount: 0,
+                lossCount: 0,
+                isOfflinePreference: false
+              };
+            }
+            (store.users[data.userId] as any).seekingJoinedAt = data.timestamp || Date.now();
+          }
+        }
+      });
+    } catch (e) {
+      console.error('Failed to sync matchmaking from Firestore:', e);
+    }
+  }
+
+  // Real connected clients via SSE
+  const activeIds = new Set(activeClients.map(c => c.userId));
+
+  const onlineList: any[] = [];
+
+  // Return all registered users searching or online
+  Object.values(store.users).forEach(u => {
+    if (u.id.startsWith('user_sim_')) return; // Skip simulated players
+    const isConnected = activeIds.has(u.id);
+    const inGame = Object.values(store.rooms).some(r =>
+      r.status === 'playing' && r.players.some(p => p.userId === u.id && p.status !== 'left')
+    );
+
+    let status = 'offline';
+    let seekingDetails: any = null;
+
+    // Check if user is currently searching in matchmaking queue
+    for (const [qKey, queueUserIds] of Object.entries(store.matchmakingQueues)) {
+      if (queueUserIds.includes(u.id)) {
+        const parts = qKey.split('_');
+        seekingDetails = {
+          betAmount: parseFloat(parts[0]) || 0,
+          capacity: parseInt(parts[1]) || 2,
+          gameMode: parts[2] || 'solo'
+        };
+        status = 'seeking';
+        break;
+      }
+    }
+
+    // ONLY include users who are actively searching in matchmaking queues right now
+    if (status === 'seeking') {
+      onlineList.push({
+        id: u.id,
+        username: u.username,
+        avatar: u.avatar,
+        winCount: u.winCount || 0,
+        lossCount: u.lossCount || 0,
+        balance: u.balance,
+        isSimulated: false,
+        status,
+        seekingDetails,
+        seekingJoinedAt: (u as any).seekingJoinedAt || Date.now()
+      });
+    }
+  });
+
+  // Sort seeking players by seekingJoinedAt descending (most recent first)
+  onlineList.sort((a, b) => {
+    if (a.status === 'seeking' && b.status === 'seeking') {
+      return (b.seekingJoinedAt || 0) - (a.seekingJoinedAt || 0);
+    }
+    if (a.status === 'seeking') return -1;
+    if (b.status === 'seeking') return 1;
+    return 0;
+  });
+
+  res.json(onlineList);
+});
+
+// Retrieve single profile
+app.get('/api/users/:userId', (req, res) => {
   const user = store.users[req.params.userId];
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
@@ -2101,6 +2237,34 @@ app.post('/api/rooms/join', (req, res) => {
   res.json(room);
 });
 
+// Check if a game is active and the user can rejoin
+app.get('/api/rooms/check-status/:roomId', (req, res) => {
+  const { roomId } = req.params;
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  const room = store.rooms[roomId];
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+
+  if (room.status !== 'playing') {
+    // Return a 409 Conflict status to indicate the game is not in a rejoinable state.
+    return res.status(409).json({ error: 'Game is not in a rejoinable state (e.g., waiting or completed).', room });
+  }
+
+  const playerInRoom = room.players.find(p => p.userId === userId && p.status !== 'left');
+  if (!playerInRoom) {
+    return res.status(403).json({ error: 'You are not a player in this game' });
+  }
+
+  // Player is in the room and game is active. Return room data.
+  res.json(room);
+});
+
 // GET Room (for spectators or re-joining)
 app.get('/api/rooms/:roomId', (req, res) => {
   const { roomId } = req.params;
@@ -2483,109 +2647,6 @@ app.post('/api/rooms/voice-signaling', (req, res) => {
   res.json({ success: true });
 });
 
-// Get active online & registered players (real users)
-app.get('/api/users/online', async (req, res) => {
-  const currentUserId = req.query.userId as string;
-  if (!currentUserId) {
-    return res.status(400).json({ error: 'Missing userId parameter' });
-  }
-
-  cleanupMatchmakingQueues();
-
-  // Sync matchmaking queue from Firestore if db is available to support multi-instance
-  if (db) {
-    try {
-      const qs = await db.collection('matchmaking').get();
-      qs.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data && data.status === 'WAITING_FOR_MATCH') {
-          const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
-          if (!store.matchmakingQueues[qKey]) {
-            store.matchmakingQueues[qKey] = [];
-          }
-          if (!store.matchmakingQueues[qKey].includes(data.userId)) {
-            store.matchmakingQueues[qKey].push(data.userId);
-            // Reconstruct user in store if not present
-            if (!store.users[data.userId]) {
-              store.users[data.userId] = {
-                id: data.userId,
-                username: data.username,
-                avatar: data.avatar,
-                balance: 100, // Fallback
-                winCount: 0,
-                lossCount: 0,
-                isOfflinePreference: false
-              };
-            }
-            (store.users[data.userId] as any).seekingJoinedAt = data.timestamp || Date.now();
-          }
-        }
-      });
-    } catch (e) {
-      console.error('Failed to sync matchmaking from Firestore:', e);
-    }
-  }
-
-  // Real connected clients via SSE
-  const activeIds = new Set(activeClients.map(c => c.userId));
-
-  const onlineList: any[] = [];
-
-  // Return all registered users searching or online
-  Object.values(store.users).forEach(u => {
-    if (u.id.startsWith('user_sim_')) return; // Skip simulated players
-    const isConnected = activeIds.has(u.id);
-    const inGame = Object.values(store.rooms).some(r =>
-      r.status === 'playing' && r.players.some(p => p.userId === u.id && p.status !== 'left')
-    );
-
-    let status = 'offline';
-    let seekingDetails: any = null;
-
-    // Check if user is currently searching in matchmaking queue
-    for (const [qKey, queueUserIds] of Object.entries(store.matchmakingQueues)) {
-      if (queueUserIds.includes(u.id)) {
-        const parts = qKey.split('_');
-        seekingDetails = {
-          betAmount: parseFloat(parts[0]) || 0,
-          capacity: parseInt(parts[1]) || 2,
-          gameMode: parts[2] || 'solo'
-        };
-        status = 'seeking';
-        break;
-      }
-    }
-
-    // ONLY include users who are actively searching in matchmaking queues right now
-    if (status === 'seeking') {
-      onlineList.push({
-        id: u.id,
-        username: u.username,
-        avatar: u.avatar,
-        winCount: u.winCount || 0,
-        lossCount: u.lossCount || 0,
-        balance: u.balance,
-        isSimulated: false,
-        status,
-        seekingDetails,
-        seekingJoinedAt: (u as any).seekingJoinedAt || Date.now()
-      });
-    }
-  });
-
-  // Sort seeking players by seekingJoinedAt descending (most recent first)
-  onlineList.sort((a, b) => {
-    if (a.status === 'seeking' && b.status === 'seeking') {
-      return (b.seekingJoinedAt || 0) - (a.seekingJoinedAt || 0);
-    }
-    if (a.status === 'seeking') return -1;
-    if (b.status === 'seeking') return 1;
-    return 0;
-  });
-
-  res.json(onlineList);
-});
-
 // Challenge / Invite a player (PUBG-style)
 app.post('/api/rooms/challenge/invite', (req, res) => {
   const { senderId, receiverId, betAmount, capacity, gameMode } = req.body;
@@ -2800,40 +2861,6 @@ app.post('/api/rooms/challenge/decline', (req, res) => {
   }
 
   res.json({ success: true });
-});
-
-// Dynamic Leaderboard (Global Earnings Board) from active store data
-app.get('/api/users/leaderboard', (req, res) => {
-  const allUsers = Object.values(store.users).filter(u => !u.id.startsWith('user_sim_') && !u.id.startsWith('bot_'));
-
-  allUsers.forEach(u => {
-    const userTransactions = store.transactions.filter(t => t.userId === u.id);
-    const totalWins = userTransactions.filter(t => t.type === 'win_payout').reduce((sum, t) => sum + t.amount, 0);
-    const totalCommission = userTransactions.filter(t => t.type === 'app_commission').reduce((sum, t) => sum + t.amount, 0);
-    u.earnings = totalWins - totalCommission;
-  });
-
-  // Sort users by winCount descending
-  const sorted = [...allUsers]
-    .sort((a, b) => {
-      const aEarnings = a.earnings || 0;
-      const bEarnings = b.earnings || 0;
-      return bEarnings - aEarnings;
-    })
-    .slice(0, 5);
-
-  let rank = 1;
-  const result = sorted.map(u => {
-    return {
-      rank: rank++,
-      name: u.username,
-      avatar: u.avatar || '🎮',
-      wins: u.winCount || 0,
-      earnings: u.earnings || 0
-    };
-  });
-
-  res.json(result);
 });
 
 // Ready Up / Toggle Ready
@@ -3353,71 +3380,6 @@ app.post('/api/rooms/leave', (req, res) => {
   }
 
   saveStore();
-});
-
-// Spectate a game room
-app.post('/api/rooms/:roomId/spectate', (req, res) => {
-  const { roomId } = req.params;
-  const { userId } = req.body;
-
-  const room = store.rooms[roomId];
-  if (!room) {
-    return res.status(404).json({ error: 'Room not found' });
-  }
-
-  if (room.status !== 'playing') {
-    return res.status(400).json({ error: 'This game is not available for spectating.' });
-  }
-
-  const client = activeClients.find(c => c.userId === userId);
-  if (client) {
-    client.spectatingRoomId = roomId;
-    // Immediately send the current game state to the new spectator
-    sendEventToUser(userId, 'game_update', room);
-    res.json({ success: true, message: `You are now spectating room ${roomId}` });
-  } else {
-    res.status(404).json({ error: 'Could not find an active connection for your user.' });
-  }
-});
-
-// Stop spectating a game room
-app.post('/api/rooms/:roomId/stop-spectating', (req, res) => {
-  const { userId } = req.body;
-  const client = activeClients.find(c => c.userId === userId);
-  if (client) {
-    client.spectatingRoomId = undefined;
-    res.json({ success: true, message: 'Stopped spectating.' });
-  } else {
-    res.status(404).json({ error: 'Could not find an active connection for your user.' });
-  }
-});
-
-// Check if a game is active and the user can rejoin
-app.get('/api/rooms/check-status/:roomId', (req, res) => {
-  const { roomId } = req.params;
-  const { userId } = req.query;
-
-  if (!userId) {
-    return res.status(400).json({ error: 'User ID is required' });
-  }
-
-  const room = store.rooms[roomId];
-  if (!room) {
-    return res.status(404).json({ error: 'Room not found' });
-  }
-
-  if (room.status !== 'playing') {
-    // Return a 409 Conflict status to indicate the game is not in a rejoinable state.
-    return res.status(409).json({ error: 'Game is not in a rejoinable state (e.g., waiting or completed).', room });
-  }
-
-  const playerInRoom = room.players.find(p => p.userId === userId && p.status !== 'left');
-  if (!playerInRoom) {
-    return res.status(403).json({ error: 'You are not a player in this game' });
-  }
-
-  // Player is in the room and game is active. Return room data.
-  res.json(room);
 });
 
 

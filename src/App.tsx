@@ -24,12 +24,8 @@ export default function App() {
       // Server-side rendering
       return 'http://localhost:3002';
     }
-    // In development, use relative paths so the Vite proxy is used.
-    if (import.meta.env.DEV) {
-      return '';
-    }
-    // In production, use the configured URL or the same origin.
-    return import.meta.env.VITE_APP_URL || window.location.origin;
+    // In browser, use relative paths so requests hit the current hosting origin directly
+    return '';
   })();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true); // Add a loading state for auth

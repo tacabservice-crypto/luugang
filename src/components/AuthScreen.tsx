@@ -29,12 +29,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       // Server-side rendering
       return 'http://localhost:3002';
     }
-    // In development, use relative paths so the Vite proxy is used.
-    if (import.meta.env.DEV) {
-      return '';
-    }
-    // In production, use the configured URL or the same origin.
-    return import.meta.env.VITE_APP_URL || window.location.origin;
+    // In browser, use relative paths so requests hit the current hosting origin directly
+    return '';
   })();
   const { t } = useLanguage();
   const [username, setUsername] = useState('');
