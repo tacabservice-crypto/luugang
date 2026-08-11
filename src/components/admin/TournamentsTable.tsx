@@ -1,24 +1,31 @@
 import React, { useState } from 'react';
 import { Tournament } from '../../types/game';
-import { Trophy, Plus, Trash2, Ban, Users, Calendar, DollarSign, X, Play, Eye } from 'lucide-react';
+import { Trophy, Plus, Trash2, Ban, Users, Calendar, DollarSign, X, Play, Eye, Edit3, UserMinus } from 'lucide-react';
 
 interface TournamentsTableProps {
   tournaments: Tournament[];
   onCreate: (data: { name: string; entryFee: number; prizePool: number; maxPlayers: number; startDate: string }) => Promise<void>;
+  onEdit?: (tournamentId: string, data: { name: string; entryFee: number; prizePool: number; maxPlayers: number; startDate: string }) => Promise<void>;
   onCancel: (tournamentId: string) => Promise<void>;
   onDelete: (tournamentId: string) => Promise<void>;
   onStart?: (tournamentId: string) => Promise<void>;
+  onRemovePlayer?: (tournamentId: string, targetUserId: string) => Promise<void>;
 }
 
 export const TournamentsTable: React.FC<TournamentsTableProps> = ({
   tournaments,
   onCreate,
+  onEdit,
   onCancel,
   onDelete,
   onStart,
+  onRemovePlayer,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewingPlayersTournament, setViewingPlayersTournament] = useState<Tournament | null>(null);
+  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+
+  // Create form state
   const [name, setName] = useState('');
   const [entryFee, setEntryFee] = useState('5');
   const [prizePool, setPrizePool] = useState('100');
@@ -28,8 +35,17 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
   });
+
+  // Edit form state
+  const [editName, setEditName] = useState('');
+  const [editEntryFee, setEditEntryFee] = useState('5');
+  const [editPrizePool, setEditPrizePool] = useState('100');
+  const [editMaxPlayers, setEditMaxPlayers] = useState('16');
+  const [editStartDate, setEditStartDate] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionUserId, setActionUserId] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +67,38 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTournament || !onEdit) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await onEdit(editingTournament.id, {
+        name: editName.trim(),
+        entryFee: parseFloat(editEntryFee) || 0,
+        prizePool: parseFloat(editPrizePool) || 0,
+        maxPlayers: parseInt(editMaxPlayers, 10) || 16,
+        startDate: editStartDate,
+      });
+      setEditingTournament(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to edit tournament');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openEditModal = (t: Tournament) => {
+    setEditingTournament(t);
+    setEditName(t.name);
+    setEditEntryFee(t.entryFee.toString());
+    setEditPrizePool(t.prizePool.toString());
+    setEditMaxPlayers(t.maxPlayers.toString());
+    const d = new Date(t.startDate);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    setEditStartDate(d.toISOString().slice(0, 16));
   };
 
   return (
@@ -146,6 +194,15 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                             className="p-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded-lg transition-colors cursor-pointer"
                           >
                             <Play className="w-4 h-4 fill-current text-emerald-400" />
+                          </button>
+                        )}
+                        {t.status !== 'completed' && t.status !== 'cancelled' && (
+                          <button
+                            onClick={() => openEditModal(t)}
+                            title="Edit Tournament"
+                            className="p-2 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Edit3 className="w-4 h-4" />
                           </button>
                         )}
                         {t.status !== 'completed' && t.status !== 'cancelled' && (
@@ -285,6 +342,108 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
         </div>
       )}
 
+      {/* EDIT TOURNAMENT MODAL */}
+      {editingTournament && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gray-800 border border-purple-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 text-white relative">
+            <div className="flex items-center justify-between border-b border-gray-700 pb-3">
+              <h3 className="text-lg font-black text-purple-400 flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-blue-400" /> Edit Tournament
+              </h3>
+              <button onClick={() => setEditingTournament(null)} className="text-gray-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {error && <div className="bg-red-500/20 border border-red-500/30 text-red-400 p-3 rounded-xl text-xs">{error}</div>}
+
+            <form onSubmit={handleEditSubmit} className="space-y-4 text-sm">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Tournament Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 rounded-xl p-2.5 text-white outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Entry Fee ($)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    required
+                    value={editEntryFee}
+                    onChange={(e) => setEditEntryFee(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-2.5 text-white outline-none focus:border-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Prize Pool ($)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    value={editPrizePool}
+                    onChange={(e) => setEditPrizePool(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-2.5 text-white outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Max Players</label>
+                  <select
+                    value={editMaxPlayers}
+                    onChange={(e) => setEditMaxPlayers(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-2.5 text-white outline-none focus:border-purple-500"
+                  >
+                    <option value="4">4 Players</option>
+                    <option value="8">8 Players</option>
+                    <option value="16">16 Players</option>
+                    <option value="32">32 Players</option>
+                    <option value="64">64 Players</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Start Date & Time</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-2.5 text-white outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3 rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingTournament(null)}
+                  className="bg-gray-700 hover:bg-gray-600 text-white font-bold px-4 py-3 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* VIEW ENROLLED PLAYERS MODAL */}
       {viewingPlayersTournament && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -321,7 +480,35 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                       />
                       <span className="font-bold text-white">{p.username}</span>
                     </div>
-                    <span className="text-[10px] text-purple-400 font-mono">#{idx + 1} Seed</span>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-purple-400 font-mono">#{idx + 1} Seed</span>
+                      {onRemovePlayer && (
+                        <button
+                          disabled={actionUserId === p.userId}
+                          onClick={async () => {
+                            if (confirm(`Ma hubtaa inaad ka saarto "${p.username}" tartankan? ($${viewingPlayersTournament.entryFee} ayaa dib loogu celinayaa wallet-kiisa)`)) {
+                              try {
+                                setActionUserId(p.userId);
+                                await onRemovePlayer(viewingPlayersTournament.id, p.userId);
+                                setViewingPlayersTournament(prev => prev ? {
+                                  ...prev,
+                                  players: prev.players.filter(pl => pl.userId !== p.userId)
+                                } : null);
+                              } catch (err: any) {
+                                alert(err.message || 'Failed to remove player');
+                              } finally {
+                                setActionUserId(null);
+                              }
+                            }
+                          }}
+                          title="Ka saar oo celi lacagta / Kick & Refund"
+                          className="p-1.5 bg-red-500/20 hover:bg-red-500/40 text-red-300 rounded-lg transition-all cursor-pointer border border-red-500/30"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}

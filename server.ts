@@ -3902,6 +3902,72 @@ app.post('/api/admin/tournaments/:id/start', isAdmin, async (req, res) => {
   res.json({ success: true, tournament, message: `Tournament "${tournament.name}" started successfully!` });
 });
 
+app.post('/api/admin/tournaments/:id/remove-player', isAdmin, async (req, res) => {
+  const tournamentId = req.params.id as string;
+  const { targetUserId } = req.body;
+
+  if (!targetUserId) {
+    return res.status(400).json({ error: 'Missing targetUserId.' });
+  }
+
+  const tournament = store.tournaments[tournamentId];
+  if (!tournament) {
+    return res.status(404).json({ error: 'Tournament not found.' });
+  }
+
+  const playerIndex = tournament.players.findIndex((p: any) => p.userId === targetUserId);
+  if (playerIndex === -1) {
+    return res.status(404).json({ error: 'Player is not registered in this tournament.' });
+  }
+
+  const removedPlayer = tournament.players[playerIndex];
+  tournament.players.splice(playerIndex, 1);
+
+  // Refund entry fee if any
+  const targetUser = store.users[targetUserId];
+  if (targetUser && tournament.entryFee > 0) {
+    targetUser.balance += tournament.entryFee;
+    addTransaction(
+      targetUser.id,
+      'deposit',
+      tournament.entryFee,
+      tournamentId,
+      `Refund for removal from tournament "${tournament.name}" by admin.`
+    );
+    broadcastUserUpdate(targetUser.id);
+  }
+
+  await saveStoreAndWait();
+  broadcastToAll('tournament_update', tournament);
+
+  res.json({
+    success: true,
+    message: `Player "${removedPlayer.username}" removed from tournament and $${tournament.entryFee} refunded.`,
+    tournament,
+  });
+});
+
+app.post('/api/admin/tournaments/:id/edit', isAdmin, async (req, res) => {
+  const tournamentId = req.params.id as string;
+  const { name, entryFee, prizePool, maxPlayers, startDate } = req.body;
+
+  const tournament = store.tournaments[tournamentId];
+  if (!tournament) {
+    return res.status(404).json({ error: 'Tournament not found.' });
+  }
+
+  if (name) tournament.name = String(name).trim();
+  if (entryFee !== undefined && !isNaN(parseFloat(entryFee))) tournament.entryFee = parseFloat(entryFee);
+  if (prizePool !== undefined && !isNaN(parseFloat(prizePool))) tournament.prizePool = parseFloat(prizePool);
+  if (maxPlayers !== undefined && !isNaN(parseInt(maxPlayers, 10))) tournament.maxPlayers = parseInt(maxPlayers, 10);
+  if (startDate) tournament.startDate = new Date(startDate).getTime();
+
+  await saveStoreAndWait();
+  broadcastToAll('tournament_update', tournament);
+
+  res.json({ success: true, tournament, message: `Tournament "${tournament.name}" updated successfully!` });
+});
+
 app.get('/api/admin/settings', isAdmin, async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     

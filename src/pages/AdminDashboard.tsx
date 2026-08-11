@@ -647,6 +647,30 @@ const AdminDashboard: React.FC = () => {
                   }
                   await fetchData('tournaments');
                 }}
+                onEdit={async (id, data) => {
+                  const response = await fetch(`/api/admin/tournaments/${id}/edit?userId=${adminUser.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                  });
+                  if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to edit tournament');
+                  }
+                  await fetchData('tournaments');
+                }}
+                onRemovePlayer={async (id, targetUserId) => {
+                  const response = await fetch(`/api/admin/tournaments/${id}/remove-player?userId=${adminUser.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetUserId }),
+                  });
+                  if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to remove player');
+                  }
+                  await fetchData('tournaments');
+                }}
             />;
             case 'settings': return <Settings 
                 adminSettings={{...adminSettings, usersByRole}}

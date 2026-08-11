@@ -38,6 +38,7 @@ const Tournaments: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [confirmRegisterTournament, setConfirmRegisterTournament] = useState<Tournament | null>(null);
 
   const fetchTournaments = async () => {
     try {
@@ -558,7 +559,16 @@ const Tournaments: React.FC = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleRegister(tournament.id);
+                              if (!user) {
+                                setMessage('Please log in to register for a tournament.');
+                                return;
+                              }
+                              if (user.balance < tournament.entryFee) {
+                                setShowWalletModal(true);
+                                setError('Insufficient wallet balance. Please top up your wallet to join this tournament!');
+                                return;
+                              }
+                              setConfirmRegisterTournament(tournament);
                             }}
                             disabled={isFull || actionLoadingId === tournament.id}
                             className={`w-full font-black py-3 px-4 rounded-2xl text-xs shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -599,6 +609,75 @@ const Tournaments: React.FC = () => {
           )}
         </section>
       </main>
+
+      {/* REGISTRATION CONFIRMATION MODAL */}
+      {confirmRegisterTournament && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#1F0E4D] border border-purple-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-6 text-white text-center relative">
+            <div className="w-16 h-16 rounded-3xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center mx-auto text-purple-300 shadow-inner">
+              <Swords className="w-8 h-8 text-yellow-400" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-white">
+                Diiwaangelinta Tartanka / Confirm Registration
+              </h3>
+              <p className="text-xs text-purple-200/80">
+                Ma hubtaa inaad is-diiwaangeliso tartankan?
+              </p>
+            </div>
+
+            {/* Tournament Summary Card */}
+            <div className="bg-black/40 border border-purple-500/30 p-4 rounded-2xl text-left space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 font-bold">Tartanka:</span>
+                <span className="font-black text-yellow-300">{confirmRegisterTournament.name}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 font-bold">Qiimaha Galitaanka (Entry Fee):</span>
+                <span className="font-mono font-black text-emerald-400">
+                  {confirmRegisterTournament.entryFee > 0 ? `$${confirmRegisterTournament.entryFee.toFixed(2)}` : 'FREE'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 font-bold">Lacagta kugu jirta (Your Balance):</span>
+                <span className="font-mono font-black text-emerald-300">
+                  ${(user?.balance || 0).toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                disabled={actionLoadingId === confirmRegisterTournament.id}
+                onClick={async () => {
+                  const targetId = confirmRegisterTournament.id;
+                  setConfirmRegisterTournament(null);
+                  await handleRegister(targetId);
+                }}
+                className="flex-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-black font-black py-3 px-4 rounded-2xl text-xs shadow-lg shadow-emerald-500/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {actionLoadingId === confirmRegisterTournament.id ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Haa, Is-diiwaangeli</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => setConfirmRegisterTournament(null)}
+                className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white font-bold py-3 px-5 rounded-2xl text-xs transition-all cursor-pointer border border-white/10"
+              >
+                Jooji / Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* WALLET DEPOSIT MODAL */}
       {showWalletModal && user && (
