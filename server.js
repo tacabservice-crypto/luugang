@@ -5,10 +5,12 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+var appDir = typeof __dirname !== "undefined" ? __dirname : import.meta && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd();
 var VIP_TIERS = {
   gold: {
     name: "Gold VIP",
@@ -69,6 +71,7 @@ var PORT = typeof rawPort === "string" && !isNaN(Number(rawPort)) ? Number(rawPo
 var DB_FILE = path.join(process.cwd(), "db_store.json");
 app.use(express.json());
 app.use(express.static(path.join(process.cwd(), "public")));
+app.use(express.static(path.join(appDir, "dist")));
 var db = null;
 var auth = null;
 function getFirebaseServiceAccount() {
@@ -3498,31 +3501,32 @@ app.get("/api/agent/my-players", isAgent, (req, res) => {
   });
   res.json(sanitizedPlayers);
 });
+app.get("/agent", (req, res) => {
+  const distPath = path.join(appDir, "dist");
+  const agentFile = fs.existsSync(path.join(distPath, "agent.html")) ? path.join(distPath, "agent.html") : path.join(process.cwd(), "agent.html");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.sendFile(agentFile);
+});
+app.get(/^(?!\/api).*/, (req, res) => {
+  const distPath = path.join(appDir, "dist");
+  const indexFile = fs.existsSync(path.join(distPath, "index.html")) ? path.join(distPath, "index.html") : path.join(process.cwd(), "index.html");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.sendFile(indexFile);
+});
 async function startServer() {
   await loadStoreFromFirestore();
   purgeSimulatedUsers();
   let vite;
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV === "development") {
     vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("/agent", (req, res) => {
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.sendFile(path.join(distPath, "agent.html"));
-    });
-    app.get(/^(?!\/api).*/, (req, res) => {
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.sendFile(path.join(distPath, "index.html"));
-    });
   }
   const server = typeof PORT === "number" ? app.listen(PORT, "0.0.0.0", () => {
     console.log(`Betting Ludo Game Full-Stack App listening at http://localhost:${PORT}`);

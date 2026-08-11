@@ -7,7 +7,12 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { createServer as createViteServer, ViteDevServer } from 'vite'; // Keep this if Vite is used later
+
+const appDir = typeof __dirname !== 'undefined'
+  ? __dirname
+  : (import.meta && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
@@ -119,8 +124,9 @@ const DB_FILE = path.join(process.cwd(), 'db_store.json');
 
 app.use(express.json());
 
-// Serve static files from the 'public' directory
+// Serve static files from 'public' and 'dist' directories
 app.use(express.static(path.join(process.cwd(), 'public')));
+app.use(express.static(path.join(appDir, 'dist')));
 
 
 // ==========================================
@@ -4715,6 +4721,32 @@ app.get('/api/agent/my-players', isAgent, (req, res) => {
 });
 
 
+// Specific route for the Agent Dashboard
+app.get('/agent', (req, res) => {
+  const distPath = path.join(appDir, 'dist');
+  const agentFile = fs.existsSync(path.join(distPath, 'agent.html'))
+    ? path.join(distPath, 'agent.html')
+    : path.join(process.cwd(), 'agent.html');
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(agentFile);
+});
+
+// For all other non-API routes, serve the main app's index.html file.
+app.get(/^(?!\/api).*/, (req, res) => {
+  const distPath = path.join(appDir, 'dist');
+  const indexFile = fs.existsSync(path.join(distPath, 'index.html'))
+    ? path.join(distPath, 'index.html')
+    : path.join(process.cwd(), 'index.html');
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(indexFile);
+});
+
 // ==========================================
 // 7. VITE MIDDLEWARE SETUP
 // ==========================================
@@ -4724,32 +4756,12 @@ async function startServer() {
   purgeSimulatedUsers(); // Ensure simulated users are purged from the memory state
 
   let vite: ViteDevServer | undefined;
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV === "development") {
     vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    
-    app.use(express.static(distPath));
-    
-    // Specific route for the Agent Dashboard
-    app.get('/agent', (req, res) => {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.sendFile(path.join(distPath, 'agent.html'));
-    });
-
-    // For all other non-API routes, serve the main app's index.html file.
-    app.get(/^(?!\/api).*/, (req, res) => {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
   }
 
   const server = typeof PORT === 'number'
