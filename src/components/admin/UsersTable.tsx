@@ -1,9 +1,19 @@
 
 import React from 'react';
-import { Edit, Trash2, Eye, History } from 'lucide-react';
+import { Edit, Trash2, Eye, History, ShieldCheck } from 'lucide-react';
 import { formatCurrency } from '../../utils/number';
+import { isFullAdmin } from '../../utils/admin';
+import { UserProfile } from '../../types/game';
 
-const UsersTable = ({ users, onEdit, onDelete, onImpersonate, onViewGames }) => {
+interface UsersTableProps {
+  users: UserProfile[];
+  onEdit: (user: UserProfile) => void;
+  onDelete: (user: UserProfile) => void;
+  onImpersonate: (user: UserProfile) => void;
+  onViewGames?: (user: UserProfile) => void;
+}
+
+const UsersTable: React.FC<UsersTableProps> = ({ users, onEdit, onDelete, onImpersonate, onViewGames }) => {
   return (
     <div className="bg-white p-6 rounded-lg shadow-md">
       <h3 className="text-xl font-bold mb-4 text-gray-800">Users</h3>
@@ -19,23 +29,41 @@ const UsersTable = ({ users, onEdit, onDelete, onImpersonate, onViewGames }) => 
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {users.map(user => (
+            {users.map(user => {
+              const protectedUser = isFullAdmin(user);
+              return (
               <tr key={user.id}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 flex items-center">
                   <span className="mr-3 text-2xl">{user.avatar}</span>
-                  {user.username}
+                  <div className="flex items-center gap-2">
+                    <span>{user.username}</span>
+                    {protectedUser && (
+                      <span className="px-2 py-0.5 text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 rounded-full flex items-center gap-1">
+                        <ShieldCheck size={12} /> Full Admin
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-semibold">{formatCurrency(user.balance)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.winCount} / {user.lossCount}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-purple-600">{user.role || 'Player'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                  <button onClick={() => onViewGames(user)} className="text-gray-500 hover:text-gray-700"><History size={18} /></button>
-                  <button onClick={() => onImpersonate(user)} className="text-blue-500 hover:text-blue-700"><Eye size={18} /></button>
-                  <button onClick={() => onEdit(user)} className="text-indigo-500 hover:text-indigo-700"><Edit size={18} /></button>
-                  <button onClick={() => onDelete(user)} className="text-red-500 hover:text-red-700"><Trash2 size={18} /></button>
+                  <button onClick={() => onViewGames(user)} className="text-gray-500 hover:text-gray-700" title="View Games"><History size={18} /></button>
+                  {protectedUser ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md font-bold cursor-not-allowed" title="Full Admin user is protected and cannot be edited, suspended, or deleted">
+                      🔒 Protected
+                    </span>
+                  ) : (
+                    <>
+                      <button onClick={() => onImpersonate(user)} className="text-blue-500 hover:text-blue-700" title="Impersonate"><Eye size={18} /></button>
+                      <button onClick={() => onEdit(user)} className="text-indigo-500 hover:text-indigo-700" title="Edit User"><Edit size={18} /></button>
+                      <button onClick={() => onDelete(user)} className="text-red-500 hover:text-red-700" title="Delete User"><Trash2 size={18} /></button>
+                    </>
+                  )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

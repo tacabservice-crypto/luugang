@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types/game';
 import ChangePasswordModal from './ChangePasswordModal';
+import { isFullAdmin } from '../utils/admin';
 
 interface Role {
     id: string;
@@ -18,6 +19,7 @@ interface UserEditModalProps {
 const AVATARS = ['😀', '😎', '🚀', '🧠', '👑', '💪', '🎉', '🔥', '💯', '🎲', '🤔','😂','😃','😄','😅','😆','😉','😊','😋','😌','😍','😏','😐','😑','😒','😓','pensive','😕','😖','😗','😘','😙','😚','😛','😜','😝','😞','😟','😠','😡','😢','😣','😤','😥','😦','😧','😨','😩','😪','😫','😬','😭','😮','😯','😰','😱','😲','😳','😴','😵','😶','😷'];
 
 const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, isAdmin = false, roles = [] }) => {
+    const isProtected = isFullAdmin(user);
     const [formData, setFormData] = useState({
         username: user.username,
         avatar: user.avatar,
@@ -36,6 +38,10 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
     };
 
     const handleSave = async () => {
+        if (isProtected) {
+            setError('Full Admin accounts are protected and cannot be edited, suspended, or deleted.');
+            return;
+        }
         setError(null);
         setIsSaving(true);
         const dataToSave: Partial<UserProfile> = { ...formData };
@@ -69,6 +75,12 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
             <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
                 <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
                     <h2 className="text-xl font-bold mb-4 text-white">Edit {isAdmin ? `User: ${user.username}` : "Your Profile"}</h2>
+                    
+                    {isProtected && (
+                        <div className="p-3 mb-4 bg-amber-900/50 border border-amber-500/50 rounded text-amber-200 text-sm flex items-center gap-2">
+                            <span>🔒 Full Admin accounts are protected and cannot be edited, suspended, or deleted.</span>
+                        </div>
+                    )}
                     
                     <div className="space-y-4">
                         <div>
@@ -147,8 +159,8 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
                             </button>
                             <button 
                                 onClick={handleSave} 
-                                disabled={isSaving}
-                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded ml-3 disabled:bg-purple-400"
+                                disabled={isSaving || isProtected}
+                                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded ml-3 disabled:bg-purple-400 disabled:cursor-not-allowed"
                             >
                                 {isSaving ? 'Kaydinaya...' : 'Save Changes'}
                             </button>

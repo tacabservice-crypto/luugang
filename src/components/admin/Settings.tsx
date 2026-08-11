@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff } from 'lucide-react';
+import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff, ShieldCheck } from 'lucide-react';
 import ChangePasswordForm from '../ChangePasswordForm';
+import { isFullAdmin } from '../../utils/admin';
 
 const Settings = ({ 
     adminSettings, 
@@ -98,14 +99,24 @@ const Settings = ({
                             <div key={roleName} className="bg-gray-50 p-4 rounded-lg">
                             <h5 className="font-semibold text-md mb-2">{roleName}</h5>
                             <ul className="space-y-2">
-                                {usersByRole[roleName].map(user => (
+                                {usersByRole[roleName].map(user => {
+                                const protectedAdmin = isFullAdmin(user) || roleName.toLowerCase().includes('admin');
+                                return (
                                 <li key={user.id} className="flex items-center justify-between p-2 bg-white rounded shadow-sm">
-                                    <span className="font-medium">{user.username}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium">{user.username}</span>
+                                      {protectedAdmin && (
+                                        <span className="px-2 py-0.5 text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 rounded-full flex items-center gap-1">
+                                          <ShieldCheck size={12} /> Full Admin
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                     {user.status}
                                     </span>
                                 </li>
-                                ))}
+                                );
+                                })}
                             </ul>
                             </div>
                         ))}
@@ -213,9 +224,20 @@ const Settings = ({
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {roles?.map((role:any) => (
+                  {roles?.map((role:any) => {
+                    const protectedRole = isFullAdmin(role);
+                    return (
                     <tr key={role.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{role.name}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <div className="flex items-center gap-2">
+                          <span>{role.name}</span>
+                          {protectedRole && (
+                            <span className="px-2 py-0.5 text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 rounded-full flex items-center gap-1">
+                              <ShieldCheck size={12} /> Full Admin
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <div className="flex flex-wrap gap-1">
                           {role.permissions.map((p:string) => <span key={p} className="px-2 py-1 bg-gray-200 text-gray-800 rounded-full text-xs">{p}</span>)}
@@ -227,16 +249,23 @@ const Settings = ({
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex items-center justify-end space-x-2">
-                            <button onClick={() => onEditRole(role)} className="text-indigo-600 hover:text-indigo-900"><Edit size={18} /></button>
-                            <button onClick={() => onToggleRoleStatus(role)} className={role.status === 'active' ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'}>
-                                {role.status === 'active' ? <PowerOff size={18} /> : <Power size={18} />}
-                            </button>
-                            <button onClick={() => onDeleteRole(role)} className="text-red-600 hover:text-red-900"><Trash2 size={18} /></button>
-                        </div>
+                        {protectedRole ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md font-bold cursor-not-allowed" title="Full Admin role is protected and cannot be edited, suspended, or deleted">
+                            🔒 Protected
+                          </span>
+                        ) : (
+                          <div className="flex items-center justify-end space-x-2">
+                              <button onClick={() => onEditRole(role)} className="text-indigo-600 hover:text-indigo-900"><Edit size={18} /></button>
+                              <button onClick={() => onToggleRoleStatus(role)} className={role.status === 'active' ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'}>
+                                  {role.status === 'active' ? <PowerOff size={18} /> : <Power size={18} />}
+                              </button>
+                              <button onClick={() => onDeleteRole(role)} className="text-red-600 hover:text-red-900"><Trash2 size={18} /></button>
+                          </div>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

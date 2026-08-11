@@ -32,42 +32,90 @@ export const useAuth = () => {
   const [appUser, setAppUser] = useState<AppUser | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+    let sse: EventSource | null = null;
+    let unsubscribeProfile: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (authUser) => {
       if (authUser) {
-        const userDocRef = doc(db, 'users', authUser.uid);
-        
-        const unsubscribeProfile = onSnapshot(userDocRef, async (snapshot) => {
-            const idToken = await authUser.getIdToken();
-            if (snapshot.exists()) {
+        try {
+          const idToken = await authUser.getIdToken();
+          const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+
+          // Fetch profile from backend store to ensure real balance and data
+          const res = await fetch(`${apiBase}/api/auth/login`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({ email: authUser.email }),
+          });
+
+          if (res.ok) {
+            const profileData = await res.json();
+            const userObj: AppUser = {
+              ...profileData,
+              uid: authUser.uid,
+              email: authUser.email || profileData.email,
+              idToken,
+            };
+            setAppUser(userObj);
+
+            // Connect to real-time updates for this user
+            if (profileData.id) {
+              if (sse) sse.close();
+              sse = new EventSource(`${apiBase}/api/updates?userId=${profileData.id}`);
+              sse.addEventListener('user_update', (e: MessageEvent) => {
+                try {
+                  const updatedProfile = JSON.parse(e.data);
+                  setAppUser((prev) => (prev ? { ...prev, ...updatedProfile } : null));
+                } catch (err) {
+                  console.error('Error parsing user_update SSE event:', err);
+                }
+              });
+            }
+          } else {
+            // Fallback to Firestore listener if API login fails
+            const userDocRef = doc(db, 'users', authUser.uid);
+            unsubscribeProfile = onSnapshot(userDocRef, (snapshot) => {
+              if (snapshot.exists()) {
                 const userProfile = snapshot.data() as UserProfile;
                 setAppUser({
-                    ...userProfile,
-                    uid: authUser.uid,
-                    email: authUser.email,
-                    idToken: idToken,
+                  ...userProfile,
+                  uid: authUser.uid,
+                  email: authUser.email,
+                  idToken,
                 });
-            } else {
-                 setAppUser({
-                    id: authUser.uid,
-                    uid: authUser.uid,
-                    username: authUser.displayName || 'Anonymous',
-                    email: authUser.email,
-                    avatar: authUser.photoURL || '',
-                    balance: 0,
-                    winCount: 0,
-                    lossCount: 0,
-                    idToken: idToken,
+              } else {
+                setAppUser({
+                  id: authUser.uid,
+                  uid: authUser.uid,
+                  username: authUser.displayName || 'Anonymous',
+                  email: authUser.email,
+                  avatar: authUser.photoURL || '🎮',
+                  balance: 0,
+                  winCount: 0,
+                  lossCount: 0,
+                  idToken,
                 });
-            }
-        });
-        return unsubscribeProfile;
-
+              }
+            });
+          }
+        } catch (err) {
+          console.error('Auth profile sync error in useAuth:', err);
+        }
       } else {
+        if (sse) sse.close();
+        if (unsubscribeProfile) unsubscribeProfile();
         setAppUser(null);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (sse) sse.close();
+      if (unsubscribeProfile) unsubscribeProfile();
+      unsubscribeAuth();
+    };
   }, []);
 
   return { user: appUser };

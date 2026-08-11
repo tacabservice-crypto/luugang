@@ -13,10 +13,11 @@ import CreateAgentModal from '../components/CreateAgentModal';
 import EditAgentModal from '../components/EditAgentModal';
 import CreditAgentModal from '../components/CreditAgentModal';
 import EditRoleModal from '../components/EditRoleModal';
-import { Agent, AgentRequest, ManualTransaction, UserProfile, Tournament } from '../types/game';
+import { Agent, AgentRequest, ManualTransaction, UserProfile, Tournament, GameRoom } from '../types/game';
 import AgentRequestsTable from '../components/admin/AgentRequestsTable';
 import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
+import { isFullAdmin } from '../utils/admin';
 
 
 const AdminDashboard: React.FC = () => {
@@ -144,7 +145,7 @@ const AdminDashboard: React.FC = () => {
         }
     };
 
-    const fetchData = useCallback(async (type: 'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'payment-settings' | 'agents' | 'tournaments' | 'settings', showerror = true) => {
+    const fetchData = useCallback(async (type: 'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'payment-settings' | 'agents' | 'tournaments' | 'settings' | 'agent-requests', showerror = true) => {
         if (!adminUser) return;
         if(showerror) setError(null);
         try {
@@ -265,6 +266,11 @@ const AdminDashboard: React.FC = () => {
     const handleSaveUser = async (updatedData: Partial<UserProfile>) => {
         if (!editingUser || !adminUser) return;
         
+        if (isFullAdmin(editingUser)) {
+            setError('Full Admin users are protected and cannot be edited.');
+            return;
+        }
+
         try {
             const response = await fetch(`/api/admin/users/${editingUser.id}/update?userId=${adminUser.id}`, {
                 method: 'POST',
@@ -285,6 +291,11 @@ const AdminDashboard: React.FC = () => {
     };
     
     const handleDeleteUser = async (userToDelete: UserProfile) => {
+        if (isFullAdmin(userToDelete)) {
+            setError('Full Admin users are protected and cannot be deleted.');
+            return;
+        }
+
         if (!adminUser || !window.confirm(`Are you sure you want to delete user ${userToDelete.username}? This action cannot be undone.`)) return;
 
         try {
@@ -302,6 +313,11 @@ const AdminDashboard: React.FC = () => {
     };
 
     const handleImpersonate = async (userToImpersonate: UserProfile) => {
+        if (isFullAdmin(userToImpersonate)) {
+            setError('Full Admin accounts are protected and cannot be impersonated.');
+            return;
+        }
+
         if (!adminUser || !window.confirm(`Are you sure you want to log in as ${userToImpersonate.username}?`)) return;
 
         try {
@@ -345,6 +361,12 @@ const AdminDashboard: React.FC = () => {
     };
 
     const handleDeleteAgent = async (agentId: string) => {
+        const targetAgent = agents.find(a => a.id === agentId);
+        if (targetAgent && isFullAdmin(targetAgent)) {
+            setError('Full Admin agents are protected and cannot be deleted.');
+            return;
+        }
+
         if (!adminId || !window.confirm('Are you sure you want to delete this agent? This action is irreversible.')) return;
         setError(null);
         try {
@@ -363,6 +385,10 @@ const AdminDashboard: React.FC = () => {
 
     const handleToggleAgentStatus = async (agent: Agent) => {
         if (!adminId) return;
+        if (isFullAdmin(agent)) {
+            setError('Full Admin agents are protected and cannot be suspended or blocked.');
+            return;
+        }
         const newStatus = agent.status === 'Active' ? 'Suspended' : 'Active';
         if (!window.confirm(`Are you sure you want to ${newStatus.toLowerCase()} agent ${agent.username}?`)) return;
         
@@ -371,6 +397,11 @@ const AdminDashboard: React.FC = () => {
 
     const handleUpdateAgent = async (agentId: string, data: Partial<Agent>) => {
         if (!adminId) return;
+        const targetAgent = agents.find(a => a.id === agentId);
+        if (targetAgent && isFullAdmin(targetAgent)) {
+            setError('Full Admin agents are protected and cannot be edited.');
+            return;
+        }
         setError(null);
         try {
             const response = await fetch(`/api/admin/agents/${agentId}/update?userId=${adminId}`, {
@@ -457,6 +488,11 @@ const AdminDashboard: React.FC = () => {
     };
 
     const handleDeleteRole = async (role: AdminRole) => {
+        if (isFullAdmin(role)) {
+            setError('Full Admin role is protected and cannot be deleted.');
+            return;
+        }
+
         if (!adminUser || !window.confirm(`Are you sure you want to delete the role "${role.name}"?`)) return;
         setError(null);
         try {
@@ -475,6 +511,12 @@ const AdminDashboard: React.FC = () => {
 
     const handleUpdateRole = async (roleId: string, updatedData: Partial<AdminRole>) => {
         if (!adminUser) return;
+
+        if (isFullAdmin(editingRole) || isFullAdmin(updatedData)) {
+            setError('Full Admin role is protected and cannot be edited.');
+            return;
+        }
+
         setError(null);
         try {
             const response = await fetch(`/api/admin/roles/${roleId}/update?userId=${adminUser.id}`, {
@@ -496,6 +538,11 @@ const AdminDashboard: React.FC = () => {
     };
 
     const handleToggleRoleStatus = async (role: AdminRole) => {
+        if (isFullAdmin(role)) {
+            setError('Full Admin role is protected and cannot be suspended or blocked.');
+            return;
+        }
+
         const newStatus = role.status === 'active' ? 'suspended' : 'active';
         if (!window.confirm(`Are you sure you want to ${newStatus === 'active' ? 'activate' : 'suspend'} the role "${role.name}"?`)) return;
         await handleUpdateRole(role.id, { status: newStatus });
@@ -738,7 +785,10 @@ const AdminDashboard: React.FC = () => {
                     permissionsList={permissionsList}
                 />
             )}
-            {spectatingRoomId && (
+            {spectatingRoomId && (() => {
+                const spectatingRoom = rooms.find(r => r.id === spectatingRoomId);
+                if (!spectatingRoom) return null;
+                return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-3/4 overflow-auto relative">
                         <button 
@@ -750,13 +800,31 @@ const AdminDashboard: React.FC = () => {
                             </svg>
                         </button>
                         <GameRoomComponent 
-                            roomId={spectatingRoomId} 
-                            user={adminUser} 
-                            isSpectator={true} 
+                            room={spectatingRoom} 
+                            user={{
+                                id: adminUser.id,
+                                username: adminUser.username,
+                                avatar: '👑',
+                                balance: 0,
+                                winCount: 0,
+                                lossCount: 0
+                            }}
+                            userId={adminUser.id}
+                            onLeave={() => setSpectatingRoomId(null)}
+                            onLogout={handleLogout}
+                            onToggleReady={() => {}}
+                            onAddBot={() => {}}
+                            onStartMatch={() => {}}
+                            onRollDice={() => {}}
+                            onMoveToken={() => {}}
+                            onSendChat={() => {}}
+                            onProfileUpdate={async () => {}}
+                            onRetryJoin={() => {}}
                         />
                     </div>
                 </div>
-            )}
+                );
+            })()}
         </AdminLayout>
     );
 };

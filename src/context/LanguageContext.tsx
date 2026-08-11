@@ -29,6 +29,7 @@ export const translations = {
     quickSocialLogin: 'Or Quick Social Login',
     authTerms: 'By entering, you agree to the gaming Terms & Conditions and understand that stake amounts are simulated using virtual currency balances.',
     nameRequired: 'Please choose a display name.',
+    emailPasswordRequired: 'Please enter both email and password.',
 
     // Dashboard / Lobby
     selectStake: 'Select Bet Stake',
@@ -162,6 +163,29 @@ export const translations = {
     enterPhoneNumber: 'Please enter your mobile money phone number.',
     transactionFailed: 'Transaction failed. Please try again.',
     noTransactions: 'No transactions recorded yet.',
+    transactionDetails: 'Transaction Details',
+    amount: 'Amount',
+    description: 'Description',
+    date: 'Date',
+    time: 'Time',
+    transactionType: 'Type',
+    status: 'Status',
+    transactionId: 'Transaction ID',
+    close: 'Close',
+
+    // Matchmaking Explanation
+    matchmakingInfoTitle: 'Tournament Matchmaking & Pairing Rules',
+    matchmakingInfoDesc: 'Learn how pairings are made, who decides matches, and player limits.',
+    pairingTypeTitle: '2-Player Knockout Matches (1v1)',
+    pairingTypeDesc: 'Matches consist of 2 players facing off in a knockout format. The winner advances while the loser is eliminated.',
+    whoDecidesTitle: 'Automated Fair Pairings (AI Algorithm)',
+    whoDecidesDesc: 'Pairings are generated 100% automatically and randomly by the system algorithm when the tournament starts. Admin does not pick opponents manually.',
+    yourBalance: 'Your Balance',
+    confirmRegistration: 'Confirm Tournament Registration',
+    entryFeeNotice: 'The entry fee will be deducted directly from your available balance.',
+    confirmYes: 'Yes, Register Now',
+    cancelBtn: 'Cancel',
+    dashboardNav: 'Dashboard',
 
     // Switcher
     switchLanguage: 'Language',
@@ -319,6 +343,20 @@ export const translations = {
     enterPhoneNumber: 'Fadlan qor lambarkaaga talefanka.',
     transactionFailed: 'Bixintu waa fashilantay. Fadlan kor u tijaabi.',
     noTransactions: 'Ma jiro wax dhigan ah oo la diwaan geliyay.',
+
+    // Matchmaking Explanation
+    matchmakingInfoTitle: 'Faahfaahinta Isku Aadka & Kulamada Tartanka',
+    matchmakingInfoDesc: 'Sida loo isku aado ciyaartoyda, cidda go’aamisa iyo sharciyada ciyaarta.',
+    pairingTypeTitle: '2 Ciyaartoy Isku Aad ah (1v1 Direct Knockout)',
+    pairingTypeDesc: 'Ciyaar kasta waxaa isugu soo baxaya 2 ciyaartoy (1v1). Qofkii guuleysta ayaa u gudbaya wareega xiga, kii lagana wuu ka baxayaa.',
+    whoDecidesTitle: 'Isku Aad Toos ah oo Cadaalad ah (System AI)',
+    whoDecidesDesc: 'Isku aadka waxaa si toos ah oo random ah u sameeya nidaamka (Algorithm) marka uu tartanku furmo. Adminku gacanta ku ma go’aamiyo.',
+    yourBalance: 'Lacagta Kugu Jirta',
+    confirmRegistration: 'Xaqiiji Diiwaangelinta Tartanka',
+    entryFeeNotice: 'Qiimaha diiwaangelinta waxaa toos looga jarayaa haraagaaga.',
+    confirmYes: 'Haa, Is-diiwaangeli Hadda',
+    cancelBtn: 'Kansal',
+    dashboardNav: 'Guud',
 
     // Switcher
     switchLanguage: 'Luqadda',

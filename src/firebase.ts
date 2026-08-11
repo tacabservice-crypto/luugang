@@ -3,32 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as admin from 'firebase-admin';
+import { initializeApp, cert, getApps, getApp } from 'firebase-admin/app';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
-// This is the recommended way to initialize the Firebase Admin SDK on platforms like Render.
-// The service account key is stored in an environment variable.
-// See: https://firebase.google.com/docs/admin/setup#initialize-sdk
+let firestoreDb: Firestore | null = null;
+
 try {
-  // Check if the app is already initialized
-  if (admin.apps.length === 0) {
+  if (getApps().length === 0) {
     const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!serviceAccountEnv) {
-      throw new Error('FIREBASE_SERVICE_ACCOUNT environment variable is not set.');
+    if (serviceAccountEnv) {
+      const serviceAccount = JSON.parse(Buffer.from(serviceAccountEnv, 'base64').toString('ascii'));
+      initializeApp({
+        credential: cert(serviceAccount)
+      });
+      console.log('Firebase Admin SDK initialized successfully.');
+      firestoreDb = getFirestore();
     }
-
-    // The environment variable is expected to be a base64 encoded JSON string.
-    const serviceAccount = JSON.parse(Buffer.from(serviceAccountEnv, 'base64').toString('ascii'));
-
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    
-    console.log('Firebase Admin SDK initialized successfully.');
+  } else {
+    firestoreDb = getFirestore(getApp());
   }
 } catch (error) {
   console.error('Firebase Admin SDK initialization error:', error);
-  // Do not re-throw the error, as it would crash the server on startup if the env var is missing.
-  // The application can run without a database connection, but will not be able to persist data.
 }
 
-export const db = admin.apps.length > 0 ? admin.firestore() : null;
+export const db = firestoreDb;

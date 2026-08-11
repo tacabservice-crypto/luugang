@@ -5,6 +5,7 @@ import { Tournament } from '../types/game';
 import TournamentBracket from '../components/TournamentBracket';
 import WalletModal from '../components/WalletModal';
 import LanguageToggle from '../components/LanguageToggle';
+import AvatarDisplay from '../components/AvatarDisplay';
 import {
   Trophy,
   ArrowLeft,
@@ -22,7 +23,10 @@ import {
   Play,
   Swords,
   Crown,
-  AlertCircle
+  AlertCircle,
+  ShieldCheck,
+  HelpCircle,
+  Bot
 } from 'lucide-react';
 
 const Tournaments: React.FC = () => {
@@ -211,7 +215,7 @@ const Tournaments: React.FC = () => {
               title="Return to Dashboard"
             >
               <ArrowLeft className="w-5 h-5 text-purple-300" />
-              <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">Dashboard</span>
+              <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">{t('dashboardNav')}</span>
             </button>
 
             <div className="flex items-center gap-2">
@@ -231,6 +235,14 @@ const Tournaments: React.FC = () => {
 
           {/* User Profile & Actions */}
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* User Profile Badge */}
+            {user && (
+              <div className="hidden md:flex items-center gap-2 bg-white/5 border border-purple-500/20 px-3 py-1.5 rounded-2xl">
+                <AvatarDisplay avatar={user.avatar} username={user.username} className="w-7 h-7 rounded-xl bg-purple-900/60 border border-purple-400/30 flex items-center justify-center shrink-0" />
+                <span className="text-xs font-bold text-gray-200 truncate max-w-[100px]">{user.username}</span>
+              </div>
+            )}
+
             {/* Wallet Balance Badge */}
             {user ? (
               <button
@@ -366,6 +378,45 @@ const Tournaments: React.FC = () => {
             </div>
           </section>
         )}
+
+        {/* 2.5 MATCHMAKING & PAIRINGS EXPLANATION BANNER */}
+        <section className="bg-gradient-to-r from-purple-950/40 via-[#1A0C40]/60 to-indigo-950/40 border border-purple-500/30 rounded-3xl p-6 shadow-xl backdrop-blur-md">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
+              <ShieldCheck className="w-6 h-6 text-yellow-400" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                {t('matchmakingInfoTitle')}
+              </h2>
+              <p className="text-xs text-purple-200/70">{t('matchmakingInfoDesc')}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {/* Pairing Rule 1 */}
+            <div className="bg-black/30 border border-white/10 p-4 rounded-2xl space-y-1.5">
+              <div className="flex items-center gap-2 text-yellow-300 font-black">
+                <Swords className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>{t('pairingTypeTitle')}</span>
+              </div>
+              <p className="text-gray-300 leading-relaxed">
+                {t('pairingTypeDesc')}
+              </p>
+            </div>
+
+            {/* Pairing Rule 2 */}
+            <div className="bg-black/30 border border-white/10 p-4 rounded-2xl space-y-1.5">
+              <div className="flex items-center gap-2 text-emerald-300 font-black">
+                <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{t('whoDecidesTitle')}</span>
+              </div>
+              <p className="text-gray-300 leading-relaxed">
+                {t('whoDecidesDesc')}
+              </p>
+            </div>
+          </div>
+        </section>
 
         {/* 3. TABS & SEARCH CONTROLS */}
         <section className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white/5 border border-white/10 p-4 rounded-3xl backdrop-blur-md">
@@ -620,27 +671,27 @@ const Tournaments: React.FC = () => {
 
             <div className="space-y-2">
               <h3 className="text-xl font-black text-white">
-                Diiwaangelinta Tartanka / Confirm Registration
+                {t('confirmRegistration')}
               </h3>
               <p className="text-xs text-purple-200/80">
-                Ma hubtaa inaad is-diiwaangeliso tartankan?
+                {t('entryFeeNotice')}
               </p>
             </div>
 
             {/* Tournament Summary Card */}
             <div className="bg-black/40 border border-purple-500/30 p-4 rounded-2xl text-left space-y-2 text-xs">
               <div className="flex justify-between items-center">
-                <span className="text-gray-400 font-bold">Tartanka:</span>
+                <span className="text-gray-400 font-bold">{t('tournaments')}:</span>
                 <span className="font-black text-yellow-300">{confirmRegisterTournament.name}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-400 font-bold">Qiimaha Galitaanka (Entry Fee):</span>
+                <span className="text-gray-400 font-bold">{t('entryFee')}:</span>
                 <span className="font-mono font-black text-emerald-400">
                   {confirmRegisterTournament.entryFee > 0 ? `$${confirmRegisterTournament.entryFee.toFixed(2)}` : 'FREE'}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-400 font-bold">Lacagta kugu jirta (Your Balance):</span>
+                <span className="text-gray-400 font-bold">{t('yourBalance')}:</span>
                 <span className="font-mono font-black text-emerald-300">
                   ${(user?.balance || 0).toFixed(2)}
                 </span>
@@ -663,7 +714,7 @@ const Tournaments: React.FC = () => {
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Haa, Is-diiwaangeli</span>
+                    <span>{t('confirmYes')}</span>
                   </>
                 )}
               </button>
@@ -672,7 +723,7 @@ const Tournaments: React.FC = () => {
                 onClick={() => setConfirmRegisterTournament(null)}
                 className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white font-bold py-3 px-5 rounded-2xl text-xs transition-all cursor-pointer border border-white/10"
               >
-                Jooji / Cancel
+                {t('cancelBtn')}
               </button>
             </div>
           </div>

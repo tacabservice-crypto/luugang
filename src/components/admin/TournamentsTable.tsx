@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Tournament } from '../../types/game';
 import { Trophy, Plus, Trash2, Ban, Users, Calendar, DollarSign, X, Play, Eye, Edit3, UserMinus } from 'lucide-react';
+import AvatarDisplay from '../AvatarDisplay';
 
 interface TournamentsTableProps {
   tournaments: Tournament[];
@@ -473,10 +474,11 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                     className="flex items-center justify-between bg-gray-900/80 border border-gray-700 p-2.5 rounded-xl text-xs"
                   >
                     <div className="flex items-center gap-2.5">
-                      <img
-                        src={p.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + p.username}
-                        alt=""
-                        className="w-8 h-8 rounded-lg bg-gray-800 object-cover"
+                      <AvatarDisplay
+                        avatar={p.avatar}
+                        username={p.username}
+                        className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center shrink-0 overflow-hidden"
+                        textClassName="text-sm"
                       />
                       <span className="font-bold text-white">{p.username}</span>
                     </div>

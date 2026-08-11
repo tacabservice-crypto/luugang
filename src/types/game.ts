@@ -30,6 +30,7 @@ export interface WalletTransaction {
   timestamp: number;
   matchId?: string;
   description: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'completed';
 }
 
 export interface ManualTransactionRequest {
@@ -45,6 +46,8 @@ export interface ManualTransactionRequest {
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;
 }
+
+export type ManualTransaction = ManualTransactionRequest;
 
 
 export type PlayerColor = 'red' | 'green' | 'yellow' | 'blue';
@@ -138,10 +141,11 @@ export interface Agent {
 export interface AgentTransaction {
   id: string;
   agentId: string;
-  type: 'FloatPurchase' | 'PlayerDeposit';
+  type: 'FloatPurchase' | 'PlayerDeposit' | 'PlayerWithdrawal' | 'deposit' | 'withdrawal';
   amount: number;
   discountAmount?: number; // For FloatPurchase, records the profit made by the platform owner
   playerId?: string; // For PlayerDeposit, the user who received the funds
+  playerName?: string;
   timestamp: number;
   description: string;
 }
@@ -166,8 +170,8 @@ export interface PlayerAgentRequest {
   agentId: string;
   playerPhone: string; // for withdrawals
   senderPhone?: string; // for deposits
-  provider: 'evc' | 'edahab' | 'sahal' | 'premier';
-  type: 'deposit' | 'withdrawal';
+  provider: 'evc' | 'edahab' | 'sahal' | 'premier' | string;
+  type: 'deposit' | 'withdrawal' | 'withdraw';
   amount: number;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;

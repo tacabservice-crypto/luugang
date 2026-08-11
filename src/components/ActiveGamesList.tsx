@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameRoom } from '../../types/game';
+import { GameRoom } from '../types/game';
 import { Eye, Loader2, Gamepad2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 

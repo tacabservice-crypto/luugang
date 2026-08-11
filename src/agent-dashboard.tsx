@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import { Agent, AgentTransaction, AgentRequest, PlayerAgentRequest } from './types/game';
+import { Agent, AgentTransaction, AgentRequest, PlayerAgentRequest, UserProfile } from './types/game';
 import toast, { Toaster } from 'react-hot-toast';
 
 // Transaction Detail Modal Component
@@ -23,7 +23,7 @@ const TransactionDetailModal: React.FC<{ transaction: AgentTransaction; onClose:
                 <h3 className="text-2xl font-bold text-purple-400 mb-4">Transaction Details</h3>
                 <div className="space-y-3 text-slate-300">
                     <p><strong>ID:</strong> <span className="font-mono text-sm">{transaction.id}</span></p>
-                    <p><strong>Type:</strong> <span className={`font-semibold ${transaction.type === 'PlayerDeposit' || transaction.type === 'deposit' ? 'text-green-400' : 'text-red-400'}`}>{transaction.type}</span></p>
+                    <p><strong>Type:</strong> <span className={`font-semibold ${transaction.type === 'PlayerDeposit' || (transaction.type as string) === 'deposit' ? 'text-green-400' : 'text-red-400'}`}>{transaction.type}</span></p>
                     <p><strong>Amount:</strong> <span className="font-mono">${transaction.amount.toFixed(2)}</span></p>
                     {transaction.discountAmount && <p><strong>Discount:</strong> <span className="font-mono">${transaction.discountAmount.toFixed(2)}</span></p>}
                     <p><strong>Date:</strong> {new Date(transaction.timestamp).toLocaleString()}</p>

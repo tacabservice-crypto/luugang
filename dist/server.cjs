@@ -3069,7 +3069,7 @@ app.post("/api/admin/roles/create", hasPermission("all"), async (req, res) => {
 });
 app.post("/api/admin/roles/:roleId/update", hasPermission("all"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { roleId } = req.params;
+  const roleId = req.params.roleId;
   const updatedData = req.body;
   if (!roleId) {
     return res.status(400).json({ error: "Role ID is required." });
@@ -3079,6 +3079,13 @@ app.post("/api/admin/roles/:roleId/update", hasPermission("all"), async (req, re
     const doc = await adminRef.get();
     if (!doc.exists) {
       return res.status(404).json({ error: "Admin role not found." });
+    }
+    const adminData = doc.data();
+    const targetUsername = String(adminData.username || "").toLowerCase();
+    const targetName = String(adminData.name || "").toLowerCase();
+    const isFullAdminTarget = adminData.permissions?.includes("all") || targetUsername === "admin" || targetName.includes("super admin") || targetName.includes("full admin");
+    if (isFullAdminTarget) {
+      return res.status(400).json({ error: "Full Admin accounts are protected and cannot be edited, suspended, or deleted." });
     }
     if (updatedData.password === "") {
       delete updatedData.password;
@@ -3094,7 +3101,7 @@ app.post("/api/admin/roles/:roleId/update", hasPermission("all"), async (req, re
 });
 app.delete("/api/admin/roles/:roleId/delete", hasPermission("all"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { roleId } = req.params;
+  const roleId = req.params.roleId;
   if (!roleId) {
     return res.status(400).json({ error: "Admin user ID is required." });
   }
@@ -3105,6 +3112,12 @@ app.delete("/api/admin/roles/:roleId/delete", hasPermission("all"), async (req, 
       return res.status(404).json({ error: "Admin user not found." });
     }
     const adminData = doc.data();
+    const targetUsername = String(adminData.username || "").toLowerCase();
+    const targetName = String(adminData.name || "").toLowerCase();
+    const isFullAdminTarget = adminData.permissions?.includes("all") || targetUsername === "admin" || targetName.includes("super admin") || targetName.includes("full admin");
+    if (isFullAdminTarget) {
+      return res.status(400).json({ error: "Full Admin accounts are protected and cannot be deleted." });
+    }
     if (adminData.permissions.includes("all")) {
       const allAdminsSnapshot = await db.collection("adminUsers").where("permissions", "array-contains", "all").get();
       if (allAdminsSnapshot.size <= 1) {
@@ -3209,18 +3222,29 @@ app.post("/api/admin/manual-transactions/:transactionId/reject", isAdmin, async 
   res.json({ success: true, transaction: tx });
 });
 app.post("/api/admin/impersonate", isAdmin, (req, res) => {
-  const { userId } = req.body;
-  const user = store.users[userId];
+  const { userId, targetUserId } = req.body;
+  const targetId = targetUserId || userId;
+  const user = store.users[targetId];
   if (!user) {
     return res.status(404).json({ error: "User not found" });
+  }
+  const uName = String(user.username || "").toLowerCase();
+  const uRole = String(user.role || "").toLowerCase();
+  if (uName === "admin" || uName === "superadmin" || uRole.includes("admin") || uRole.includes("super")) {
+    return res.status(400).json({ error: "Full Admin accounts are protected and cannot be impersonated." });
   }
   res.json({ success: true, user });
 });
 app.post("/api/admin/users/:userId/update", isAdmin, async (req, res) => {
-  const { userId } = req.params;
+  const userId = req.params.userId;
   const userToUpdate = store.users[userId];
   if (!userToUpdate) {
     return res.status(404).json({ error: "User not found." });
+  }
+  const uName = String(userToUpdate.username || "").toLowerCase();
+  const uRole = String(userToUpdate.role || "").toLowerCase();
+  if (uName === "admin" || uRole.includes("admin") || uRole.includes("super")) {
+    return res.status(400).json({ error: "Full Admin users are protected and cannot be edited." });
   }
   const { username, avatar, balance, winCount, lossCount, role, password } = req.body;
   if (typeof username === "string" && username.trim()) {
@@ -3311,7 +3335,7 @@ app.post("/api/admin/agents/create", isAdmin, async (req, res) => {
 });
 app.post("/api/admin/agents/:agentId/update", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { agentId } = req.params;
+  const agentId = req.params.agentId;
   const { username, password, commissionRate, status, location, phone, promoCode } = req.body;
   try {
     const agentRef = db.collection("agents").doc(agentId);
@@ -3320,6 +3344,12 @@ app.post("/api/admin/agents/:agentId/update", isAdmin, async (req, res) => {
       return res.status(404).json({ error: "Agent not found." });
     }
     const agentData = agentDoc.data();
+    const targetUsername = String(agentData.username || "").toLowerCase();
+    const targetRole = String(agentData.role || "").toLowerCase();
+    const isFullAdminAgent = targetUsername === "admin" || targetUsername === "superadmin" || targetRole.includes("admin") || targetRole.includes("super");
+    if (isFullAdminAgent) {
+      return res.status(400).json({ error: "Full Admin agents are protected and cannot be edited, suspended, or deleted." });
+    }
     if (promoCode && typeof promoCode === "string" && promoCode.trim() !== "" && promoCode.trim() !== agentData.promoCode) {
       const agentsRef = db.collection("agents");
       const promoCodeQuery = await agentsRef.where("promoCode", "==", promoCode.trim()).get();
@@ -3364,9 +3394,32 @@ app.post("/api/admin/agents/:agentId/update", isAdmin, async (req, res) => {
     res.status(500).json({ error: "Failed to update agent in database." });
   }
 });
+app.delete("/api/admin/agents/:agentId/delete", isAdmin, async (req, res) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const agentId = req.params.agentId;
+  try {
+    const agentRef = db.collection("agents").doc(agentId);
+    const agentDoc = await agentRef.get();
+    if (!agentDoc.exists) {
+      return res.status(404).json({ error: "Agent not found." });
+    }
+    const agentData = agentDoc.data();
+    const targetUsername = String(agentData.username || "").toLowerCase();
+    const targetRole = String(agentData.role || "").toLowerCase();
+    const isFullAdminAgent = targetUsername === "admin" || targetUsername === "superadmin" || targetRole.includes("admin") || targetRole.includes("super");
+    if (isFullAdminAgent) {
+      return res.status(400).json({ error: "Full Admin agents are protected and cannot be deleted." });
+    }
+    await agentRef.delete();
+    res.json({ success: true, message: "Agent deleted successfully." });
+  } catch (error) {
+    console.error(`Failed to delete agent ${agentId}:`, error);
+    res.status(500).json({ error: "Failed to delete agent." });
+  }
+});
 app.post("/api/admin/agents/:agentId/credit", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { agentId } = req.params;
+  const agentId = req.params.agentId;
   const { amount, discount } = req.body;
   const creditAmount = parseFloat(amount);
   const discountAmount = parseFloat(discount) || 0;
@@ -3418,7 +3471,7 @@ app.get("/api/admin/agent-requests", isAdmin, async (req, res) => {
 });
 app.post("/api/admin/agent-requests/:requestId/approve", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { requestId } = req.params;
+  const requestId = req.params.requestId;
   const adminId = req.query.userId;
   try {
     const requestRef = db.collection("agentRequests").doc(requestId);
@@ -3470,7 +3523,8 @@ app.post("/api/admin/agent-requests/:requestId/reject", isAdmin, async (req, res
   const { requestId } = req.params;
   const adminId = req.query.userId;
   try {
-    const requestRef = db.collection("agentRequests").doc(requestId);
+    const reqId = Array.isArray(requestId) ? requestId[0] : requestId;
+    const requestRef = db.collection("agentRequests").doc(reqId);
     const requestDoc = await requestRef.get();
     if (!requestDoc.exists) {
       return res.status(404).json({ error: "Request not found." });
@@ -3494,8 +3548,14 @@ app.post("/api/admin/agent-requests/:requestId/reject", isAdmin, async (req, res
   }
 });
 app.delete("/api/admin/users/:userId/delete", isAdmin, (req, res) => {
-  const { userId } = req.params;
-  if (store.users[userId]) {
+  const userId = req.params.userId;
+  const userToDelete = store.users[userId];
+  if (userToDelete) {
+    const uName = String(userToDelete.username || "").toLowerCase();
+    const uRole = String(userToDelete.role || "").toLowerCase();
+    if (uName === "admin" || uRole.includes("admin") || uRole.includes("super")) {
+      return res.status(400).json({ error: "Full Admin users are protected and cannot be deleted." });
+    }
     delete store.users[userId];
     saveStoreAndWait();
     res.json({ success: true, message: `User ${userId} has been deleted.` });
@@ -3504,7 +3564,7 @@ app.delete("/api/admin/users/:userId/delete", isAdmin, (req, res) => {
   }
 });
 app.post("/api/admin/rooms/:roomId/cancel", isAdmin, (req, res) => {
-  const { roomId } = req.params;
+  const roomId = req.params.roomId;
   const room = store.rooms[roomId];
   if (!room) {
     return res.status(404).json({ error: "Room not found" });
@@ -3528,10 +3588,15 @@ app.post("/api/admin/rooms/:roomId/cancel", isAdmin, (req, res) => {
   res.json({ success: true, message: `Room ${roomId} has been canceled and bets refunded.` });
 });
 app.post("/api/admin/users/:userId/toggle-admin", isAdmin, (req, res) => {
-  const { userId } = req.params;
+  const userId = req.params.userId;
   const user = store.users[userId];
   if (!user) {
     return res.status(404).json({ error: "User not found" });
+  }
+  const uName = String(user.username || "").toLowerCase();
+  const uRole = String(user.role || "").toLowerCase();
+  if (uName === "admin" || uName === "superadmin" || uRole.includes("admin") || uRole.includes("super")) {
+    return res.status(400).json({ error: "Full Admin users are protected and cannot be modified." });
   }
   if (user.role === "admin") {
     user.role = "player";

@@ -7,7 +7,7 @@ interface VoiceChatContextType {
   isSpeakerOn: boolean;
   toggleMute: () => void;
   toggleSpeaker: () => void;
-  initializeVoiceChat: (localUserId: string, roomId: string) => void;
+  initializeVoiceChat: (localUserId: string, roomId: string, isSpectator?: boolean) => void;
   updatePlayers: (players: LudoPlayer[]) => void;
   closeVoiceChat: () => void;
   speakingPlayers: Record<string, boolean>;

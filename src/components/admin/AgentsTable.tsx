@@ -2,6 +2,7 @@
 import React from 'react';
 import { Edit, ShieldCheck, DollarSign, Power, PowerOff, Trash2 } from 'lucide-react';
 import { formatCurrency } from '../../utils/number';
+import { isFullAdmin } from '../../utils/admin';
 
 const AgentsTable = ({ agents, onCredit, onEdit, onToggleStatus, onDelete, onCreate }) => {
   return (
@@ -28,10 +29,21 @@ const AgentsTable = ({ agents, onCredit, onEdit, onToggleStatus, onDelete, onCre
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {agents.map(agent => (
+            {agents.map(agent => {
+              const protectedAgent = isFullAdmin(agent);
+              return (
               <tr key={agent.id}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{agent.id}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{agent.username}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  <div className="flex items-center gap-2">
+                    <span>{agent.username}</span>
+                    {protectedAgent && (
+                      <span className="px-2 py-0.5 text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 rounded-full flex items-center gap-1">
+                        <ShieldCheck size={12} /> Full Admin
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-blue-600">{(agent.commissionRate * 100).toFixed(2)}%</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-semibold">{formatCurrency(agent.floatBalance)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -42,15 +54,24 @@ const AgentsTable = ({ agents, onCredit, onEdit, onToggleStatus, onDelete, onCre
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                  <button onClick={() => onCredit(agent)} className="text-green-500 hover:text-green-700"><DollarSign size={18} /></button>
-                  <button onClick={() => onEdit(agent)} className="text-indigo-500 hover:text-indigo-700"><Edit size={18} /></button>
-                  <button onClick={() => onToggleStatus(agent)} className={agent.status === 'Active' ? 'text-yellow-500 hover:text-yellow-700' : 'text-green-500 hover:text-green-700'}>
-                    {agent.status === 'Active' ? <PowerOff size={18} /> : <Power size={18} />}
-                  </button>
-                  <button onClick={() => onDelete(agent.id)} className="text-red-500 hover:text-red-700"><Trash2 size={18} /></button>
+                  {protectedAgent ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md font-bold cursor-not-allowed" title="Full Admin agent is protected and cannot be edited, suspended, or deleted">
+                      🔒 Protected
+                    </span>
+                  ) : (
+                    <>
+                      <button onClick={() => onCredit(agent)} className="text-green-500 hover:text-green-700" title="Credit Agent"><DollarSign size={18} /></button>
+                      <button onClick={() => onEdit(agent)} className="text-indigo-500 hover:text-indigo-700" title="Edit Agent"><Edit size={18} /></button>
+                      <button onClick={() => onToggleStatus(agent)} className={agent.status === 'Active' ? 'text-yellow-500 hover:text-yellow-700' : 'text-green-500 hover:text-green-700'} title="Toggle Status">
+                        {agent.status === 'Active' ? <PowerOff size={18} /> : <Power size={18} />}
+                      </button>
+                      <button onClick={() => onDelete(agent.id)} className="text-red-500 hover:text-red-700" title="Delete Agent"><Trash2 size={18} /></button>
+                    </>
+                  )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

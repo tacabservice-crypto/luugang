@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Tournament, TournamentMatch } from '../types/game';
 import { Trophy, ArrowLeft, Swords, Crown, Play, Users, DollarSign, Calendar, ShieldCheck, Sparkles, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import AvatarDisplay from './AvatarDisplay';
 
 interface TournamentBracketProps {
   tournamentId: string;
@@ -154,10 +155,11 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
             <Sparkles className="w-6 h-6 text-yellow-400" /> TOURNAMENT CHAMPION <Sparkles className="w-6 h-6 text-yellow-400" />
           </h2>
           <div className="flex items-center justify-center gap-4 pt-2">
-            <img
-              src={winner.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=winner'}
-              alt={winner.username}
-              className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-yellow-400 shadow-xl object-cover bg-purple-900"
+            <AvatarDisplay
+              avatar={winner.avatar}
+              username={winner.username}
+              className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-yellow-400 shadow-xl bg-purple-900 flex items-center justify-center shrink-0 overflow-hidden"
+              textClassName="text-3xl sm:text-4xl"
             />
             <div className="text-left">
               <p className="text-xl sm:text-2xl font-black text-white">{winner.username}</p>
@@ -286,13 +288,11 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
                             }`}
                           >
                             <div className="flex items-center gap-2.5 truncate">
-                              <img
-                                src={
-                                  match.player1?.avatar ||
-                                  'https://api.dicebear.com/7.x/bottts/svg?seed=' + (match.player1?.username || 'tbd')
-                                }
-                                alt=""
-                                className="w-8 h-8 rounded-lg object-cover bg-purple-950 shrink-0 border border-white/10"
+                              <AvatarDisplay
+                                avatar={match.player1?.avatar}
+                                username={match.player1?.username}
+                                className="w-8 h-8 rounded-lg bg-purple-950 shrink-0 border border-white/10 flex items-center justify-center overflow-hidden"
+                                textClassName="text-sm"
                               />
                               <span className="text-xs font-bold truncate">
                                 {match.player1?.username || 'TBD (Waiting)'}
@@ -317,13 +317,11 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
                             }`}
                           >
                             <div className="flex items-center gap-2.5 truncate">
-                              <img
-                                src={
-                                  match.player2?.avatar ||
-                                  'https://api.dicebear.com/7.x/bottts/svg?seed=' + (match.player2?.username || 'tbd2')
-                                }
-                                alt=""
-                                className="w-8 h-8 rounded-lg object-cover bg-purple-950 shrink-0 border border-white/10"
+                              <AvatarDisplay
+                                avatar={match.player2?.avatar}
+                                username={match.player2?.username}
+                                className="w-8 h-8 rounded-lg bg-purple-950 shrink-0 border border-white/10 flex items-center justify-center overflow-hidden"
+                                textClassName="text-sm"
                               />
                               <span className="text-xs font-bold truncate">
                                 {match.player2?.username || 'TBD (Waiting)'}
@@ -376,10 +374,11 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
                 key={p.userId || idx}
                 className="bg-black/30 border border-white/10 p-2.5 rounded-2xl flex items-center gap-2.5"
               >
-                <img
-                  src={p.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + p.username}
-                  alt={p.username}
-                  className="w-8 h-8 rounded-xl object-cover bg-purple-950 border border-white/10 shrink-0"
+                <AvatarDisplay
+                  avatar={p.avatar}
+                  username={p.username}
+                  className="w-8 h-8 rounded-xl bg-purple-950 border border-white/10 shrink-0 flex items-center justify-center overflow-hidden"
+                  textClassName="text-sm"
                 />
                 <span className="text-xs font-bold text-gray-200 truncate">{p.username}</span>
               </div>
