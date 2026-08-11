@@ -338,7 +338,7 @@ function loadStore() {
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
       store.rooms = parsed.rooms || {};
-      store.matchmakingQueues = parsed.matchmakingQueues || {
+      store.matchmakingQueues = {
         0: [],
         1: [],
         5: [],
@@ -387,7 +387,7 @@ async function loadStoreFromFirestore() {
         store.users = parsed.users || {};
         store.transactions = parsed.transactions || [];
         store.rooms = parsed.rooms || {};
-        store.matchmakingQueues = parsed.matchmakingQueues || {
+        store.matchmakingQueues = {
           0: [],
           1: [],
           5: [],
@@ -572,6 +572,8 @@ function removeSSEClient(res) {
 }
 function cleanupMatchmakingQueues() {
   let changed = false;
+  const activeUserIds = new Set(activeClients.map((c) => c.userId));
+  const now = Date.now();
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     const beforeLen = store.matchmakingQueues[qKey].length;
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((userId) => {
@@ -580,6 +582,23 @@ function cleanupMatchmakingQueues() {
         (r) => r.status === "playing" && r.players.some((p) => p.userId === userId && p.status !== "left")
       );
       if (inGame) return false;
+      if (!activeUserIds.has(userId)) {
+        if (db) {
+          db.collection("matchmaking").doc(userId).delete().catch(() => {
+          });
+        }
+        return false;
+      }
+      const u = store.users[userId];
+      const seekingJoinedAt = u?.seekingJoinedAt;
+      if (seekingJoinedAt && now - seekingJoinedAt > 18e4) {
+        delete u.seekingJoinedAt;
+        if (db) {
+          db.collection("matchmaking").doc(userId).delete().catch(() => {
+          });
+        }
+        return false;
+      }
       return true;
     });
     if (store.matchmakingQueues[qKey].length !== beforeLen) {
@@ -989,21 +1008,27 @@ setInterval(() => {
 }, 1e4);
 setInterval(() => {
   cleanupMatchmakingQueues();
+  const activeConnectedUserIds = new Set(activeClients.map((c) => c.userId));
   Object.keys(store.matchmakingQueues).forEach((queueKey) => {
     const queueUserIds = store.matchmakingQueues[queueKey];
     if (!queueUserIds || queueUserIds.length === 0) return;
+    const connectedQueueUserIds = queueUserIds.filter((id) => activeConnectedUserIds.has(id));
+    if (connectedQueueUserIds.length === 0) {
+      store.matchmakingQueues[queueKey] = [];
+      return;
+    }
     const parts = queueKey.split("_");
     const bet = parseFloat(parts[0]) || 0;
     const cap = parseInt(parts[1]) || 2;
     const mode = parts[2] === "team" ? "team" : "solo";
-    const firstUserId = queueUserIds[0];
+    const firstUserId = connectedQueueUserIds[0];
     const firstUser = store.users[firstUserId];
     if (!firstUser) return;
     const joinedAt = firstUser.seekingJoinedAt || Date.now();
     const waitTimeMs = Date.now() - joinedAt;
-    if (waitTimeMs >= 42e4) {
+    if (waitTimeMs >= 18e4) {
       console.log(`Matchmaking timeout for queue ${queueKey}. Auto-filling remaining seats with bots...`);
-      const realPlayers = queueUserIds.map((id) => store.users[id]).filter(Boolean);
+      const realPlayers = connectedQueueUserIds.map((id) => store.users[id]).filter(Boolean);
       store.matchmakingQueues[queueKey] = [];
       if (db) {
         realPlayers.forEach((p) => {
@@ -1263,31 +1288,43 @@ app.get("/api/users/online", async (req, res) => {
     return res.status(400).json({ error: "Missing userId parameter" });
   }
   cleanupMatchmakingQueues();
+  const activeIds = new Set(activeClients.map((c) => c.userId));
+  const now = Date.now();
   if (db) {
     try {
       const qs = await db.collection("matchmaking").get();
       qs.forEach((docSnap) => {
         const data = docSnap.data();
         if (data && data.status === "WAITING_FOR_MATCH") {
-          const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
-          if (!store.matchmakingQueues[qKey]) {
-            store.matchmakingQueues[qKey] = [];
-          }
-          if (!store.matchmakingQueues[qKey].includes(data.userId)) {
-            store.matchmakingQueues[qKey].push(data.userId);
-            if (!store.users[data.userId]) {
-              store.users[data.userId] = {
-                id: data.userId,
-                username: data.username,
-                avatar: data.avatar,
-                balance: 100,
-                // Fallback
-                winCount: 0,
-                lossCount: 0,
-                isOfflinePreference: false
-              };
+          const isStale = now - (data.timestamp || 0) > 18e4;
+          const isUserConnected = activeIds.has(data.userId);
+          if (isStale || !isUserConnected) {
+            db.collection("matchmaking").doc(data.userId).delete().catch(() => {
+            });
+            for (const qKey of Object.keys(store.matchmakingQueues)) {
+              store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== data.userId);
             }
-            store.users[data.userId].seekingJoinedAt = data.timestamp || Date.now();
+          } else {
+            const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
+            if (!store.matchmakingQueues[qKey]) {
+              store.matchmakingQueues[qKey] = [];
+            }
+            if (!store.matchmakingQueues[qKey].includes(data.userId)) {
+              store.matchmakingQueues[qKey].push(data.userId);
+              if (!store.users[data.userId]) {
+                store.users[data.userId] = {
+                  id: data.userId,
+                  username: data.username,
+                  avatar: data.avatar,
+                  balance: 100,
+                  // Fallback
+                  winCount: 0,
+                  lossCount: 0,
+                  isOfflinePreference: false
+                };
+              }
+              store.users[data.userId].seekingJoinedAt = data.timestamp || Date.now();
+            }
           }
         }
       });
@@ -1295,7 +1332,6 @@ app.get("/api/users/online", async (req, res) => {
       console.error("Failed to sync matchmaking from Firestore:", e);
     }
   }
-  const activeIds = new Set(activeClients.map((c) => c.userId));
   const onlineList = [];
   Object.values(store.users).forEach((u) => {
     if (u.id.startsWith("user_sim_")) return;
@@ -1736,15 +1772,38 @@ function checkAndStartTournaments() {
   });
 }
 setInterval(checkAndStartTournaments, 1e4);
+setInterval(() => {
+  const now = Date.now();
+  Object.keys(store.rooms).forEach((roomId) => {
+    const room = store.rooms[roomId];
+    if (room.status === "playing") {
+      const activeHumanPlayers = room.players.filter((p) => !isBotPlayer(p.userId) && p.status !== "left");
+      const lastAct = room.gameState?.lastActivity || room.createdAt || now;
+      if (activeHumanPlayers.length === 0 || now - lastAct > 15 * 60 * 1e3) {
+        room.status = "completed";
+        addLog(room, "Room closed due to inactivity or abandonment.");
+        saveStore();
+      }
+    }
+  });
+}, 3e4);
 app.get("/api/rooms/active", (req, res) => {
-  const activeGames = Object.values(store.rooms).filter((r) => r.status === "playing").map((r) => ({
+  const now = Date.now();
+  const activeGames = Object.values(store.rooms).filter((r) => {
+    if (r.status !== "playing") return false;
+    if (r.gameState?.winnerId) return false;
+    const activeHumanPlayers = r.players.filter((p) => !isBotPlayer(p.userId) && p.status !== "left");
+    if (activeHumanPlayers.length === 0) return false;
+    const lastAct = r.gameState?.lastActivity || r.createdAt || now;
+    if (now - lastAct > 15 * 60 * 1e3) return false;
+    return true;
+  }).map((r) => ({
     id: r.id,
-    // Changed from roomId to id to match GameRoom type
     players: r.players.map((p) => ({
       userId: p.userId,
-      // Added userId
       username: p.username,
-      avatar: p.avatar
+      avatar: p.avatar,
+      status: p.status
     })),
     betAmount: r.betAmount,
     gameMode: r.gameMode,

@@ -477,7 +477,8 @@ function loadStore() {
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
       store.rooms = parsed.rooms || {};
-      store.matchmakingQueues = parsed.matchmakingQueues || {
+      // Matchmaking queues are transient live state and must always start fresh
+      store.matchmakingQueues = {
         0: [], 1: [], 5: [], 10: [], 25: [], 50: []
       };
       store.houseRevenue = parsed.houseRevenue || 0;
@@ -523,7 +524,8 @@ async function loadStoreFromFirestore() {
         store.users = parsed.users || {};
         store.transactions = parsed.transactions || [];
         store.rooms = parsed.rooms || {};
-        store.matchmakingQueues = parsed.matchmakingQueues || {
+        // Matchmaking queues are transient live state and must always start fresh
+        store.matchmakingQueues = {
           0: [], 1: [], 5: [], 10: [], 25: [], 50: []
         };
         store.houseRevenue = parsed.houseRevenue || 0;
@@ -757,20 +759,48 @@ function removeSSEClient(res: any) {
 // Clean up stale users from matchmaking queues
 function cleanupMatchmakingQueues() {
   let changed = false;
+  const activeUserIds = new Set(activeClients.map(c => c.userId));
+  const now = Date.now();
+
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     const beforeLen = store.matchmakingQueues[qKey].length;
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter(userId => {
+      // Must exist in store
       if (!store.users[userId]) return false;
+
+      // Must not be in an active playing room
       const inGame = Object.values(store.rooms).some(r =>
         r.status === 'playing' && r.players.some(p => p.userId === userId && p.status !== 'left')
       );
       if (inGame) return false;
+
+      // Must be currently connected via SSE
+      if (!activeUserIds.has(userId)) {
+        if (db) {
+          db.collection('matchmaking').doc(userId).delete().catch(() => {});
+        }
+        return false;
+      }
+
+      // Must not be in queue longer than 3 minutes (180,000 ms)
+      const u = store.users[userId];
+      const seekingJoinedAt = (u as any)?.seekingJoinedAt;
+      if (seekingJoinedAt && (now - seekingJoinedAt > 180000)) {
+        delete (u as any).seekingJoinedAt;
+        if (db) {
+          db.collection('matchmaking').doc(userId).delete().catch(() => {});
+        }
+        return false;
+      }
+
       return true;
     });
+
     if (store.matchmakingQueues[qKey].length !== beforeLen) {
       changed = true;
     }
   }
+
   if (changed) {
     saveStore();
   }
@@ -1318,9 +1348,19 @@ setInterval(() => {
 setInterval(() => {
   cleanupMatchmakingQueues();
 
+  const activeConnectedUserIds = new Set(activeClients.map(c => c.userId));
+
   Object.keys(store.matchmakingQueues).forEach(queueKey => {
     const queueUserIds = store.matchmakingQueues[queueKey];
     if (!queueUserIds || queueUserIds.length === 0) return;
+
+    // Filter out players who are not currently connected
+    const connectedQueueUserIds = queueUserIds.filter(id => activeConnectedUserIds.has(id));
+    if (connectedQueueUserIds.length === 0) {
+      // Remove disconnected user entries from queue
+      store.matchmakingQueues[queueKey] = [];
+      return;
+    }
 
     // Get bet, cap, mode from queueKey (e.g., "1_2_solo" -> bet: 1, cap: 2, mode: "solo")
     const parts = queueKey.split('_');
@@ -1329,19 +1369,19 @@ setInterval(() => {
     const mode = (parts[2] === 'team' ? 'team' : 'solo') as 'solo' | 'team';
 
     // Find the first user in the queue
-    const firstUserId = queueUserIds[0];
+    const firstUserId = connectedQueueUserIds[0];
     const firstUser = store.users[firstUserId];
     if (!firstUser) return;
 
     const joinedAt = (firstUser as any).seekingJoinedAt || Date.now();
     const waitTimeMs = Date.now() - joinedAt;
 
-    // If wait time exceeds 7 minutes (420000 ms), auto-fill the remaining seats with bots!
-    if (waitTimeMs >= 420000) {
+    // If wait time exceeds 3 minutes (180000 ms), auto-fill the remaining seats with bots!
+    if (waitTimeMs >= 180000) {
       console.log(`Matchmaking timeout for queue ${queueKey}. Auto-filling remaining seats with bots...`);
 
-      // Retrieve all real players currently in this queue
-      const realPlayers = queueUserIds.map(id => store.users[id]).filter(Boolean);
+      // Retrieve all real connected players currently in this queue
+      const realPlayers = connectedQueueUserIds.map(id => store.users[id]).filter(Boolean);
 
       // Remove these players from the queue
       store.matchmakingQueues[queueKey] = [];
@@ -1678,6 +1718,9 @@ app.get('/api/users/online', async (req, res) => {
 
   cleanupMatchmakingQueues();
 
+  const activeIds = new Set(activeClients.map(c => c.userId));
+  const now = Date.now();
+
   // Sync matchmaking queue from Firestore if db is available to support multi-instance
   if (db) {
     try {
@@ -1685,25 +1728,38 @@ app.get('/api/users/online', async (req, res) => {
       qs.forEach(docSnap => {
         const data = docSnap.data();
         if (data && data.status === 'WAITING_FOR_MATCH') {
-          const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
-          if (!store.matchmakingQueues[qKey]) {
-            store.matchmakingQueues[qKey] = [];
-          }
-          if (!store.matchmakingQueues[qKey].includes(data.userId)) {
-            store.matchmakingQueues[qKey].push(data.userId);
-            // Reconstruct user in store if not present
-            if (!store.users[data.userId]) {
-              store.users[data.userId] = {
-                id: data.userId,
-                username: data.username,
-                avatar: data.avatar,
-                balance: 100, // Fallback
-                winCount: 0,
-                lossCount: 0,
-                isOfflinePreference: false
-              };
+          // Check if record is stale (> 3 minutes old) or user is not connected via SSE
+          const isStale = (now - (data.timestamp || 0)) > 180000;
+          const isUserConnected = activeIds.has(data.userId);
+
+          if (isStale || !isUserConnected) {
+            // Delete stale/disconnected record from Firestore
+            db.collection('matchmaking').doc(data.userId).delete().catch(() => {});
+            // Remove from memory queue if present
+            for (const qKey of Object.keys(store.matchmakingQueues)) {
+              store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter(id => id !== data.userId);
             }
-            (store.users[data.userId] as any).seekingJoinedAt = data.timestamp || Date.now();
+          } else {
+            const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
+            if (!store.matchmakingQueues[qKey]) {
+              store.matchmakingQueues[qKey] = [];
+            }
+            if (!store.matchmakingQueues[qKey].includes(data.userId)) {
+              store.matchmakingQueues[qKey].push(data.userId);
+              // Reconstruct user in store if not present
+              if (!store.users[data.userId]) {
+                store.users[data.userId] = {
+                  id: data.userId,
+                  username: data.username,
+                  avatar: data.avatar,
+                  balance: 100, // Fallback
+                  winCount: 0,
+                  lossCount: 0,
+                  isOfflinePreference: false
+                };
+              }
+              (store.users[data.userId] as any).seekingJoinedAt = data.timestamp || Date.now();
+            }
           }
         }
       });
@@ -1711,9 +1767,6 @@ app.get('/api/users/online', async (req, res) => {
       console.error('Failed to sync matchmaking from Firestore:', e);
     }
   }
-
-  // Real connected clients via SSE
-  const activeIds = new Set(activeClients.map(c => c.userId));
 
   const onlineList: any[] = [];
 
@@ -2283,6 +2336,25 @@ function checkAndStartTournaments() {
 
 setInterval(checkAndStartTournaments, 10000); // Check every 10 seconds
 
+// Periodic room maintenance: auto-close abandoned or inactive games
+setInterval(() => {
+  const now = Date.now();
+  Object.keys(store.rooms).forEach(roomId => {
+    const room = store.rooms[roomId];
+    if (room.status === 'playing') {
+      const activeHumanPlayers = room.players.filter(p => !isBotPlayer(p.userId) && p.status !== 'left');
+      const lastAct = room.gameState?.lastActivity || room.createdAt || now;
+      
+      // If no human players remain or inactive for > 15 minutes, mark room as completed
+      if (activeHumanPlayers.length === 0 || (now - lastAct > 15 * 60 * 1000)) {
+        room.status = 'completed';
+        addLog(room, 'Room closed due to inactivity or abandonment.');
+        saveStore();
+      }
+    }
+  });
+}, 30000);
+
 // ==========================================
 // 5. MATCHMAKING & LOBBY SYSTEM
 // ==========================================
@@ -2290,14 +2362,29 @@ setInterval(checkAndStartTournaments, 10000); // Check every 10 seconds
 // GET /api/rooms/active
 // Returns a list of all currently active games that can be spectated.
 app.get('/api/rooms/active', (req, res) => {
+  const now = Date.now();
   const activeGames = Object.values(store.rooms)
-    .filter(r => r.status === 'playing')
+    .filter(r => {
+      if (r.status !== 'playing') return false;
+      if (r.gameState?.winnerId) return false;
+      
+      // Must have at least one active non-bot human player who hasn't left
+      const activeHumanPlayers = r.players.filter(p => !isBotPlayer(p.userId) && p.status !== 'left');
+      if (activeHumanPlayers.length === 0) return false;
+
+      // Must have had activity within the last 15 minutes
+      const lastAct = r.gameState?.lastActivity || r.createdAt || now;
+      if (now - lastAct > 15 * 60 * 1000) return false;
+
+      return true;
+    })
     .map(r => ({
-      id: r.id, // Changed from roomId to id to match GameRoom type
+      id: r.id,
       players: r.players.map(p => ({
-        userId: p.userId, // Added userId
+        userId: p.userId,
         username: p.username,
         avatar: p.avatar,
+        status: p.status,
       })),
       betAmount: r.betAmount,
       gameMode: r.gameMode,

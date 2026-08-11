@@ -187,11 +187,15 @@ export default function App() {
         }
         
         setActiveRoom(prevRoom => {
-          // Preserve the rejection reason if the new update is for the same room
-          if (prevRoom && prevRoom.id === updatedRoom.id && prevRoom.rejectionReason) {
-            return { ...updatedRoom, rejectionReason: prevRoom.rejectionReason };
+          // Only update activeRoom if the user is already currently in this specific room
+          if (prevRoom && prevRoom.id === updatedRoom.id) {
+            if (prevRoom.rejectionReason) {
+              return { ...updatedRoom, rejectionReason: prevRoom.rejectionReason };
+            }
+            return updatedRoom;
           }
-          return updatedRoom;
+          // Do not automatically force-open a game room if user is not currently in it
+          return prevRoom;
         });
       } catch (err) {
         console.error('Failed to parse game update', err);
