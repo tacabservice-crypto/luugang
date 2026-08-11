@@ -111,17 +111,35 @@ let db: Firestore | null = null;
 let auth: Auth | null = null;
 
 function getFirebaseServiceAccount() {
-  const envValue = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_ADMIN_CREDENTIALS;
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  if (projectId && clientEmail && privateKey) {
+    return {
+      project_id: projectId,
+      client_email: clientEmail,
+      private_key: privateKey.replace(/\\n/g, '\n'),
+    };
+  }
+
+  const envValue =
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    process.env.FIREBASE_ADMIN_CREDENTIALS;
 
   if (envValue) {
     try {
       const parsed = JSON.parse(envValue);
+
       if (parsed && parsed.project_id && parsed.private_key) {
         return parsed;
       }
-      console.warn('FIREBASE_SERVICE_ACCOUNT was set but did not contain project_id/private_key.');
+
+      console.warn(
+        'Firebase credentials did not contain project_id/private_key.'
+      );
     } catch (error) {
-      console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT env JSON:', error);
+      console.error('Failed to parse Firebase credentials JSON:', error);
     }
   }
 
@@ -137,7 +155,7 @@ function getFirebaseServiceAccount() {
     const serviceAccountFile = fs.readFileSync(serviceAccountPath, 'utf8');
     return JSON.parse(serviceAccountFile);
   } catch (error) {
-    console.error('Failed to read Firebase service account JSON file:', error);
+    console.error('Failed to read Firebase service account file:', error);
     return null;
   }
 }
