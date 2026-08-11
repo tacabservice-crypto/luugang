@@ -163,13 +163,25 @@ import { getAuth, Auth } from 'firebase-admin/auth';
 function getFirebaseServiceAccount() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey: string = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n") || "";
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || "";
 
-  if (projectId && clientEmail && privateKey) {
+  if (projectId && clientEmail && rawPrivateKey) {
+    let formattedKey = rawPrivateKey;
+
+    // Handle escaped \n strings or surrounding quotes
+    if (
+      (formattedKey.startsWith("'") && formattedKey.endsWith("'")) ||
+      (formattedKey.startsWith('"') && formattedKey.endsWith('"'))
+    ) {
+      formattedKey = formattedKey.slice(1, -1);
+    }
+
+    formattedKey = formattedKey.replace(/\\n/g, "\n");
+
     return {
       project_id: projectId,
       client_email: clientEmail,
-      private_key: privateKey.replace(/\\n/g, '\n'),
+      private_key: formattedKey,
     };
   }
 

@@ -95,12 +95,17 @@ var auth = null;
 function getFirebaseServiceAccount() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n") || "";
-  if (projectId && clientEmail && privateKey) {
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || "";
+  if (projectId && clientEmail && rawPrivateKey) {
+    let formattedKey = rawPrivateKey;
+    if (formattedKey.startsWith("'") && formattedKey.endsWith("'") || formattedKey.startsWith('"') && formattedKey.endsWith('"')) {
+      formattedKey = formattedKey.slice(1, -1);
+    }
+    formattedKey = formattedKey.replace(/\\n/g, "\n");
     return {
       project_id: projectId,
       client_email: clientEmail,
-      private_key: privateKey.replace(/\\n/g, "\n")
+      private_key: formattedKey
     };
   }
   const envValue = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_ADMIN_CREDENTIALS;
