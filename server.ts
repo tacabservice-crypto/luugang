@@ -71,6 +71,7 @@ const configuredAllowedOrigins = [
 });
 
 const allowedOrigins = Array.from(new Set([
+  'https://ludosom.com',
   'https://dhili-dhili-ludo.onrender.com',
   'https://dhilidhili.onrender.com',
   'http://localhost:3000',
