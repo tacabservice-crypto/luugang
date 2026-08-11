@@ -1396,6 +1396,9 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
 
   // If a promo code is provided, validate it and find the agent.
   if (promoCode && typeof promoCode === 'string' && promoCode.trim() !== '') {
+    if (!db) {
+        return res.status(503).json({ error: 'Promo code validation is temporarily unavailable.' });
+    }
     const agentsRef = db.collection('agents');
     const agentSnapshot = await agentsRef.where('promoCode', '==', promoCode.trim()).limit(1).get();
 
