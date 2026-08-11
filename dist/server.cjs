@@ -272,6 +272,64 @@ var store = {
   agentTransactions: [],
   tournaments: {}
 };
+function seedDefaultTournaments() {
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1e3;
+  const oneDay = 24 * 60 * 60 * 1e3;
+  const openOrActive = Object.values(store.tournaments).filter(
+    (t) => t.status === "registration_open" || t.status === "in_progress"
+  );
+  if (openOrActive.length < 3) {
+    const t1 = {
+      id: `tourney_weekly_${now}_1`,
+      name: "Ludo$om Weekly Champion Cup \u{1F3C6}",
+      entryFee: 5,
+      prizePool: 100,
+      status: "registration_open",
+      players: [],
+      maxPlayers: 16,
+      startDate: now + oneDay * 2,
+      endDate: 0,
+      winnerId: null,
+      currentRound: 1,
+      matches: [],
+      createdAt: now
+    };
+    const t2 = {
+      id: `tourney_weekend_${now}_2`,
+      name: "Weekend High Stakes Knockout \u26A1",
+      entryFee: 10,
+      prizePool: 200,
+      status: "registration_open",
+      players: [],
+      maxPlayers: 8,
+      startDate: now + oneDay * 4,
+      endDate: 0,
+      winnerId: null,
+      currentRound: 1,
+      matches: [],
+      createdAt: now
+    };
+    const t3 = {
+      id: `tourney_daily_${now}_3`,
+      name: "Daily Quick Sprint Tournament \u{1F680}",
+      entryFee: 2,
+      prizePool: 30,
+      status: "registration_open",
+      players: [],
+      maxPlayers: 4,
+      startDate: now + oneHour * 6,
+      endDate: 0,
+      winnerId: null,
+      currentRound: 1,
+      matches: [],
+      createdAt: now
+    };
+    if (!store.tournaments[t1.id]) store.tournaments[t1.id] = t1;
+    if (!store.tournaments[t2.id]) store.tournaments[t2.id] = t2;
+    if (!store.tournaments[t3.id]) store.tournaments[t3.id] = t3;
+  }
+}
 function loadStore() {
   try {
     if (import_fs.default.existsSync(DB_FILE)) {
@@ -296,6 +354,7 @@ function loadStore() {
       };
       store.agentFloatInstructions = parsed.agentFloatInstructions || "";
       store.tournaments = parsed.tournaments || {};
+      seedDefaultTournaments();
       const persistedRoles = Array.isArray(parsed.adminSettings?.roles) ? parsed.adminSettings.roles : [];
       store.adminSettings = {
         username: parsed.adminSettings?.username || process.env.ADMIN_USERNAME || "admin",
@@ -1471,8 +1530,14 @@ app.post("/api/vip/subscribe", verifyFirebaseToken, async (req, res) => {
   res.json({ success: true, user, message: `Successfully subscribed to ${vipTier.name} VIP!` });
 });
 app.get("/api/tournaments", (req, res) => {
-  const availableTournaments = Object.values(store.tournaments).filter((t) => t.status === "registration_open");
-  res.json(availableTournaments);
+  seedDefaultTournaments();
+  const { status } = req.query;
+  const allTournaments = Object.values(store.tournaments);
+  if (status && typeof status === "string" && status !== "all") {
+    return res.json(allTournaments.filter((t) => t.status === status));
+  }
+  allTournaments.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json(allTournaments);
 });
 app.get("/api/tournaments/:id", (req, res) => {
   const { id } = req.params;
@@ -1516,6 +1581,34 @@ app.post("/api/tournaments/:id/register", verifyFirebaseToken, async (req, res) 
   broadcastUserUpdate(user.id);
   broadcastToAll("tournament_update", tournament);
   res.json({ success: true, tournament, message: `Successfully registered for ${tournament.name}!` });
+});
+app.post("/api/tournaments/:id/unregister", verifyFirebaseToken, async (req, res) => {
+  const { id } = req.params;
+  const firebaseUid = req.user.uid;
+  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user) {
+    return res.status(404).json({ error: "User not found." });
+  }
+  const tournament = store.tournaments[id];
+  if (!tournament) {
+    return res.status(404).json({ error: "Tournament not found." });
+  }
+  if (tournament.status !== "registration_open") {
+    return res.status(400).json({ error: "Cannot unregister after tournament has started or finished." });
+  }
+  const playerIndex = tournament.players.findIndex((p) => p.userId === user.id);
+  if (playerIndex === -1) {
+    return res.status(400).json({ error: "You are not registered for this tournament." });
+  }
+  tournament.players.splice(playerIndex, 1);
+  if (tournament.entryFee > 0) {
+    user.balance += tournament.entryFee;
+    addTransaction(user.id, "deposit", tournament.entryFee, id, `Refund for unregistering from tournament "${tournament.name}".`);
+  }
+  await saveStoreAndWait();
+  broadcastUserUpdate(user.id);
+  broadcastToAll("tournament_update", tournament);
+  res.json({ success: true, tournament, message: `Unregistered from ${tournament.name}. Entry fee refunded.` });
 });
 async function handleTournamentMatchWin(tournamentId, matchId, winnerId) {
   const tournament = store.tournaments[tournamentId];
@@ -1608,27 +1701,37 @@ function createTournamentBracket(tournament) {
 }
 function checkAndStartTournaments() {
   const now = Date.now();
+  seedDefaultTournaments();
   Object.values(store.tournaments).forEach(async (t) => {
-    if (t.status === "registration_open" && now >= t.startDate && t.players.length >= 2) {
-      t.status = "in_progress";
-      t.matches = createTournamentBracket(t);
-      t.currentRound = 1;
-      for (const match of t.matches) {
-        if (match.status === "pending" && match.player1 && match.player2) {
-          const room = startMatchedRoom(
-            [match.player1, match.player2],
-            0,
-            // No extra bet for tournament matches
-            2,
-            "solo"
-          );
-          match.roomId = room.id;
-          match.status = "in_progress";
-          room.tournamentDetails = { tournamentId: t.id, matchId: match.id };
+    if (t.status === "registration_open" && now >= t.startDate) {
+      if (t.players.length >= 2) {
+        t.status = "in_progress";
+        t.matches = createTournamentBracket(t);
+        t.currentRound = 1;
+        for (const match of t.matches) {
+          if (match.status === "pending" && match.player1 && match.player2) {
+            const room = startMatchedRoom(
+              [
+                { id: match.player1.userId, username: match.player1.username, avatar: match.player1.avatar, balance: 0 },
+                { id: match.player2.userId, username: match.player2.username, avatar: match.player2.avatar, balance: 0 }
+              ],
+              0,
+              // No extra bet for tournament matches
+              2,
+              "solo"
+            );
+            match.roomId = room.id;
+            match.status = "in_progress";
+            room.tournamentDetails = { tournamentId: t.id, matchId: match.id };
+          }
         }
+        await saveStoreAndWait();
+        broadcastToAll("tournament_started", t);
+      } else {
+        t.startDate = now + 12 * 60 * 60 * 1e3;
+        await saveStoreAndWait();
+        broadcastToAll("tournament_update", t);
       }
-      await saveStoreAndWait();
-      broadcastToAll("tournament_started", t);
     }
   });
 }
@@ -2731,6 +2834,104 @@ var isAdmin = async (req, res, next) => {
     res.status(500).json({ error: "An error occurred during admin validation." });
   }
 };
+app.get("/api/admin/tournaments", isAdmin, (req, res) => {
+  seedDefaultTournaments();
+  const tournamentsList = Object.values(store.tournaments);
+  tournamentsList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json(tournamentsList);
+});
+app.post("/api/admin/tournaments/create", isAdmin, async (req, res) => {
+  const { name, entryFee, prizePool, maxPlayers, startDate } = req.body;
+  if (!name || entryFee === void 0 || !prizePool || !maxPlayers || !startDate) {
+    return res.status(400).json({ error: "Missing required tournament fields." });
+  }
+  const id = `tourney_${Date.now()}`;
+  const newTournament = {
+    id,
+    name: String(name).trim(),
+    entryFee: parseFloat(entryFee),
+    prizePool: parseFloat(prizePool),
+    status: "registration_open",
+    players: [],
+    maxPlayers: parseInt(maxPlayers, 10),
+    startDate: new Date(startDate).getTime(),
+    endDate: 0,
+    winnerId: null,
+    currentRound: 1,
+    matches: [],
+    createdAt: Date.now()
+  };
+  store.tournaments[id] = newTournament;
+  await saveStoreAndWait();
+  broadcastToAll("tournament_update", newTournament);
+  res.json({ success: true, tournament: newTournament, message: "Tournament created successfully!" });
+});
+app.post("/api/admin/tournaments/:id/cancel", isAdmin, async (req, res) => {
+  const tournamentId = req.params.id;
+  const tournament = store.tournaments[tournamentId];
+  if (!tournament) {
+    return res.status(404).json({ error: "Tournament not found." });
+  }
+  if (tournament.status === "completed" || tournament.status === "cancelled") {
+    return res.status(400).json({ error: "Tournament is already finished or cancelled." });
+  }
+  tournament.players.forEach((p) => {
+    const user = store.users[p.userId];
+    if (user && tournament.entryFee > 0) {
+      user.balance += tournament.entryFee;
+      addTransaction(user.id, "deposit", tournament.entryFee, tournamentId, `Refund for cancelled tournament "${tournament.name}".`);
+      broadcastUserUpdate(user.id);
+    }
+  });
+  tournament.status = "cancelled";
+  await saveStoreAndWait();
+  broadcastToAll("tournament_update", tournament);
+  res.json({ success: true, message: "Tournament cancelled and entry fees refunded." });
+});
+app.delete("/api/admin/tournaments/:id", isAdmin, async (req, res) => {
+  const tournamentId = req.params.id;
+  if (!store.tournaments[tournamentId]) {
+    return res.status(404).json({ error: "Tournament not found." });
+  }
+  delete store.tournaments[tournamentId];
+  await saveStoreAndWait();
+  res.json({ success: true, message: "Tournament deleted successfully." });
+});
+app.post("/api/admin/tournaments/:id/start", isAdmin, async (req, res) => {
+  const tournamentId = req.params.id;
+  const tournament = store.tournaments[tournamentId];
+  if (!tournament) {
+    return res.status(404).json({ error: "Tournament not found." });
+  }
+  if (tournament.status !== "registration_open") {
+    return res.status(400).json({ error: "Tournament is not in registration phase." });
+  }
+  if (tournament.players.length < 2) {
+    return res.status(400).json({ error: "At least 2 players are required to start a tournament." });
+  }
+  tournament.status = "in_progress";
+  tournament.matches = createTournamentBracket(tournament);
+  tournament.currentRound = 1;
+  for (const match of tournament.matches) {
+    if (match.status === "pending" && match.player1 && match.player2) {
+      const room = startMatchedRoom(
+        [
+          { id: match.player1.userId, username: match.player1.username, avatar: match.player1.avatar, balance: 0 },
+          { id: match.player2.userId, username: match.player2.username, avatar: match.player2.avatar, balance: 0 }
+        ],
+        0,
+        2,
+        "solo"
+      );
+      match.roomId = room.id;
+      match.status = "in_progress";
+      room.tournamentDetails = { tournamentId: tournament.id, matchId: match.id };
+    }
+  }
+  await saveStoreAndWait();
+  broadcastToAll("tournament_started", tournament);
+  res.json({ success: true, tournament, message: `Tournament "${tournament.name}" started successfully!` });
+});
 app.get("/api/admin/settings", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   try {

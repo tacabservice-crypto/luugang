@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Tournament } from '../../types/game';
-import { Trophy, Plus, Trash2, Ban, Users, Calendar, DollarSign, X } from 'lucide-react';
+import { Trophy, Plus, Trash2, Ban, Users, Calendar, DollarSign, X, Play, Eye } from 'lucide-react';
 
 interface TournamentsTableProps {
   tournaments: Tournament[];
   onCreate: (data: { name: string; entryFee: number; prizePool: number; maxPlayers: number; startDate: string }) => Promise<void>;
   onCancel: (tournamentId: string) => Promise<void>;
   onDelete: (tournamentId: string) => Promise<void>;
+  onStart?: (tournamentId: string) => Promise<void>;
 }
 
 export const TournamentsTable: React.FC<TournamentsTableProps> = ({
@@ -14,8 +15,10 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
   onCreate,
   onCancel,
   onDelete,
+  onStart,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [viewingPlayersTournament, setViewingPlayersTournament] = useState<Tournament | null>(null);
   const [name, setName] = useState('');
   const [entryFee, setEntryFee] = useState('5');
   const [prizePool, setPrizePool] = useState('100');
@@ -99,9 +102,14 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                       <span className="text-gray-400 text-xs block">(${t.entryFee} entry)</span>
                     </td>
                     <td className="px-6 py-4 font-mono">
-                      <span className="bg-purple-950/60 border border-purple-500/30 text-purple-300 px-2.5 py-1 rounded-full text-xs font-bold">
-                        {t.players?.length || 0} / {t.maxPlayers}
-                      </span>
+                      <button
+                        onClick={() => setViewingPlayersTournament(t)}
+                        className="bg-purple-950/60 hover:bg-purple-900 border border-purple-500/30 text-purple-300 px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                      >
+                        <Users className="w-3.5 h-3.5 text-purple-400" />
+                        <span>{t.players?.length || 0} / {t.maxPlayers}</span>
+                        <Eye className="w-3 h-3 text-purple-400 ml-1" />
+                      </button>
                     </td>
                     <td className="px-6 py-4 text-xs font-mono text-gray-400">
                       {new Date(t.startDate).toLocaleString()}
@@ -112,7 +120,7 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                           t.status === 'registration_open'
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : t.status === 'in_progress'
-                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse'
                             : t.status === 'completed'
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                             : 'bg-red-500/20 text-red-400 border border-red-500/30'
@@ -123,6 +131,23 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                     </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-2">
+                        {t.status === 'registration_open' && onStart && (
+                          <button
+                            onClick={() => {
+                              if ((t.players?.length || 0) < 2) {
+                                alert('At least 2 players must be registered to start the tournament.');
+                                return;
+                              }
+                              if (confirm(`Force start tournament "${t.name}" immediately? Brackets will be created.`)) {
+                                onStart(t.id);
+                              }
+                            }}
+                            title="Force Start Tournament Now"
+                            className="p-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Play className="w-4 h-4 fill-current text-emerald-400" />
+                          </button>
+                        )}
                         {t.status !== 'completed' && t.status !== 'cancelled' && (
                           <button
                             onClick={() => {
@@ -256,6 +281,60 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW ENROLLED PLAYERS MODAL */}
+      {viewingPlayersTournament && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gray-800 border border-purple-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 text-white relative">
+            <div className="flex items-center justify-between border-b border-gray-700 pb-3">
+              <div>
+                <h3 className="text-lg font-black text-purple-400 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-400" /> Registered Players
+                </h3>
+                <p className="text-xs text-gray-400">{viewingPlayersTournament.name}</p>
+              </div>
+              <button
+                onClick={() => setViewingPlayersTournament(null)}
+                className="text-gray-400 hover:text-white cursor-pointer p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+              {viewingPlayersTournament.players?.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-6">No players have registered for this tournament yet.</p>
+              ) : (
+                viewingPlayersTournament.players.map((p, idx) => (
+                  <div
+                    key={p.userId || idx}
+                    className="flex items-center justify-between bg-gray-900/80 border border-gray-700 p-2.5 rounded-xl text-xs"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <img
+                        src={p.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + p.username}
+                        alt=""
+                        className="w-8 h-8 rounded-lg bg-gray-800 object-cover"
+                      />
+                      <span className="font-bold text-white">{p.username}</span>
+                    </div>
+                    <span className="text-[10px] text-purple-400 font-mono">#{idx + 1} Seed</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => setViewingPlayersTournament(null)}
+                className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2.5 rounded-xl text-xs cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

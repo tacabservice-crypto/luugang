@@ -412,9 +412,9 @@ function seedDefaultTournaments() {
     t => t.status === 'registration_open' || t.status === 'in_progress'
   );
 
-  if (openOrActive.length < 2) {
+  if (openOrActive.length < 3) {
     const t1: Tournament = {
-      id: `tourney_weekly_${Date.now()}_1`,
+      id: `tourney_weekly_${now}_1`,
       name: 'Ludo$om Weekly Champion Cup 🏆',
       entryFee: 5.0,
       prizePool: 100.0,
@@ -430,7 +430,7 @@ function seedDefaultTournaments() {
     };
 
     const t2: Tournament = {
-      id: `tourney_weekend_${Date.now()}_2`,
+      id: `tourney_weekend_${now}_2`,
       name: 'Weekend High Stakes Knockout ⚡',
       entryFee: 10.0,
       prizePool: 200.0,
@@ -446,7 +446,7 @@ function seedDefaultTournaments() {
     };
 
     const t3: Tournament = {
-      id: `tourney_daily_${Date.now()}_3`,
+      id: `tourney_daily_${now}_3`,
       name: 'Daily Quick Sprint Tournament 🚀',
       entryFee: 2.0,
       prizePool: 30.0,
@@ -3821,8 +3821,8 @@ app.post('/api/admin/tournaments/create', isAdmin, async (req, res) => {
 });
 
 app.post('/api/admin/tournaments/:id/cancel', isAdmin, async (req, res) => {
-  const { id } = req.params;
-  const tournament = store.tournaments[id];
+  const tournamentId = req.params.id as string;
+  const tournament = store.tournaments[tournamentId];
 
   if (!tournament) {
     return res.status(404).json({ error: 'Tournament not found.' });
@@ -3833,11 +3833,11 @@ app.post('/api/admin/tournaments/:id/cancel', isAdmin, async (req, res) => {
   }
 
   // Refund all registered players
-  tournament.players.forEach(p => {
+  tournament.players.forEach((p: { userId: string; username: string; avatar: string }) => {
     const user = store.users[p.userId];
     if (user && tournament.entryFee > 0) {
       user.balance += tournament.entryFee;
-      addTransaction(user.id, 'deposit', tournament.entryFee, id, `Refund for cancelled tournament "${tournament.name}".`);
+      addTransaction(user.id, 'deposit', tournament.entryFee, tournamentId, `Refund for cancelled tournament "${tournament.name}".`);
       broadcastUserUpdate(user.id);
     }
   });
@@ -3850,20 +3850,20 @@ app.post('/api/admin/tournaments/:id/cancel', isAdmin, async (req, res) => {
 });
 
 app.delete('/api/admin/tournaments/:id', isAdmin, async (req, res) => {
-  const { id } = req.params;
-  if (!store.tournaments[id]) {
+  const tournamentId = req.params.id as string;
+  if (!store.tournaments[tournamentId]) {
     return res.status(404).json({ error: 'Tournament not found.' });
   }
 
-  delete store.tournaments[id];
+  delete store.tournaments[tournamentId];
   await saveStoreAndWait();
 
   res.json({ success: true, message: 'Tournament deleted successfully.' });
 });
 
 app.post('/api/admin/tournaments/:id/start', isAdmin, async (req, res) => {
-  const { id } = req.params;
-  const tournament = store.tournaments[id];
+  const tournamentId = req.params.id as string;
+  const tournament = store.tournaments[tournamentId];
 
   if (!tournament) {
     return res.status(404).json({ error: 'Tournament not found.' });

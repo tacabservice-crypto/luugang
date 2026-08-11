@@ -637,6 +637,16 @@ const AdminDashboard: React.FC = () => {
                   }
                   await fetchData('tournaments');
                 }}
+                onStart={async (id) => {
+                  const response = await fetch(`/api/admin/tournaments/${id}/start?userId=${adminUser.id}`, {
+                    method: 'POST',
+                  });
+                  if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to start tournament');
+                  }
+                  await fetchData('tournaments');
+                }}
             />;
             case 'settings': return <Settings 
                 adminSettings={{...adminSettings, usersByRole}}

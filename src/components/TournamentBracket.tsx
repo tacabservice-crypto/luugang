@@ -14,6 +14,7 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMobileRound, setSelectedMobileRound] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchTournament = async () => {
@@ -168,11 +169,11 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
 
       {/* BRACKET KNOCKOUT ROUNDS DISPLAY */}
       <div className="bg-white/5 border border-white/10 p-4 sm:p-6 rounded-3xl backdrop-blur-md shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
           <h2 className="text-lg font-black text-purple-300 flex items-center gap-2">
             <Swords className="w-5 h-5 text-amber-400" /> Knockout Bracket & Live Matches
           </h2>
-          <span className="text-xs text-gray-400">Scroll horizontally to view all rounds</span>
+          <span className="text-xs text-gray-400">View live round pairings & match results</span>
         </div>
 
         {Object.keys(rounds).length === 0 ? (
@@ -184,24 +185,62 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
             </p>
           </div>
         ) : (
-          <div className="flex gap-6 overflow-x-auto pb-4 pt-2 scrollbar-thin scrollbar-thumb-purple-600/50">
-            {Object.keys(rounds).map((roundNumberStr) => {
-              const roundNum = parseInt(roundNumberStr, 10);
-              const roundMatches = rounds[roundNum];
-              const roundTitle =
-                roundNum === Object.keys(rounds).length
-                  ? '🏆 Finals'
-                  : roundNum === Object.keys(rounds).length - 1 && Object.keys(rounds).length > 2
-                  ? '⚡ Semi-Finals'
-                  : `Round ${roundNum}`;
+          <div>
+            {/* Mobile Round Selection Tabs */}
+            <div className="flex md:hidden items-center gap-2 overflow-x-auto pb-3 mb-2 scrollbar-none">
+              {Object.keys(rounds).map((roundNumberStr) => {
+                const roundNum = parseInt(roundNumberStr, 10);
+                const isSelected = (selectedMobileRound || tournament.currentRound || 1) === roundNum;
+                const roundTitle =
+                  roundNum === Object.keys(rounds).length
+                    ? '🏆 Finals'
+                    : roundNum === Object.keys(rounds).length - 1 && Object.keys(rounds).length > 2
+                    ? '⚡ Semi-Finals'
+                    : `Round ${roundNum}`;
 
-              return (
-                <div key={roundNumberStr} className="flex-shrink-0 w-80 space-y-4">
-                  <div className="bg-purple-950/60 border border-purple-500/30 px-4 py-2.5 rounded-2xl text-center">
-                    <span className="text-sm font-black text-purple-300 uppercase tracking-wider">
-                      {roundTitle}
-                    </span>
-                  </div>
+                return (
+                  <button
+                    key={roundNumberStr}
+                    onClick={() => setSelectedMobileRound(roundNum)}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 cursor-pointer ${
+                      isSelected
+                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg'
+                        : 'bg-white/5 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {roundTitle}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Desktop Side-by-Side & Mobile Selected Round Grid */}
+            <div className="flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 pt-2 scrollbar-thin scrollbar-thumb-purple-600/50">
+              {Object.keys(rounds).map((roundNumberStr) => {
+                const roundNum = parseInt(roundNumberStr, 10);
+                const roundMatches = rounds[roundNum];
+                const activeMobileRound = selectedMobileRound || tournament.currentRound || 1;
+                const isVisibleOnMobile = activeMobileRound === roundNum;
+
+                const roundTitle =
+                  roundNum === Object.keys(rounds).length
+                    ? '🏆 Finals'
+                    : roundNum === Object.keys(rounds).length - 1 && Object.keys(rounds).length > 2
+                    ? '⚡ Semi-Finals'
+                    : `Round ${roundNum}`;
+
+                return (
+                  <div
+                    key={roundNumberStr}
+                    className={`flex-shrink-0 w-full md:w-80 space-y-4 ${
+                      isVisibleOnMobile ? 'block' : 'hidden md:block'
+                    }`}
+                  >
+                    <div className="bg-purple-950/60 border border-purple-500/30 px-4 py-2.5 rounded-2xl text-center">
+                      <span className="text-sm font-black text-purple-300 uppercase tracking-wider">
+                        {roundTitle}
+                      </span>
+                    </div>
 
                   <div className="space-y-4">
                     {roundMatches.map((match) => {
@@ -319,6 +358,7 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
               );
             })}
           </div>
+        </div>
         )}
       </div>
 

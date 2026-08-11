@@ -4,7 +4,7 @@
  */
 
 export interface UserProfile {
-  earnings: number;
+  earnings?: number;
   id: string;
   username: string;
   email?: string;
