@@ -160,28 +160,42 @@ let db: Firestore | null = null;
 let auth: Auth | null = null;
 import { getAuth, Auth } from 'firebase-admin/auth';
 
+function normalizePrivateKey(key: string): string {
+  if (!key) return '';
+  let str = key.trim();
+
+  // Strip outer quotes if enclosed
+  if (
+    (str.startsWith("'") && str.endsWith("'")) ||
+    (str.startsWith('"') && str.endsWith('"'))
+  ) {
+    str = str.slice(1, -1).trim();
+  }
+
+  // Replace literal \n with real newline
+  str = str.replace(/\\n/g, '\n');
+
+  // Ensure header and footer exist with proper newlines
+  if (!str.includes('-----BEGIN PRIVATE KEY-----')) {
+    str = `-----BEGIN PRIVATE KEY-----\n${str}`;
+  }
+  if (!str.includes('-----END PRIVATE KEY-----')) {
+    str = `${str}\n-----END PRIVATE KEY-----`;
+  }
+
+  return str;
+}
+
 function getFirebaseServiceAccount() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || "";
 
   if (projectId && clientEmail && rawPrivateKey) {
-    let formattedKey = rawPrivateKey;
-
-    // Handle escaped \n strings or surrounding quotes
-    if (
-      (formattedKey.startsWith("'") && formattedKey.endsWith("'")) ||
-      (formattedKey.startsWith('"') && formattedKey.endsWith('"'))
-    ) {
-      formattedKey = formattedKey.slice(1, -1);
-    }
-
-    formattedKey = formattedKey.replace(/\\n/g, "\n");
-
     return {
       project_id: projectId,
       client_email: clientEmail,
-      private_key: formattedKey,
+      private_key: normalizePrivateKey(rawPrivateKey),
     };
   }
 
@@ -226,7 +240,7 @@ function getFirebaseServiceAccount() {
 
       if (parsed && typeof parsed === 'object') {
         if (parsed.private_key && typeof parsed.private_key === 'string') {
-          parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+          parsed.private_key = normalizePrivateKey(parsed.private_key);
         }
         if (parsed.project_id && parsed.private_key) {
           return parsed;
@@ -269,7 +283,7 @@ function getFirebaseServiceAccount() {
 const serviceAccount = getFirebaseServiceAccount();
 if (serviceAccount) {
   try {
-    serviceAccount.private_key = (serviceAccount.private_key || '').replace(/\\n/g, '\n');
+    serviceAccount.private_key = normalizePrivateKey(serviceAccount.private_key || '');
 
     try {
       getApp();

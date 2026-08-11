@@ -92,20 +92,32 @@ app.use(express.static(path.join(process.cwd(), "public")));
 app.use(express.static(getDistDirectory()));
 var db = null;
 var auth = null;
+function normalizePrivateKey(key) {
+  if (!key) return "";
+  let str = key.trim();
+  if (str.startsWith("'") && str.endsWith("'") || str.startsWith('"') && str.endsWith('"')) {
+    str = str.slice(1, -1).trim();
+  }
+  str = str.replace(/\\n/g, "\n");
+  if (!str.includes("-----BEGIN PRIVATE KEY-----")) {
+    str = `-----BEGIN PRIVATE KEY-----
+${str}`;
+  }
+  if (!str.includes("-----END PRIVATE KEY-----")) {
+    str = `${str}
+-----END PRIVATE KEY-----`;
+  }
+  return str;
+}
 function getFirebaseServiceAccount() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || "";
   if (projectId && clientEmail && rawPrivateKey) {
-    let formattedKey = rawPrivateKey;
-    if (formattedKey.startsWith("'") && formattedKey.endsWith("'") || formattedKey.startsWith('"') && formattedKey.endsWith('"')) {
-      formattedKey = formattedKey.slice(1, -1);
-    }
-    formattedKey = formattedKey.replace(/\\n/g, "\n");
     return {
       project_id: projectId,
       client_email: clientEmail,
-      private_key: formattedKey
+      private_key: normalizePrivateKey(rawPrivateKey)
     };
   }
   const envValue = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_ADMIN_CREDENTIALS;
@@ -134,7 +146,7 @@ function getFirebaseServiceAccount() {
       }
       if (parsed && typeof parsed === "object") {
         if (parsed.private_key && typeof parsed.private_key === "string") {
-          parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+          parsed.private_key = normalizePrivateKey(parsed.private_key);
         }
         if (parsed.project_id && parsed.private_key) {
           return parsed;
@@ -169,7 +181,7 @@ function getFirebaseServiceAccount() {
 var serviceAccount = getFirebaseServiceAccount();
 if (serviceAccount) {
   try {
-    serviceAccount.private_key = (serviceAccount.private_key || "").replace(/\\n/g, "\n");
+    serviceAccount.private_key = normalizePrivateKey(serviceAccount.private_key || "");
     try {
       getApp();
     } catch (error) {
