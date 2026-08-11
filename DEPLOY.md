@@ -36,6 +36,7 @@ Hadda waxaan u gudbaynaa website-ka Render si aan u abuurno adeegga (service) ma
     *   **Region:** Dooro meel kuu dhow (tusaale, **Frankfurt (EU Central)**).
     *   **Branch:** Hubi inuu yahay `main` (ama `master`, hadba kii aad isticmaasho).
     *   **Root Directory:** **ISKA DAA** (ha buuxin).
+    *   **Output Directory:** **Qor** `dist`. Kani waa meesha ay ku jiraan faylasha app-kaaga oo la dhisay.
     *   **Runtime:** Render waa inuu si toos ah u doortaa **`Node`**. Haddii kale, adigu dooro.
     *   **Build Command:** Qor amarkan:
         ```bash
