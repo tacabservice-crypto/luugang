@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node -e \"import('fs').then(f => f.writeFileSync('dist/server.js', 'import path from \\\"path\\\";\\nimport { fileURLToPath } from \\\"url\\\";\\nimport { createRequire } from \\\"module\\\";\\n\\nconst require = createRequire(import.meta.url);\\nrequire(\\\"./server.cjs\\\");\\n'))\"",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=server.js && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.js",
     "start": "node server.js",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
