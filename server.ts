@@ -164,26 +164,46 @@ function normalizePrivateKey(key: string): string {
   if (!key) return '';
   let str = key.trim();
 
-  // Strip outer quotes if enclosed
-  if (
-    (str.startsWith("'") && str.endsWith("'")) ||
-    (str.startsWith('"') && str.endsWith('"'))
-  ) {
-    str = str.slice(1, -1).trim();
+  // 1. If base64 encoded (doesn't start with -----BEGIN), try decoding
+  if (!str.includes('PRIVATE KEY') && !str.includes('\\n') && !str.includes('\n')) {
+    try {
+      const decoded = Buffer.from(str, 'base64').toString('utf8');
+      if (decoded.includes('PRIVATE KEY')) {
+        str = decoded.trim();
+      }
+    } catch (e) {}
   }
 
-  // Replace literal \n with real newline
-  str = str.replace(/\\n/g, '\n');
+  // 2. Strip surrounding quotes (double, single, or backslash-escaped)
+  str = str.replace(/^["'\\]+|["'\\]+$/g, '').trim();
 
-  // Ensure header and footer exist with proper newlines
-  if (!str.includes('-----BEGIN PRIVATE KEY-----')) {
-    str = `-----BEGIN PRIVATE KEY-----\n${str}`;
+  // 3. Unescape double backslashes and literal \n / \r
+  str = str.replace(/\\\\n/g, '\n')
+           .replace(/\\n/g, '\n')
+           .replace(/\\r/g, '');
+
+  // 4. Extract header, body, footer if present
+  const headerMatch = str.match(/-----BEGIN [A-Z ]+-----/);
+  const footerMatch = str.match(/-----END [A-Z ]+-----/);
+
+  const header = headerMatch ? headerMatch[0] : '-----BEGIN PRIVATE KEY-----';
+  const footer = footerMatch ? footerMatch[0] : '-----END PRIVATE KEY-----';
+
+  let body = str;
+  if (headerMatch) {
+    body = body.substring(body.indexOf(header) + header.length);
   }
-  if (!str.includes('-----END PRIVATE KEY-----')) {
-    str = `${str}\n-----END PRIVATE KEY-----`;
+  if (footerMatch) {
+    body = body.substring(0, body.indexOf(footer));
   }
 
-  return str;
+  // Strip all whitespace/newlines/backslashes from body, then reformat into standard PEM 64-char lines
+  const cleanBody = body.replace(/[\s\r\n\\]+/g, '');
+
+  // Re-wrap body into standard 64-char lines
+  const wrappedBody = cleanBody.match(/.{1,64}/g)?.join('\n') || cleanBody;
+
+  return `${header}\n${wrappedBody}\n${footer}\n`;
 }
 
 function getFirebaseServiceAccount() {

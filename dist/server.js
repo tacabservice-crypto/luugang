@@ -95,19 +95,34 @@ var auth = null;
 function normalizePrivateKey(key) {
   if (!key) return "";
   let str = key.trim();
-  if (str.startsWith("'") && str.endsWith("'") || str.startsWith('"') && str.endsWith('"')) {
-    str = str.slice(1, -1).trim();
+  if (!str.includes("PRIVATE KEY") && !str.includes("\\n") && !str.includes("\n")) {
+    try {
+      const decoded = Buffer.from(str, "base64").toString("utf8");
+      if (decoded.includes("PRIVATE KEY")) {
+        str = decoded.trim();
+      }
+    } catch (e) {
+    }
   }
-  str = str.replace(/\\n/g, "\n");
-  if (!str.includes("-----BEGIN PRIVATE KEY-----")) {
-    str = `-----BEGIN PRIVATE KEY-----
-${str}`;
+  str = str.replace(/^["'\\]+|["'\\]+$/g, "").trim();
+  str = str.replace(/\\\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "");
+  const headerMatch = str.match(/-----BEGIN [A-Z ]+-----/);
+  const footerMatch = str.match(/-----END [A-Z ]+-----/);
+  const header = headerMatch ? headerMatch[0] : "-----BEGIN PRIVATE KEY-----";
+  const footer = footerMatch ? footerMatch[0] : "-----END PRIVATE KEY-----";
+  let body = str;
+  if (headerMatch) {
+    body = body.substring(body.indexOf(header) + header.length);
   }
-  if (!str.includes("-----END PRIVATE KEY-----")) {
-    str = `${str}
------END PRIVATE KEY-----`;
+  if (footerMatch) {
+    body = body.substring(0, body.indexOf(footer));
   }
-  return str;
+  const cleanBody = body.replace(/[\s\r\n\\]+/g, "");
+  const wrappedBody = cleanBody.match(/.{1,64}/g)?.join("\n") || cleanBody;
+  return `${header}
+${wrappedBody}
+${footer}
+`;
 }
 function getFirebaseServiceAccount() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
