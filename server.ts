@@ -4266,18 +4266,6 @@ app.delete('/api/admin/users/:userId/delete', isAdmin, (req, res) => {
 });
 
 
-// Delete a user
-app.delete('/api/admin/users/:userId/delete', isAdmin, (req, res) => {
-    const { userId } = req.params;
-    if (store.users[userId]) {
-        delete store.users[userId];
-        saveStoreAndWait();
-        res.json({ success: true, message: `User ${userId} has been deleted.` });
-    } else {
-        res.status(404).json({ error: 'User not found' });
-    }
-});
-
 
 // Cancel a game
 app.post('/api/admin/rooms/:roomId/cancel', isAdmin, (req, res) => {

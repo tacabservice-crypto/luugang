@@ -367,31 +367,31 @@
   },
   "transactions": [
     {
-      "id": "tx_1786444144186_ixeq4",
+      "id": "tx_1786453001057_qseue",
       "userId": "house",
       "type": "app_commission",
       "amount": 0.06,
-      "timestamp": 1786444144186,
+      "timestamp": 1786453001057,
       "matchId": "MATCH_0F4HR",
       "description": "Rake from forfeit match MATCH_0F4HR (10%)."
     },
     {
-      "id": "tx_1786444144163_snvc3",
+      "id": "tx_1786453001042_5s722",
       "userId": "user_1785871427921_us98b",
       "type": "win_payout",
       "amount": 0.54,
-      "timestamp": 1786444144163,
+      "timestamp": 1786453001042,
       "matchId": "MATCH_0F4HR",
       "description": "Win by opponent inactivity forfeit (Rake: $0.06)."
     },
     {
-      "id": "tx_1786443888693_el0vl",
+      "id": "tx_1786452754875_cvtqz",
       "userId": "user_1785704210390_bck7d",
       "type": "bet_escrow_locked",
       "amount": 0.3,
-      "timestamp": 1786443888693,
-      "matchId": "MATCH_R8PA8",
-      "description": "Escrow stake for Ludo Match MATCH_R8PA8."
+      "timestamp": 1786452754875,
+      "matchId": "MATCH_7UHE2",
+      "description": "Escrow stake for Ludo Match MATCH_7UHE2."
     },
     {
       "id": "tx_1785871808899_3505h",
@@ -53995,33 +53995,33 @@
             "text": "⏱️ Waqtiga 30-ka ilbiriqsi wuu dhamaaday Boocame. Ganaaxa daahitaanka ayaa bilaabanaya."
           },
           {
-            "id": "log_1786443895950_ii95k",
-            "timestamp": 1786443895950,
+            "id": "log_1786452758972_k7jtp",
+            "timestamp": 1786452758972,
             "text": "⏱️ Digniin: Boocame waxaa u harsan 4 daqiiqo. (Warning: Boocame has 4 minutes left.)"
           },
           {
-            "id": "log_1786443964067_kiua9",
-            "timestamp": 1786443964067,
+            "id": "log_1786452820941_yxk6m",
+            "timestamp": 1786452820941,
             "text": "⏱️ Digniin: Boocame waxaa u harsan 3 daqiiqo. (Warning: Boocame has 3 minutes left.)"
           },
           {
-            "id": "log_1786444024098_zpz51",
-            "timestamp": 1786444024098,
+            "id": "log_1786452880977_5w0p8",
+            "timestamp": 1786452880977,
             "text": "⏱️ Digniin: Boocame waxaa u harsan 2 daqiiqo. (Warning: Boocame has 2 minutes left.)"
           },
           {
-            "id": "log_1786444084121_1k1ey",
-            "timestamp": 1786444084121,
+            "id": "log_1786452941009_s7wve",
+            "timestamp": 1786452941009,
             "text": "⏱️ Digniin: Boocame waxaa u harsan 1 daqiiqo. (Warning: Boocame has 1 minutes left.)"
           },
           {
-            "id": "log_1786444144163_49g92",
-            "timestamp": 1786444144163,
+            "id": "log_1786453001042_eo2fe",
+            "timestamp": 1786453001042,
             "text": "⏱️ Boocame has been forfeited due to inactivity."
           },
           {
-            "id": "log_1786444144163_755a2",
-            "timestamp": 1786444144163,
+            "id": "log_1786453001042_wu21a",
+            "timestamp": 1786453001042,
             "text": "🏆 Game Over! Me wins by forfeit and takes the pot of $0.60!"
           }
         ],
@@ -54032,8 +54032,8 @@
       },
       "createdAt": 1785871809005
     },
-    "MATCH_R8PA8": {
-      "id": "MATCH_R8PA8",
+    "MATCH_7UHE2": {
+      "id": "MATCH_7UHE2",
       "status": "playing",
       "betAmount": 0.3,
       "players": [
@@ -54050,15 +54050,15 @@
           "balance": 100.45
         },
         {
-          "userId": "bot_match_1786443888693_1",
-          "username": "NomadLudo AI #56",
+          "userId": "bot_match_1786452754875_1",
+          "username": "DesertFox AI #87",
           "avatar": "🦊",
           "color": "blue",
           "isHost": false,
           "isReady": true,
           "status": "online",
-          "winCount": 18,
-          "lossCount": 15,
+          "winCount": 26,
+          "lossCount": 18,
           "balance": 100
         }
       ],
@@ -54096,25 +54096,25 @@
           },
           {
             "id": "token_blue_0",
-            "ownerId": "bot_match_1786443888693_1",
+            "ownerId": "bot_match_1786452754875_1",
             "color": "blue",
             "position": -1
           },
           {
             "id": "token_blue_1",
-            "ownerId": "bot_match_1786443888693_1",
+            "ownerId": "bot_match_1786452754875_1",
             "color": "blue",
             "position": -1
           },
           {
             "id": "token_blue_2",
-            "ownerId": "bot_match_1786443888693_1",
+            "ownerId": "bot_match_1786452754875_1",
             "color": "blue",
             "position": -1
           },
           {
             "id": "token_blue_3",
-            "ownerId": "bot_match_1786443888693_1",
+            "ownerId": "bot_match_1786452754875_1",
             "color": "blue",
             "position": -1
           }
@@ -54124,24 +54124,24 @@
         "logs": [
           {
             "id": "1",
-            "timestamp": 1786443888706,
+            "timestamp": 1786452754901,
             "text": "Match found! Mode: Solo 2P"
           },
           {
             "id": "2",
-            "timestamp": 1786443888706,
+            "timestamp": 1786452754901,
             "text": "Stake of $0.3 locked in secure escrow pool ($0.60)"
           },
           {
-            "id": "log_1786443929051_7z4gp",
-            "timestamp": 1786443929052,
+            "id": "log_1786452785927_n5rwt",
+            "timestamp": 1786452785927,
             "text": "⏱️ Waqtiga 30-ka ilbiriqsi wuu dhamaaday khaalid. Ganaaxa daahitaanka ayaa bilaabanaya."
           }
         ],
         "chat": [],
-        "lastActivity": 1786443888706
+        "lastActivity": 1786452754901
       },
-      "createdAt": 1786443888706
+      "createdAt": 1786452754901
     }
   },
   "matchmakingQueues": {
