@@ -1,35 +1,14 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
+import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);
 
 // server.ts
-var import_express = __toESM(require("express"), 1);
-var import_cors = __toESM(require("cors"), 1);
-var import_path = __toESM(require("path"), 1);
-var import_fs = __toESM(require("fs"), 1);
-var import_vite = require("vite");
-var import_app = require("firebase-admin/app");
-var import_firestore = require("firebase-admin/firestore");
-var import_auth = require("firebase-admin/auth");
+import express from "express";
+import cors from "cors";
+import path from "path";
+import fs from "fs";
+import { createServer as createViteServer } from "vite";
+import { initializeApp, cert, getApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 var VIP_TIERS = {
   gold: {
     name: "Gold VIP",
@@ -49,7 +28,7 @@ var VIP_TIERS = {
   }
 };
 var RAKE_PERCENTAGE = 0.1;
-var app = (0, import_express.default)();
+var app = express();
 var configuredAllowedOrigins = [
   process.env.VITE_APP_URL,
   process.env.PUBLIC_URL,
@@ -73,7 +52,7 @@ var allowedOrigins = Array.from(/* @__PURE__ */ new Set([
   "http://127.0.0.1:5173",
   ...configuredAllowedOrigins
 ]));
-app.use((0, import_cors.default)({
+app.use(cors({
   origin: function(origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.includes("ludosom.com")) {
       callback(null, true);
@@ -87,9 +66,9 @@ app.use((0, import_cors.default)({
 }));
 var rawPort = process.env.PORT || 3002;
 var PORT = typeof rawPort === "string" && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
-var DB_FILE = import_path.default.join(process.cwd(), "db_store.json");
-app.use(import_express.default.json());
-app.use(import_express.default.static(import_path.default.join(process.cwd(), "public")));
+var DB_FILE = path.join(process.cwd(), "db_store.json");
+app.use(express.json());
+app.use(express.static(path.join(process.cwd(), "public")));
 var db = null;
 var auth = null;
 function getFirebaseServiceAccount() {
@@ -117,12 +96,12 @@ function getFirebaseServiceAccount() {
       console.error("Failed to parse Firebase credentials JSON:", error);
     }
   }
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH : import_path.default.join(process.cwd(), "firebase-admin-key.json");
-  if (!import_fs.default.existsSync(serviceAccountPath)) {
+  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH : path.join(process.cwd(), "firebase-admin-key.json");
+  if (!fs.existsSync(serviceAccountPath)) {
     return null;
   }
   try {
-    const serviceAccountFile = import_fs.default.readFileSync(serviceAccountPath, "utf8");
+    const serviceAccountFile = fs.readFileSync(serviceAccountPath, "utf8");
     return JSON.parse(serviceAccountFile);
   } catch (error) {
     console.error("Failed to read Firebase service account file:", error);
@@ -134,15 +113,15 @@ if (serviceAccount) {
   try {
     serviceAccount.private_key = (serviceAccount.private_key || "").replace(/\\n/g, "\n");
     try {
-      (0, import_app.getApp)();
+      getApp();
     } catch (error) {
-      (0, import_app.initializeApp)({
-        credential: (0, import_app.cert)(serviceAccount),
+      initializeApp({
+        credential: cert(serviceAccount),
         databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
       });
     }
-    db = (0, import_firestore.getFirestore)();
-    auth = (0, import_auth.getAuth)();
+    db = getFirestore();
+    auth = getAuth();
     console.log("Firebase Firestore and Auth initialized successfully with Admin SDK.");
   } catch (err) {
     console.error("Failed to initialize Firebase Admin SDK:", err);
@@ -188,8 +167,8 @@ var store = {
 };
 function loadStore() {
   try {
-    if (import_fs.default.existsSync(DB_FILE)) {
-      const raw = import_fs.default.readFileSync(DB_FILE, "utf8");
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, "utf8");
       const parsed = JSON.parse(raw);
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
@@ -267,7 +246,7 @@ async function loadStoreFromFirestore() {
         store.agentTransactions = parsed.agentTransactions || [];
         store.tournaments = parsed.tournaments || {};
         console.log("Database loaded successfully from Firebase Firestore.");
-        import_fs.default.writeFileSync(DB_FILE, payload.data, "utf8");
+        fs.writeFileSync(DB_FILE, payload.data, "utf8");
         return;
       }
     }
@@ -291,14 +270,14 @@ async function syncToFirestore() {
 }
 function saveStore() {
   try {
-    import_fs.default.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
   } catch (error) {
     console.error("Failed to write database to disk.", error);
   }
 }
 async function saveStoreAndWait() {
   try {
-    import_fs.default.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
     await syncToFirestore();
   } catch (error) {
     console.error("Failed to write database to disk.", error);
@@ -955,7 +934,7 @@ app.get("/api/debug/firebase", async (req, res) => {
       initialized: true,
       writeAndReadSuccess: data?.test === true,
       data,
-      projectId: (0, import_app.getApp)().options.projectId
+      projectId: getApp().options.projectId
     });
   } catch (err) {
     return res.json({
@@ -3524,25 +3503,25 @@ async function startServer() {
   purgeSimulatedUsers();
   let vite;
   if (process.env.NODE_ENV !== "production") {
-    vite = await (0, import_vite.createServer)({
+    vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = import_path.default.join(process.cwd(), "dist");
-    app.use(import_express.default.static(distPath));
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
     app.get("/agent", (req, res) => {
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
-      res.sendFile(import_path.default.join(distPath, "agent.html"));
+      res.sendFile(path.join(distPath, "agent.html"));
     });
     app.get(/^(?!\/api).*/, (req, res) => {
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
-      res.sendFile(import_path.default.join(distPath, "index.html"));
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
   const server = typeof PORT === "number" ? app.listen(PORT, "0.0.0.0", () => {
