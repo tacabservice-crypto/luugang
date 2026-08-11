@@ -7,10 +7,12 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { createServer as createViteServer, ViteDevServer } from 'vite';
+import { createServer as createViteServer, ViteDevServer } from 'vite'; // Keep this if Vite is used later
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
-import { getAuth, Auth } from 'firebase-admin/auth';
+// Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
+// import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
+// const { db, auth } = initializeFirebase();
 
 import {
   UserProfile,
@@ -30,6 +32,19 @@ import {
   TournamentMatch,
 } from './src/types/game.ts';
 
+interface ManualTransactionRequest {
+  id: string;
+  userId: string;
+  username: string;
+  agentId: string;
+  amount: number;
+  phone?: string; // For withdrawals
+  senderPhone?: string; // For deposits
+  provider: string;
+  transactionType: 'deposit' | 'withdraw';
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+}
 interface VipTier {
   name: string;
   price: number; // Monthly price
@@ -110,6 +125,7 @@ app.use(express.static(path.join(process.cwd(), 'public')));
 // ==========================================
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+import { getAuth, Auth } from 'firebase-admin/auth';
 
 function getFirebaseServiceAccount() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
@@ -1805,8 +1821,19 @@ async function handleTournamentMatchWin(tournamentId: string, matchId: string, w
       // Create Ludo rooms for each pending match
       for (const nextMatch of nextRoundMatches) {
         if (nextMatch.status === 'pending' && nextMatch.player1 && nextMatch.player2) {
+          const player1Profile = store.users[nextMatch.player1.userId];
+          const player2Profile = store.users[nextMatch.player2.userId];
+
+          if (!player1Profile || !player2Profile) {
+            console.error(`Error: Could not find full user profile for tournament match players. Match ID: ${nextMatch.id}`);
+            continue; // Skip this match if profiles are missing
+          }
+
           const room = startMatchedRoom(
-            [nextMatch.player1, nextMatch.player2],
+            [
+              { id: player1Profile.id, username: player1Profile.username, avatar: player1Profile.avatar, balance: player1Profile.balance, winCount: player1Profile.winCount, lossCount: player1Profile.lossCount },
+              { id: player2Profile.id, username: player2Profile.username, avatar: player2Profile.avatar, balance: player2Profile.balance, winCount: player2Profile.winCount, lossCount: player2Profile.lossCount },
+            ],
             0, 2, 'solo'
           );
           nextMatch.roomId = room.id;
@@ -4347,6 +4374,18 @@ app.put('/api/admin/agents/:agentId', isAdmin, async (req, res) => {
     } catch (error) {
         console.error(`Failed to update agent ${agentId}:`, error);
         res.status(500).json({ error: 'Failed to update agent.' });
+    }
+});
+
+// Delete a user
+app.delete('/api/admin/users/:userId/delete', isAdmin, (req, res) => {
+    const { userId } = req.params;
+    if (store.users[userId]) {
+        delete store.users[userId];
+        saveStoreAndWait();
+        res.json({ success: true, message: `User ${userId} has been deleted.` });
+    } else {
+        res.status(404).json({ error: 'User not found' });
     }
 });
 
