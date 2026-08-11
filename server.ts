@@ -13,6 +13,25 @@ import { createServer as createViteServer, ViteDevServer } from 'vite'; // Keep 
 const appDir = typeof __dirname !== 'undefined'
   ? __dirname
   : (import.meta && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
+
+function getDistDirectory(): string {
+  const cwdDist = path.join(process.cwd(), 'dist');
+  if (fs.existsSync(path.join(cwdDist, 'index.html'))) {
+    return cwdDist;
+  }
+  const currentDir = typeof __dirname !== 'undefined'
+    ? __dirname
+    : (import.meta && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd());
+
+  if (fs.existsSync(path.join(currentDir, 'index.html'))) {
+    return currentDir;
+  }
+  const currentDist = path.join(currentDir, 'dist');
+  if (fs.existsSync(path.join(currentDist, 'index.html'))) {
+    return currentDist;
+  }
+  return cwdDist;
+}
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
@@ -126,7 +145,7 @@ app.use(express.json());
 
 // Serve static files from 'public' and 'dist' directories
 app.use(express.static(path.join(process.cwd(), 'public')));
-app.use(express.static(path.join(appDir, 'dist')));
+app.use(express.static(getDistDirectory()));
 
 
 // ==========================================
@@ -4723,7 +4742,7 @@ app.get('/api/agent/my-players', isAgent, (req, res) => {
 
 // Specific route for the Agent Dashboard
 app.get('/agent', (req, res) => {
-  const distPath = path.join(appDir, 'dist');
+  const distPath = getDistDirectory();
   const agentFile = fs.existsSync(path.join(distPath, 'agent.html'))
     ? path.join(distPath, 'agent.html')
     : path.join(process.cwd(), 'agent.html');
@@ -4736,7 +4755,12 @@ app.get('/agent', (req, res) => {
 
 // For all other non-API routes, serve the main app's index.html file.
 app.get(/^(?!\/api).*/, (req, res) => {
-  const distPath = path.join(appDir, 'dist');
+  // If request is for a missing static asset file, return 404 instead of index.html
+  if (req.path.startsWith('/assets/') || /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|mp3|wav|woff|woff2|ttf|map|webmanifest)$/i.test(req.path)) {
+    return res.status(404).send('Asset not found');
+  }
+
+  const distPath = getDistDirectory();
   const indexFile = fs.existsSync(path.join(distPath, 'index.html'))
     ? path.join(distPath, 'index.html')
     : path.join(process.cwd(), 'index.html');
