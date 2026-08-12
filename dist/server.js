@@ -454,6 +454,7 @@ async function loadStoreFromFirestore() {
         console.log("Database loaded successfully from Firebase Firestore.");
         fs.writeFileSync(DB_FILE, payload.data, "utf8");
         await loadUserProfilesFromFirestore();
+        await loadManualRequestsFromFirestore();
         await syncUserProfilesToFirestore();
         return;
       }
@@ -461,6 +462,7 @@ async function loadStoreFromFirestore() {
     console.log("No existing state in Firestore. Loading from local store fallback...");
     loadStore();
     await loadUserProfilesFromFirestore();
+    await loadManualRequestsFromFirestore();
     await syncUserProfilesToFirestore();
   } catch (err) {
     console.error("Failed to load store from Firestore:", err);
@@ -513,6 +515,27 @@ async function saveUserProfileToFirestore(user) {
   const cleanProfile = JSON.parse(JSON.stringify(user));
   await db.collection("users").doc(documentId).set(cleanProfile, { merge: true });
   persistedUserProfiles.set(documentId, serializeUserProfile(user));
+}
+async function saveManualRequestToFirestore(request) {
+  if (!db) throw new Error("Database not initialized");
+  await db.collection("manualTransactionRequests").doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
+}
+async function loadManualRequestsFromFirestore() {
+  if (!db) return;
+  const snapshot = await db.collection("manualTransactionRequests").get();
+  const requests = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const merged = new Map(store.pendingManualTransactions.map((request) => [request.id, request]));
+  requests.forEach((request) => merged.set(request.id, request));
+  store.pendingManualTransactions = [...merged.values()].sort((a, b) => b.createdAt - a.createdAt);
+}
+async function findManualRequest(requestId) {
+  const localRequest = store.pendingManualTransactions.find((request2) => request2.id === requestId);
+  if (localRequest || !db) return localRequest;
+  const document = await db.collection("manualTransactionRequests").doc(requestId).get();
+  if (!document.exists) return void 0;
+  const request = { id: document.id, ...document.data() };
+  store.pendingManualTransactions.unshift(request);
+  return request;
 }
 async function findUserProfileInFirestore(firebaseUid, email) {
   if (!db) return null;
@@ -1626,14 +1649,18 @@ app.post("/api/wallet/withdraw", (req, res) => {
 });
 app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   const { userId, agentId, amount, phone, senderPhone, provider, transactionType } = req.body;
-  if (!userId || !amount || !provider || !transactionType) {
+  const requestAmount = Number(amount);
+  if (!userId || !Number.isFinite(requestAmount) || requestAmount <= 0 || !provider || !transactionType) {
     return res.status(400).json({ error: "Missing required fields. `userId`, `amount`, `provider`, and `transactionType` are all required." });
+  }
+  if (transactionType !== "deposit" && transactionType !== "withdraw") {
+    return res.status(400).json({ error: "Invalid transaction type." });
   }
   const user = store.users[userId];
   if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
-  const assignedAgentId = user.linkedAgentId || void 0;
+  const assignedAgentId = user.linkedAgentId || (typeof agentId === "string" && agentId.trim() ? agentId.trim() : void 0);
   if (assignedAgentId && agentId && assignedAgentId !== agentId) {
     return res.status(400).json({ error: "This account is locked to a specific agent. You can only transact with your assigned agent." });
   }
@@ -1644,7 +1671,10 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
     return res.status(400).json({ error: "Sender phone number is required for deposit requests." });
   }
   let assignedAgentUsername;
-  if (assignedAgentId && db) {
+  if (assignedAgentId) {
+    if (!db) {
+      return res.status(503).json({ error: "The payment service is temporarily unavailable." });
+    }
     try {
       const agentDoc = await db.collection("agents").doc(assignedAgentId).get();
       if (!agentDoc.exists) {
@@ -1667,7 +1697,7 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
     agentId: assignedAgentId,
     agentUsername: assignedAgentUsername,
     managedBy: assignedAgentId ? "agent" : "admin",
-    amount: parseFloat(amount),
+    amount: requestAmount,
     phone,
     // This will be the destination for withdrawals
     senderPhone,
@@ -1678,6 +1708,13 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
     createdAt: Date.now()
   };
   store.pendingManualTransactions.unshift(newRequest);
+  try {
+    await saveManualRequestToFirestore(newRequest);
+  } catch (error) {
+    store.pendingManualTransactions = store.pendingManualTransactions.filter((request) => request.id !== newRequest.id);
+    console.error("Failed to persist manual transaction request:", error);
+    return res.status(503).json({ error: "Your request could not be saved. Please try again." });
+  }
   await saveStoreAndWait();
   res.json({ success: true, message: "Your request has been submitted for review." });
 });
@@ -4245,8 +4282,22 @@ app.get("/api/agent/requests", isAgent, async (req, res) => {
     res.status(500).json({ error: "Failed to retrieve float requests." });
   }
 });
-app.get("/api/agent/player-requests", isAgent, (req, res) => {
+app.get("/api/agent/player-requests", isAgent, async (req, res) => {
   const agent = req.agent;
+  if (db) {
+    try {
+      const snapshot = await db.collection("manualTransactionRequests").where("agentId", "==", agent.id).get();
+      snapshot.docs.forEach((doc) => {
+        const request = { id: doc.id, ...doc.data() };
+        const index = store.pendingManualTransactions.findIndex((item) => item.id === request.id);
+        if (index >= 0) store.pendingManualTransactions[index] = request;
+        else store.pendingManualTransactions.push(request);
+      });
+    } catch (error) {
+      console.error(`Failed to load player requests for agent ${agent.id}:`, error);
+      return res.status(500).json({ error: "Failed to retrieve player requests." });
+    }
+  }
   const agentSpecificTxs = store.pendingManualTransactions.filter((tx) => {
     const user = store.users[tx.userId];
     return tx.status === "pending" && tx.agentId === agent.id && (tx.managedBy === "agent" || user?.linkedAgentId === agent.id);
@@ -4277,7 +4328,7 @@ app.get("/api/agent/player-requests", isAgent, (req, res) => {
 app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, res) => {
   const { requestId } = req.params;
   const agent = req.agent;
-  const tx = store.pendingManualTransactions.find((t) => t.id === requestId);
+  const tx = await findManualRequest(requestId);
   if (!tx || tx.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
@@ -4337,6 +4388,7 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
     tx.status = "approved";
     tx.resolvedBy = agent.id;
     tx.resolverUsername = agent.username;
+    await saveManualRequestToFirestore(tx);
     await saveStoreAndWait();
     broadcastUserUpdate(user.id);
     res.json({ success: true, transaction: tx });
@@ -4352,7 +4404,7 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
 app.post("/api/agent/player-requests/:requestId/reject", isAgent, async (req, res) => {
   const { requestId } = req.params;
   const agent = req.agent;
-  const tx = store.pendingManualTransactions.find((t) => t.id === requestId);
+  const tx = await findManualRequest(requestId);
   if (!tx || tx.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
@@ -4362,12 +4414,14 @@ app.post("/api/agent/player-requests/:requestId/reject", isAgent, async (req, re
   const user = store.users[tx.userId];
   if (!user) {
     tx.status = "rejected";
+    await saveManualRequestToFirestore(tx);
     await saveStoreAndWait();
     return res.status(404).json({ error: "User associated with transaction not found. Transaction rejected." });
   }
   tx.status = "rejected";
   tx.resolvedBy = agent.id;
   tx.resolverUsername = agent.username;
+  await saveManualRequestToFirestore(tx);
   await saveStoreAndWait();
   sendEventToUser(user.id, "user_notification", {
     type: "info",

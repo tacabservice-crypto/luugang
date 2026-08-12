@@ -100,7 +100,9 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 userId: user.id,
-                agentId: user.linkedAgentId || undefined,
+                // Send the agent actually selected in the wallet. The server still
+                // gives a promo-linked agent priority and rejects mismatches.
+                agentId: selectedAgentId || user.linkedAgentId || undefined,
                 amount: parseFloat(amount),
                 phone: activeTab === 'withdraw' ? phone : (agents.find(a => a.id === selectedAgentId)?.phone || DEPOSIT_PHONE_NUMBER),
                 senderPhone: activeTab === 'deposit' ? senderPhone : undefined,
