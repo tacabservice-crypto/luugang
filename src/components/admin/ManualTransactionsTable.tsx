@@ -121,7 +121,7 @@ const ManualTransactionsTable: React.FC<ManualTransactionsTableProps> = ({ trans
         )}
 
         <div className="overflow-x-auto p-4">
-          <table className="min-w-full text-left text-sm text-slate-300">
+          <table className="min-w-[980px] w-full text-left text-sm text-slate-300">
             <thead className="text-xs uppercase tracking-wider text-slate-500">
               <tr className="border-b border-slate-800">
                 <th className="px-4 py-3">User</th>

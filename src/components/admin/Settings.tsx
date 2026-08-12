@@ -48,6 +48,7 @@ const Settings = ({
   }
 
   const { roles, usersByRole } = adminSettings;
+  const canManageRoles = adminUser?.permissions?.includes('all');
 
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
@@ -55,9 +56,9 @@ const Settings = ({
   };
   
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+    <div className="w-full min-w-0 rounded-xl bg-white p-3 shadow-md sm:p-6">
+      <div className="overflow-x-auto border-b border-gray-200">
+        <nav className="-mb-px flex min-w-max gap-5 sm:gap-8" aria-label="Tabs">
           <button onClick={() => setSettingsView('roles')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'roles' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             Roles & Permissions
           </button>
@@ -129,7 +130,7 @@ const Settings = ({
 
         {settingsView === 'payment' && (
           <div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
               <h3 className="text-xl font-bold">Payment Providers</h3>
               <button onClick={() => { onSavePaymentSettings({ providers: editablePaymentSettings, instructions: editablePaymentSettings.agentFloatInstructions }); showNotification('success', 'Payment settings saved!'); }} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition-colors">
                 Save Settings
@@ -207,14 +208,13 @@ const Settings = ({
 
         {settingsView === 'roles' && (
           <div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
               <h3 className="text-xl font-bold">Roles & Permissions</h3>
-              <button onClick={onCreateRole} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md">
-                Create New Role
-              </button>
+              {canManageRoles && <button onClick={onCreateRole} className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md">Create New Role</button>}
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full bg-white">
+            {!canManageRoles && <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">You can view roles, but only a Full Admin can create, edit, suspend, or delete them.</div>}
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-[760px] w-full bg-white">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role Name</th>
@@ -249,7 +249,7 @@ const Settings = ({
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        {protectedRole ? (
+                        {protectedRole || !canManageRoles ? (
                           <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md font-bold cursor-not-allowed" title="Full Admin role is protected and cannot be edited, suspended, or deleted">
                             🔒 Protected
                           </span>

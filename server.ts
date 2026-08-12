@@ -411,8 +411,22 @@ interface DBStore {
 
 const DEFAULT_ADMIN_ROLES: AdminRoleTemplate[] = [
   { id: 'admin', name: 'Administrator', permissions: ['all'] },
-  { id: 'editor', name: 'Editor', permissions: ['manage_users', 'manage_content'] },
+  { id: 'editor', name: 'Editor', permissions: ['stats', 'users', 'rooms'] },
 ];
+
+const ADMIN_PERMISSION_KEYS = ['stats', 'users', 'rooms', 'transactions', 'agents', 'tournaments', 'settings'] as const;
+
+function normalizeAdminPermissions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  if (value.includes('all')) return ['all'];
+  const legacyMap: Record<string, string[]> = {
+    manage_users: ['users'],
+    manage_content: ['rooms', 'tournaments'],
+    view_stats: ['stats'],
+  };
+  const normalized = value.flatMap(permission => legacyMap[String(permission)] || [String(permission)]);
+  return [...new Set(normalized.filter(permission => (ADMIN_PERMISSION_KEYS as readonly string[]).includes(permission)))];
+}
 
 const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   username: process.env.ADMIN_USERNAME || 'admin',
@@ -3994,6 +4008,10 @@ app.post('/api/admin/login', async (req, res) => {
 
         const adminUserDoc = snapshot.docs[0];
         const adminUser = adminUserDoc.data() as AdminUser;
+        if ((adminUser as any).status === 'suspended') {
+            return res.status(403).json({ error: 'Access denied. This admin account is suspended.' });
+        }
+        adminUser.permissions = normalizeAdminPermissions(adminUser.permissions);
 
         // IMPORTANT: Passwords should be hashed. This is a plain text comparison for now.
         if (adminUser.password === password) {
@@ -4092,7 +4110,11 @@ const isAdmin = async (req: express.Request, res: express.Response, next: expres
     try {
         const doc = await db.collection('adminUsers').doc(adminId).get();
         if (doc.exists) {
-            next(); // It's a valid admin, let them pass for now.
+            const admin = doc.data() as AdminUser;
+            if (admin.status === 'suspended') {
+                return res.status(403).json({ error: 'Access denied. This admin account is suspended.' });
+            }
+            next();
         } else {
             res.status(403).json({ error: 'Access denied. Invalid admin user.' });
         }
@@ -4103,14 +4125,14 @@ const isAdmin = async (req: express.Request, res: express.Response, next: expres
 };
 
 // Admin Tournament Management Endpoints
-app.get('/api/admin/tournaments', isAdmin, (req, res) => {
+app.get('/api/admin/tournaments', hasPermission('tournaments'), (req, res) => {
   seedDefaultTournaments();
   const tournamentsList = Object.values(store.tournaments);
   tournamentsList.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   res.json(tournamentsList);
 });
 
-app.post('/api/admin/tournaments/create', isAdmin, async (req, res) => {
+app.post('/api/admin/tournaments/create', hasPermission('tournaments'), async (req, res) => {
   const { name, entryFee, prizePool, maxPlayers, startDate } = req.body;
   if (!name || entryFee === undefined || !prizePool || !maxPlayers || !startDate) {
     return res.status(400).json({ error: 'Missing required tournament fields.' });
@@ -4140,7 +4162,7 @@ app.post('/api/admin/tournaments/create', isAdmin, async (req, res) => {
   res.json({ success: true, tournament: newTournament, message: 'Tournament created successfully!' });
 });
 
-app.post('/api/admin/tournaments/:id/cancel', isAdmin, async (req, res) => {
+app.post('/api/admin/tournaments/:id/cancel', hasPermission('tournaments'), async (req, res) => {
   const tournamentId = req.params.id as string;
   const tournament = store.tournaments[tournamentId];
 
@@ -4169,7 +4191,7 @@ app.post('/api/admin/tournaments/:id/cancel', isAdmin, async (req, res) => {
   res.json({ success: true, message: 'Tournament cancelled and entry fees refunded.' });
 });
 
-app.delete('/api/admin/tournaments/:id', isAdmin, async (req, res) => {
+app.delete('/api/admin/tournaments/:id', hasPermission('tournaments'), async (req, res) => {
   const tournamentId = req.params.id as string;
   if (!store.tournaments[tournamentId]) {
     return res.status(404).json({ error: 'Tournament not found.' });
@@ -4181,7 +4203,7 @@ app.delete('/api/admin/tournaments/:id', isAdmin, async (req, res) => {
   res.json({ success: true, message: 'Tournament deleted successfully.' });
 });
 
-app.post('/api/admin/tournaments/:id/start', isAdmin, async (req, res) => {
+app.post('/api/admin/tournaments/:id/start', hasPermission('tournaments'), async (req, res) => {
   const tournamentId = req.params.id as string;
   const tournament = store.tournaments[tournamentId];
 
@@ -4222,7 +4244,7 @@ app.post('/api/admin/tournaments/:id/start', isAdmin, async (req, res) => {
   res.json({ success: true, tournament, message: `Tournament "${tournament.name}" started successfully!` });
 });
 
-app.post('/api/admin/tournaments/:id/remove-player', isAdmin, async (req, res) => {
+app.post('/api/admin/tournaments/:id/remove-player', hasPermission('tournaments'), async (req, res) => {
   const tournamentId = req.params.id as string;
   const { targetUserId } = req.body;
 
@@ -4267,7 +4289,7 @@ app.post('/api/admin/tournaments/:id/remove-player', isAdmin, async (req, res) =
   });
 });
 
-app.post('/api/admin/tournaments/:id/edit', isAdmin, async (req, res) => {
+app.post('/api/admin/tournaments/:id/edit', hasPermission('tournaments'), async (req, res) => {
   const tournamentId = req.params.id as string;
   const { name, entryFee, prizePool, maxPlayers, startDate } = req.body;
 
@@ -4288,15 +4310,21 @@ app.post('/api/admin/tournaments/:id/edit', isAdmin, async (req, res) => {
   res.json({ success: true, tournament, message: `Tournament "${tournament.name}" updated successfully!` });
 });
 
-app.get('/api/admin/settings', isAdmin, async (req, res) => {
+app.get('/api/admin/settings', hasPermission('settings'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     
     try {
         const adminUsersSnapshot = await db.collection('adminUsers').get();
-        const roles = adminUsersSnapshot.docs.map(doc => {
-            const { password, ...roleData } = doc.data();
-            return roleData;
-        });
+        const roles = await Promise.all(adminUsersSnapshot.docs.map(async doc => {
+            const data = doc.data();
+            const normalizedPermissions = normalizeAdminPermissions(data.permissions);
+            const status = data.status === 'suspended' ? 'suspended' : 'active';
+            if (JSON.stringify(data.permissions || []) !== JSON.stringify(normalizedPermissions) || data.status !== status) {
+                await doc.ref.update({ permissions: normalizedPermissions, status });
+            }
+            const { password, ...roleData } = data;
+            return { ...roleData, id: data.id || doc.id, permissions: normalizedPermissions, status };
+        }));
 
         res.json({
             username: store.adminSettings?.username || process.env.ADMIN_USERNAME || 'admin',
@@ -4309,7 +4337,7 @@ app.get('/api/admin/settings', isAdmin, async (req, res) => {
     }
 });
 
-app.post('/api/admin/settings', isAdmin, async (req, res) => {
+app.post('/api/admin/settings', hasPermission('settings'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
 
     const { currentPassword, newPassword, confirmPassword } = req.body;
@@ -4363,8 +4391,15 @@ app.post('/api/admin/roles/create', hasPermission('all'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const { username, password, permissions, name } = req.body;
 
+    const normalizedPermissions = normalizeAdminPermissions(permissions);
     if (!username || !password || !Array.isArray(permissions) || !name) {
         return res.status(400).json({ error: 'Role Name, username, password, and a list of permissions are required.' });
+    }
+    if (String(username).trim().length < 3 || String(password).length < 6 || String(name).trim().length < 2) {
+        return res.status(400).json({ error: 'Role name and username are required; password must be at least 6 characters.' });
+    }
+    if (normalizedPermissions.length === 0) {
+        return res.status(400).json({ error: 'Select at least one valid permission.' });
     }
 
     try {
@@ -4377,10 +4412,11 @@ app.post('/api/admin/roles/create', hasPermission('all'), async (req, res) => {
         const newAdminId = `admin_${Date.now()}`;
         const newAdmin: AdminUser = {
             id: newAdminId,
-            username,
+            username: String(username).trim(),
             password, // In a real app, this MUST be hashed.
-            permissions,
-            name, // Adding the role name field
+            permissions: normalizedPermissions,
+            name: String(name).trim(),
+            status: 'active',
         };
 
         await adminUsersRef.doc(newAdminId).set(newAdmin);
@@ -4398,7 +4434,7 @@ app.post('/api/admin/roles/create', hasPermission('all'), async (req, res) => {
 app.post('/api/admin/roles/:roleId/update', hasPermission('all'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const roleId = req.params.roleId as string;
-    const updatedData = req.body;
+        const updatedData = { ...req.body };
 
     if (!roleId) {
         return res.status(400).json({ error: 'Role ID is required.' });
@@ -4425,6 +4461,19 @@ app.post('/api/admin/roles/:roleId/update', hasPermission('all'), async (req, re
         if (updatedData.password === '') {
             delete updatedData.password;
         }
+
+        if (updatedData.permissions !== undefined) {
+            const normalizedPermissions = normalizeAdminPermissions(updatedData.permissions);
+            if (normalizedPermissions.length === 0) {
+                return res.status(400).json({ error: 'Select at least one valid permission.' });
+            }
+            updatedData.permissions = normalizedPermissions;
+        }
+        if (updatedData.status !== undefined && !['active', 'suspended'].includes(updatedData.status)) {
+            return res.status(400).json({ error: 'Invalid role status.' });
+        }
+        if (updatedData.name !== undefined) updatedData.name = String(updatedData.name).trim();
+        if (updatedData.username !== undefined) updatedData.username = String(updatedData.username).trim();
 
         await adminRef.update(updatedData);
 
@@ -4486,34 +4535,88 @@ app.delete('/api/admin/roles/:roleId/delete', hasPermission('all'), async (req, 
 });
 
 // Get all runtime stats
-app.get('/api/admin/stats', isAdmin, (req, res) => {
+app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
+    const users = Object.values(store.users).filter(user => !user.id.startsWith('bot_') && !user.id.startsWith('user_sim_'));
+    const rooms = Object.values(store.rooms);
+    const tournaments = Object.values(store.tournaments);
+    const manualTransactions = store.pendingManualTransactions || [];
+    const monthBuckets = new Map<string, { month: string; deposits: number; withdrawals: number; transactions: number }>();
+    const now = new Date();
+    for (let offset = 5; offset >= 0; offset--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+        const key = `${date.getFullYear()}-${date.getMonth()}`;
+        monthBuckets.set(key, { month: date.toLocaleString('en', { month: 'short' }), deposits: 0, withdrawals: 0, transactions: 0 });
+    }
+    store.transactions.forEach(tx => {
+        const date = new Date(tx.timestamp);
+        const bucket = monthBuckets.get(`${date.getFullYear()}-${date.getMonth()}`);
+        if (!bucket) return;
+        bucket.transactions += 1;
+        if (tx.type === 'deposit' || tx.type === 'win_payout' || tx.type === 'refund') bucket.deposits += Number(tx.amount || 0);
+        if (tx.type === 'withdrawal') bucket.withdrawals += Number(tx.amount || 0);
+    });
+
+    let totalAgents = 0;
+    let activeAgents = 0;
+    let pendingAgentRequests = 0;
+    if (db) {
+        try {
+            const [agentsSnapshot, agentRequestsSnapshot] = await Promise.all([
+                db.collection('agents').get(),
+                db.collection('agentRequests').where('status', '==', 'pending').get(),
+            ]);
+            totalAgents = agentsSnapshot.size;
+            activeAgents = agentsSnapshot.docs.filter(doc => doc.data().status === 'Active').length;
+            pendingAgentRequests = agentRequestsSnapshot.size;
+        } catch (error) {
+            console.error('Failed to include Firestore agent metrics in admin stats:', error);
+        }
+    }
+
+    const recentActivity = [
+        ...store.transactions.slice(-8).map(tx => ({ id: tx.id, kind: 'transaction', title: tx.description, amount: tx.amount, status: tx.status || 'completed', timestamp: tx.timestamp })),
+        ...manualTransactions.slice(0, 8).map(tx => ({ id: tx.id, kind: 'manual', title: `${tx.username} requested a ${tx.transactionType}`, amount: tx.amount, status: tx.status, timestamp: tx.createdAt })),
+    ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+
     res.json({
-        totalUsers: Object.keys(store.users).length,
-        totalRooms: Object.keys(store.rooms).length,
-        activeRooms: Object.values(store.rooms).filter(r => r.status === 'playing').length,
-        waitingRooms: Object.values(store.rooms).filter(r => r.status === 'waiting').length,
+        totalUsers: users.length,
+        totalRooms: rooms.length,
+        activeRooms: rooms.filter(r => r.status === 'playing').length,
+        waitingRooms: rooms.filter(r => r.status === 'waiting').length,
+        completedRooms: rooms.filter(r => r.status === 'completed').length,
         houseRevenue: store.houseRevenue || 0,
         onlineClients: activeClients.length,
+        totalTransactions: store.transactions.length,
+        pendingAdminTransactions: manualTransactions.filter(tx => tx.status === 'pending' && tx.managedBy !== 'agent').length,
+        pendingAgentTransactions: manualTransactions.filter(tx => tx.status === 'pending' && tx.managedBy === 'agent').length,
+        totalAgents,
+        activeAgents,
+        pendingAgentRequests,
+        openTournaments: tournaments.filter(t => t.status === 'registration_open').length,
+        activeTournaments: tournaments.filter(t => t.status === 'in_progress').length,
+        totalTournamentPlayers: tournaments.reduce((sum, tournament) => sum + tournament.players.length, 0),
+        monthlyActivity: [...monthBuckets.values()],
+        recentActivity,
     });
 });
 
 // Get all users
-app.get('/api/admin/users', isAdmin, (req, res) => {
+app.get('/api/admin/users', hasPermission('users'), (req, res) => {
     res.json(Object.values(store.users));
 });
 
 // Get all rooms
-app.get('/api/admin/rooms', isAdmin, (req, res) => {
+app.get('/api/admin/rooms', hasPermission('rooms'), (req, res) => {
     res.json(Object.values(store.rooms));
 });
 
 // Get all transactions
-app.get('/api/admin/transactions', isAdmin, (req, res) => {
+app.get('/api/admin/transactions', hasPermission('transactions'), (req, res) => {
     res.json(store.transactions);
 });
 
 // Get all pending manual transactions
-app.get('/api/admin/manual-transactions', isAdmin, async (req, res) => {
+app.get('/api/admin/manual-transactions', hasPermission('transactions'), async (req, res) => {
     const agentNames = new Map<string, string>();
     if (db) {
         const linkedAgentIds = [...new Set(
@@ -4544,11 +4647,11 @@ app.get('/api/admin/manual-transactions', isAdmin, async (req, res) => {
     res.json(transactions);
 });
 
-app.get('/api/admin/payment-settings', isAdmin, (req, res) => {
+app.get('/api/admin/payment-settings', hasPermission('settings'), (req, res) => {
     res.json(store.paymentProviders);
 });
 
-app.post('/api/admin/payment-settings', isAdmin, async (req, res) => {
+app.post('/api/admin/payment-settings', hasPermission('settings'), async (req, res) => {
     const { paymentProviders, agentFloatInstructions } = req.body;
 
     if (paymentProviders && typeof paymentProviders === 'object') {
@@ -4571,7 +4674,7 @@ app.post('/api/admin/payment-settings', isAdmin, async (req, res) => {
 });
 
 // Approve a manual transaction
-app.post('/api/admin/manual-transactions/:transactionId/approve', isAdmin, async (req, res) => {
+app.post('/api/admin/manual-transactions/:transactionId/approve', hasPermission('transactions'), async (req, res) => {
     const { transactionId } = req.params;
     const tx = store.pendingManualTransactions.find(t => t.id === transactionId);
 
@@ -4614,7 +4717,7 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', isAdmin, async
 });
 
 // Reject a manual transaction
-app.post('/api/admin/manual-transactions/:transactionId/reject', isAdmin, async (req, res) => {
+app.post('/api/admin/manual-transactions/:transactionId/reject', hasPermission('transactions'), async (req, res) => {
     const { transactionId } = req.params;
     const tx = store.pendingManualTransactions.find(t => t.id === transactionId);
 
@@ -4654,7 +4757,7 @@ app.post('/api/admin/manual-transactions/:transactionId/reject', isAdmin, async 
 
 
 // Impersonate a user
-app.post('/api/admin/impersonate', isAdmin, (req, res) => {
+app.post('/api/admin/impersonate', hasPermission('users'), (req, res) => {
     const { userId, targetUserId } = req.body;
     const targetId = targetUserId || userId;
     const user = store.users[targetId];
@@ -4672,7 +4775,7 @@ app.post('/api/admin/impersonate', isAdmin, (req, res) => {
 });
 
 // Update a user's details (e.g., balance, role)
-app.post('/api/admin/users/:userId/update', isAdmin, async (req, res) => {
+app.post('/api/admin/users/:userId/update', hasPermission('users'), async (req, res) => {
     const userId = req.params.userId as string;
     const userToUpdate = store.users[userId];
 
@@ -4723,7 +4826,7 @@ app.post('/api/admin/users/:userId/update', isAdmin, async (req, res) => {
 // ==================================
 
 // Get all agents
-app.get('/api/admin/agents', isAdmin, async (req, res) => {
+app.get('/api/admin/agents', hasPermission('agents'), async (req, res) => {
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   try {
     const agentsSnapshot = await db.collection('agents').get();
@@ -4736,7 +4839,7 @@ app.get('/api/admin/agents', isAdmin, async (req, res) => {
 });
 
 // Create a new agent
-app.post('/api/admin/agents/create', isAdmin, async (req, res) => {
+app.post('/api/admin/agents/create', hasPermission('agents'), async (req, res) => {
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const { username, password, commissionRate, location, phone, promoCode } = req.body;
 
@@ -4797,7 +4900,7 @@ app.post('/api/admin/agents/create', isAdmin, async (req, res) => {
 });
 
 // Update an agent's details
-app.post('/api/admin/agents/:agentId/update', isAdmin, async (req, res) => {
+app.post('/api/admin/agents/:agentId/update', hasPermission('agents'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const agentId = req.params.agentId as string;
     const { username, password, commissionRate, status, location, phone, promoCode } = req.body;
@@ -4880,7 +4983,7 @@ app.post('/api/admin/agents/:agentId/update', isAdmin, async (req, res) => {
 });
 
 // Delete an agent
-app.delete('/api/admin/agents/:agentId/delete', isAdmin, async (req, res) => {
+app.delete('/api/admin/agents/:agentId/delete', hasPermission('agents'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const agentId = req.params.agentId as string;
 
@@ -4917,7 +5020,7 @@ app.delete('/api/admin/agents/:agentId/delete', isAdmin, async (req, res) => {
 });
 
 // Credit an agent's float balance
-app.post('/api/admin/agents/:agentId/credit', isAdmin, async (req, res) => {
+app.post('/api/admin/agents/:agentId/credit', hasPermission('agents'), async (req, res) => {
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const agentId = req.params.agentId as string;
   const { amount, discount } = req.body;
@@ -4969,7 +5072,7 @@ app.post('/api/admin/agents/:agentId/credit', isAdmin, async (req, res) => {
 
 
 // Get all agent requests for admin view
-app.get('/api/admin/agent-requests', isAdmin, async (req, res) => {
+app.get('/api/admin/agent-requests', hasPermission('agents'), async (req, res) => {
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   try {
     const requestsSnapshot = await db.collection('agentRequests').orderBy('createdAt', 'desc').get();
@@ -4982,7 +5085,7 @@ app.get('/api/admin/agent-requests', isAdmin, async (req, res) => {
 });
 
 // Approve an agent float request
-app.post('/api/admin/agent-requests/:requestId/approve', isAdmin, async (req, res) => {
+app.post('/api/admin/agent-requests/:requestId/approve', hasPermission('agents'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const requestId = req.params.requestId as string;
     const adminId = req.query.userId as string;
@@ -5045,7 +5148,7 @@ app.post('/api/admin/agent-requests/:requestId/approve', isAdmin, async (req, re
 });
 
 // Reject an agent float request
-app.post('/api/admin/agent-requests/:requestId/reject', isAdmin, async (req, res) => {
+app.post('/api/admin/agent-requests/:requestId/reject', hasPermission('agents'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const { requestId } = req.params;
     const adminId = req.query.userId as string;
@@ -5085,7 +5188,7 @@ app.post('/api/admin/agent-requests/:requestId/reject', isAdmin, async (req, res
 
 
 // Delete a user
-app.delete('/api/admin/users/:userId/delete', isAdmin, (req, res) => {
+app.delete('/api/admin/users/:userId/delete', hasPermission('users'), (req, res) => {
     const userId = req.params.userId as string;
     const userToDelete = store.users[userId];
 
@@ -5107,7 +5210,7 @@ app.delete('/api/admin/users/:userId/delete', isAdmin, (req, res) => {
 
 
 // Cancel a game
-app.post('/api/admin/rooms/:roomId/cancel', isAdmin, (req, res) => {
+app.post('/api/admin/rooms/:roomId/cancel', hasPermission('rooms'), (req, res) => {
     const roomId = req.params.roomId as string;
     const room = store.rooms[roomId];
     if (!room) {
@@ -5137,7 +5240,7 @@ app.post('/api/admin/rooms/:roomId/cancel', isAdmin, (req, res) => {
 });
 
 // Toggle admin rights for a user
-app.post('/api/admin/users/:userId/toggle-admin', isAdmin, (req, res) => {
+app.post('/api/admin/users/:userId/toggle-admin', hasPermission('users'), (req, res) => {
     const userId = req.params.userId as string;
     const user = store.users[userId];
     if (!user) {
@@ -5162,7 +5265,7 @@ app.post('/api/admin/users/:userId/toggle-admin', isAdmin, (req, res) => {
 });
 
 // Get user's game history
-app.get('/api/admin/users/:userId/games', isAdmin, (req, res) => {
+app.get('/api/admin/users/:userId/games', hasPermission('users'), (req, res) => {
     const { userId } = req.params;
     const userGames = Object.values(store.rooms).filter(room => 
         room.players.some(p => p.userId === userId)

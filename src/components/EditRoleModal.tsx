@@ -59,6 +59,18 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
             return;
         }
         setError(null);
+        if (!formData.name.trim() || !formData.username?.trim()) {
+            setError('Role name and username are required.');
+            return;
+        }
+        if (!role && formData.password.length < 6) {
+            setError('Password must be at least 6 characters.');
+            return;
+        }
+        if (formData.permissions.length === 0) {
+            setError('Select at least one permission.');
+            return;
+        }
         setIsSaving(true);
         try {
             if (role) { // We are editing
@@ -75,8 +87,8 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-3">
+            <div className="bg-gray-800 rounded-xl shadow-xl p-4 sm:p-6 w-full max-w-2xl max-h-[92vh] overflow-y-auto">
                 <h2 className="text-xl font-bold mb-4 text-white">{role ? `Edit Role: ${role.name}` : 'Create New Role'}</h2>
                 
                 {isProtected && (
@@ -120,30 +132,31 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
                     )}
                     <div>
                         <h3 className="text-lg font-bold text-white mb-2">Permissions</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        <p className="mb-3 text-xs text-gray-400">Choose only the dashboard sections this admin should access. Backend APIs enforce the same permissions.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {permissionsList.map(permission => (
-                                <label key={permission} className="flex items-center space-x-2">
+                                <label key={permission} className="flex items-center space-x-3 rounded-lg border border-gray-700 bg-gray-900/50 p-3">
                                     <input
                                         type="checkbox"
                                         checked={formData.permissions.includes(permission)}
                                         onChange={() => handlePermissionChange(permission)}
                                         className="form-checkbox h-5 w-5 text-purple-600 bg-gray-700 border-gray-600 rounded"
                                     />
-                                    <span className="text-white capitalize">{permission.replace('-', ' ')}</span>
+                                    <span className="text-white capitalize">{permission === 'stats' ? 'Dashboard statistics' : permission.replace('-', ' ')}</span>
                                 </label>
                             ))}
                         </div>
                     </div>
                 </div>
 
-                <div className="mt-6 flex justify-end items-center">
-                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:items-center">
+                    <button onClick={onClose} className="w-full sm:w-auto bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
                         Cancel
                     </button>
                     <button 
                         onClick={handleSave} 
                         disabled={isSaving || isProtected}
-                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded ml-3 disabled:bg-purple-400 disabled:cursor-not-allowed"
+                        className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded disabled:bg-purple-400 disabled:cursor-not-allowed"
                     >
                         {isSaving ? 'Kaydinaya...' : 'Save Changes'}
                     </button>

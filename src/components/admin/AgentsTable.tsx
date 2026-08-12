@@ -6,18 +6,18 @@ import { isFullAdmin } from '../../utils/admin';
 
 const AgentsTable = ({ agents, onCredit, onEdit, onToggleStatus, onDelete, onCreate }) => {
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
-      <div className="flex justify-between items-center mb-4">
+    <div className="w-full min-w-0 bg-white p-3 sm:p-6 rounded-lg shadow-md">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4">
         <h3 className="text-xl font-bold text-gray-800">Agents</h3>
         <button 
             onClick={onCreate} 
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+            className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
         >
           Create Agent
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-[820px] w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent ID</th>

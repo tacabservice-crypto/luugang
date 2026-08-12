@@ -4,10 +4,10 @@ import { formatCurrency } from '../../utils/number';
 
 const TransactionsTable = ({ transactions }) => {
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md">
+    <div className="w-full min-w-0 bg-white p-3 sm:p-6 rounded-lg shadow-md">
       <h3 className="text-xl font-bold mb-4 text-gray-800">Transactions</h3>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-[820px] w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -28,7 +28,7 @@ const TransactionsTable = ({ transactions }) => {
                 }`}>
                   {formatCurrency(tx.amount)}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{tx.description}</td>
+                <td className="px-6 py-4 min-w-64 text-sm text-gray-500">{tx.description}</td>
               </tr>
             ))}
           </tbody>

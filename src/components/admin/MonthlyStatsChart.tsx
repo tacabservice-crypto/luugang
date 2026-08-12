@@ -4,26 +4,22 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 const MonthlyStatsChart = ({ data }) => {
   // Default data if none is provided to avoid crashing the component
   const defaultData = [
-    { month: 'Jan', sales: 0, views: 0 },
-    { month: 'Feb', sales: 0, views: 0 },
-    { month: 'Mar', sales: 0, views: 0 },
-    { month: 'Apr', sales: 0, views: 0 },
-    { month: 'May', sales: 0, views: 0 },
-    { month: 'Jun', sales: 0, views: 0 },
+    { month: 'Jan', deposits: 0, withdrawals: 0 },
   ];
 
   const chartData = data && data.length > 0 ? data : defaultData;
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-lg">
-      <h3 className="text-xl font-bold text-gray-800 mb-4">Monthly Overview</h3>
+    <div className="min-w-0 bg-white p-4 sm:p-6 rounded-xl shadow-lg">
+      <h3 className="text-xl font-bold text-gray-800">Monthly Money Flow</h3>
+      <p className="mb-4 text-sm text-gray-500">Deposits and withdrawals recorded during the last six months</p>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart
           data={chartData}
           margin={{
             top: 5,
-            right: 30,
-            left: 20,
+            right: 8,
+            left: 0,
             bottom: 5,
           }}
         >
@@ -40,8 +36,8 @@ const MonthlyStatsChart = ({ data }) => {
             itemStyle={{ fontWeight: 'bold' }}
           />
           <Legend />
-          <Bar dataKey="sales" name="Sales" fill="#2563eb" />
-          <Bar dataKey="views" name="Views" fill="#8b5cf6" />
+          <Bar dataKey="deposits" name="Deposits" fill="#2563eb" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="withdrawals" name="Withdrawals" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

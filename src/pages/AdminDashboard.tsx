@@ -19,6 +19,12 @@ import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
 import { isFullAdmin } from '../utils/admin';
 
+const VIEW_PERMISSIONS: Record<string, string> = {
+    stats: 'stats', users: 'users', rooms: 'rooms', transactions: 'transactions',
+    'manual-transactions': 'transactions', agents: 'agents', 'agent-requests': 'agents',
+    tournaments: 'tournaments', settings: 'settings',
+};
+const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'agents', 'agent-requests', 'tournaments', 'settings'];
 
 const AdminDashboard: React.FC = () => {
     // Define AdminUser interface to match backend
@@ -63,6 +69,15 @@ const AdminDashboard: React.FC = () => {
     const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
     const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
 
+    useEffect(() => {
+        if (!adminUser) return;
+        const permissions = adminUser.permissions || [];
+        const fullAccess = permissions.includes('all') || adminUser.username === 'admin' || adminUser.role === 'Super Admin';
+        if (fullAccess || permissions.includes(VIEW_PERMISSIONS[view])) return;
+        const firstAllowedView = VIEW_ORDER.find(candidate => permissions.includes(VIEW_PERMISSIONS[candidate]));
+        if (firstAllowedView) setView(firstAllowedView as typeof view);
+    }, [adminUser, view]);
+
     // Modal state
     const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
     const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
@@ -73,7 +88,7 @@ const AdminDashboard: React.FC = () => {
     const [spectatingRoomId, setSpectatingRoomId] = useState<string | null>(null);
 
 
-    const permissionsList = ['stats', 'users', 'rooms', 'transactions', 'agents', 'settings'];
+    const permissionsList = ['stats', 'users', 'rooms', 'transactions', 'agents', 'tournaments', 'settings'];
 
     const handleLogout = () => {
         localStorage.removeItem('admin_user');
@@ -642,7 +657,12 @@ const AdminDashboard: React.FC = () => {
 
     const renderView = () => {
         // Find user by role
-        const usersByRole = adminSettings?.usersByRole || {};
+        const usersByRole = (adminSettings?.roles || []).reduce((groups: Record<string, any[]>, admin: any) => {
+            const roleName = admin.name || 'Custom Admin';
+            if (!groups[roleName]) groups[roleName] = [];
+            groups[roleName].push(admin);
+            return groups;
+        }, {});
 
         switch (view) {
             case 'stats': return <StatsGrid stats={stats} rooms={rooms} manualTransactions={manualTransactions} setView={setView} />;
@@ -746,7 +766,7 @@ const AdminDashboard: React.FC = () => {
             hasPermission={hasPermission}
         >
             <Toaster />
-            <div className="p-6">
+            <div className="w-full min-w-0 p-3 sm:p-4 lg:p-6">
                 {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
                 {renderView()}
             </div>
@@ -791,8 +811,8 @@ const AdminDashboard: React.FC = () => {
                 const spectatingRoom = rooms.find(r => r.id === spectatingRoomId);
                 if (!spectatingRoom) return null;
                 return (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-3/4 overflow-auto relative">
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[90vh] sm:h-3/4 overflow-auto relative">
                         <button 
                             onClick={() => setSpectatingRoomId(null)} 
                             className="absolute top-2 right-2 text-gray-500 hover:text-gray-800 z-10"
