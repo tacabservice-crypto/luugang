@@ -37,7 +37,11 @@ export interface ManualTransactionRequest {
   id: string;
   userId: string;
   username: string;
-  agentId: string;
+  agentId?: string;
+  agentUsername?: string;
+  managedBy?: 'admin' | 'agent';
+  resolvedBy?: string;
+  resolverUsername?: string;
   amount: number;
   phone: string; // For withdrawals, this is the destination phone number
   senderPhone?: string; // For deposits, this is the source phone number
@@ -213,4 +217,3 @@ export interface TournamentMatch {
   roomId: string | null; // Reference to a GameRoom ID if played in a Ludo room
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
 }
-

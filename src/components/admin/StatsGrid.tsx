@@ -56,8 +56,8 @@ const RoomCard = ({ room }) => {
 const StatsGrid = ({ stats, rooms = [], manualTransactions = [], setView }) => {
   if (!stats) return <p className="text-center text-gray-500">Loading stats...</p>;
 
-  const pendingDeposits = manualTransactions.filter(tx => tx.transactionType === 'deposit' && tx.status === 'pending');
-  const pendingWithdrawals = manualTransactions.filter(tx => tx.transactionType === 'withdraw' && tx.status === 'pending');
+  const pendingDeposits = manualTransactions.filter(tx => tx.managedBy !== 'agent' && tx.transactionType === 'deposit' && tx.status === 'pending');
+  const pendingWithdrawals = manualTransactions.filter(tx => tx.managedBy !== 'agent' && tx.transactionType === 'withdraw' && tx.status === 'pending');
   const activeRooms = rooms.filter(r => r.status === 'playing');
 
   const mainStats = [

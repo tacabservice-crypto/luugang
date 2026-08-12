@@ -96,7 +96,17 @@ export default function App() {
 
   // Firebase Auth State Listener
   useEffect(() => {
+    let authStateResolved = false;
+    const authLoadingTimeout = window.setTimeout(() => {
+      if (!authStateResolved) {
+        console.warn('Firebase Auth initialization timed out; showing the sign-in screen.');
+        setAuthLoading(false);
+      }
+    }, 5000);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      authStateResolved = true;
+      window.clearTimeout(authLoadingTimeout);
       if (firebaseUser) {
         try {
           const token = await firebaseUser.getIdToken();
@@ -129,7 +139,10 @@ export default function App() {
     });
 
     // Cleanup subscription on unmount
-    return () => unsubscribe();
+    return () => {
+      window.clearTimeout(authLoadingTimeout);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

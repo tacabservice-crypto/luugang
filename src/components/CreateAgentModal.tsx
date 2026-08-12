@@ -20,8 +20,8 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
 
     const handleSubmit = async () => {
         setError(null);
-        if (!phone) {
-            setError("Phone number is required.");
+        if (!phone || !promoCode.trim()) {
+            setError("Phone number and promo code are required.");
             return;
         }
         setIsSubmitting(true);
@@ -69,7 +69,7 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
                         type="text"
                         value={promoCode}
                         onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-                        placeholder="Promo Code (optional)"
+                        placeholder="Promo Code (required)"
                         className="bg-gray-700 text-white w-full px-4 py-2 rounded"
                         disabled={isSubmitting}
                     />

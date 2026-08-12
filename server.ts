@@ -65,7 +65,11 @@ interface ManualTransactionRequest {
   id: string;
   userId: string;
   username: string;
-  agentId: string;
+  agentId?: string;
+  agentUsername?: string;
+  managedBy?: 'admin' | 'agent';
+  resolvedBy?: string;
+  resolverUsername?: string;
   amount: number;
   phone?: string; // For withdrawals
   senderPhone?: string; // For deposits
@@ -146,6 +150,21 @@ const rawPort = process.env.PORT || 3002;
 const PORT = typeof rawPort === 'string' && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
 const DB_FILE = path.join(process.cwd(), 'db_store.json');
 const WELCOME_BONUS = 1.0;
+
+function normalizePromoCode(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
+
+async function findAgentDocsByPromoCode(agentsRef: FirebaseFirestore.CollectionReference, promoCode: string) {
+  const exactSnapshot = await agentsRef.where('promoCode', '==', promoCode).get();
+  if (!exactSnapshot.empty) return exactSnapshot.docs;
+
+  // Compatibility for agent records created before promo codes were normalized.
+  const allAgentsSnapshot = await agentsRef.get();
+  return allAgentsSnapshot.docs.filter(
+    (agentDoc) => normalizePromoCode(agentDoc.data().promoCode) === promoCode
+  );
+}
 
 app.use(express.json());
 
@@ -1829,18 +1848,27 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   let linkedAgentId: string | undefined = undefined;
 
   // If a promo code is provided, validate it and find the agent.
-  if (promoCode && typeof promoCode === 'string' && promoCode.trim() !== '') {
+  const normalizedPromoCode = normalizePromoCode(promoCode);
+  if (normalizedPromoCode) {
     if (!db) {
         return res.status(503).json({ error: 'Promo code validation is temporarily unavailable.' });
     }
     const agentsRef = db.collection('agents');
-    const agentSnapshot = await agentsRef.where('promoCode', '==', promoCode.trim()).limit(1).get();
+    const matchingAgentDocs = await findAgentDocsByPromoCode(agentsRef, normalizedPromoCode);
 
-    if (agentSnapshot.empty) {
+    if (matchingAgentDocs.length === 0) {
         return res.status(400).json({ error: 'Invalid or expired promo code.' });
     }
 
-    const agent = agentSnapshot.docs[0].data() as Agent;
+    const agentDoc = matchingAgentDocs[0];
+    const agent = agentDoc.data() as Agent;
+    if (agent.status !== 'Active') {
+      return res.status(400).json({ error: 'This promo code belongs to an inactive agent.' });
+    }
+    if (agent.promoCode !== normalizedPromoCode) {
+      await agentDoc.ref.update({ promoCode: normalizedPromoCode });
+      agent.promoCode = normalizedPromoCode;
+    }
     linkedAgentId = agent.id;
   }
 
@@ -2102,8 +2130,8 @@ app.post('/api/wallet/withdraw', (req, res) => {
 app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   const { userId, agentId, amount, phone, senderPhone, provider, transactionType } = req.body;
 
-  if (!userId || !agentId || !amount || !provider || !transactionType) {
-    return res.status(400).json({ error: 'Missing required fields. `userId`, `agentId`, `amount`, `provider`, and `transactionType` are all required.' });
+  if (!userId || !amount || !provider || !transactionType) {
+    return res.status(400).json({ error: 'Missing required fields. `userId`, `amount`, `provider`, and `transactionType` are all required.' });
   }
 
   const user = store.users[userId];
@@ -2112,7 +2140,8 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   }
 
   // ==> START PROMO CODE AGENT LOCK VALIDATION
-  if (user.linkedAgentId && user.linkedAgentId !== agentId) {
+  const assignedAgentId = user.linkedAgentId || undefined;
+  if (assignedAgentId && agentId && assignedAgentId !== agentId) {
     return res.status(400).json({ error: 'This account is locked to a specific agent. You can only transact with your assigned agent.' });
   }
   // <== END PROMO CODE AGENT LOCK VALIDATION
@@ -2126,12 +2155,18 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   }
 
   // Verify the agent exists
-  if (db) {
+  let assignedAgentUsername: string | undefined;
+  if (assignedAgentId && db) {
       try {
-        const agentDoc = await db.collection('agents').doc(agentId).get();
+        const agentDoc = await db.collection('agents').doc(assignedAgentId).get();
         if (!agentDoc.exists) {
             return res.status(404).json({ error: 'The selected agent does not exist.' });
         }
+        const selectedAgent = agentDoc.data() as Agent;
+        if (selectedAgent.status !== 'Active') {
+            return res.status(400).json({ error: 'The selected agent is not active.' });
+        }
+        assignedAgentUsername = selectedAgent.username;
       } catch (err) {
         console.error("Failed to verify agent for manual transaction request:", err);
         return res.status(500).json({ error: "Could not verify the selected agent." });
@@ -2143,7 +2178,9 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
     id: `req_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     userId,
     username: user.username,
-    agentId: agentId,
+    agentId: assignedAgentId,
+    agentUsername: assignedAgentUsername,
+    managedBy: assignedAgentId ? 'agent' : 'admin',
     amount: parseFloat(amount),
     phone, // This will be the destination for withdrawals
     senderPhone, // This is the source number for deposits
@@ -2849,6 +2886,10 @@ app.post('/api/request-to-agent', authMiddleware, async (req, res) => {
         const agentDoc = await db.collection('agents').doc(agentId).get();
         if (!agentDoc.exists) {
             return res.status(404).json({ error: 'The selected agent does not exist.' });
+        }
+        const selectedAgent = agentDoc.data() as Agent;
+        if (selectedAgent.status !== 'Active') {
+            return res.status(400).json({ error: 'The selected agent is not active.' });
         }
         
         const requestRef = db.collection('playerAgentRequests').doc();
@@ -4472,8 +4513,35 @@ app.get('/api/admin/transactions', isAdmin, (req, res) => {
 });
 
 // Get all pending manual transactions
-app.get('/api/admin/manual-transactions', isAdmin, (req, res) => {
-    res.json(store.pendingManualTransactions || []);
+app.get('/api/admin/manual-transactions', isAdmin, async (req, res) => {
+    const agentNames = new Map<string, string>();
+    if (db) {
+        const linkedAgentIds = [...new Set(
+            Object.values(store.users).map(user => user.linkedAgentId).filter((id): id is string => Boolean(id))
+        )];
+        await Promise.all(linkedAgentIds.map(async agentId => {
+            try {
+                const agentDoc = await db.collection('agents').doc(agentId).get();
+                if (agentDoc.exists) {
+                    agentNames.set(agentId, (agentDoc.data() as Agent).username);
+                }
+            } catch (error) {
+                console.error(`Failed to load agent ${agentId} for admin transaction monitoring:`, error);
+            }
+        }));
+    }
+
+    const transactions = (store.pendingManualTransactions || []).map(tx => {
+        const user = store.users[tx.userId];
+        const linkedAgentId = user?.linkedAgentId;
+        return {
+            ...tx,
+            agentId: linkedAgentId || tx.agentId,
+            agentUsername: tx.agentUsername || (linkedAgentId ? agentNames.get(linkedAgentId) : undefined),
+            managedBy: tx.managedBy || (linkedAgentId ? 'agent' : 'admin'),
+        };
+    });
+    res.json(transactions);
 });
 
 app.get('/api/admin/payment-settings', isAdmin, (req, res) => {
@@ -4516,6 +4584,10 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', isAdmin, async
         return res.status(404).json({ error: 'User associated with transaction not found.' });
     }
 
+    if (tx.managedBy === 'agent' || user.linkedAgentId) {
+        return res.status(403).json({ error: 'This transaction is assigned to an agent and is read-only for administrators.' });
+    }
+
     if (tx.transactionType === 'deposit') {
         user.balance += tx.amount;
         addTransaction(user.id, 'deposit', tx.amount, undefined, `Manual deposit approved by admin. Request ID: ${tx.id}`);
@@ -4532,6 +4604,9 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', isAdmin, async
     }
 
     tx.status = 'approved';
+    tx.managedBy = 'admin';
+    tx.resolvedBy = String(req.query.userId || 'admin');
+    tx.resolverUsername = 'Admin';
     await saveStoreAndWait();
 
     broadcastUserUpdate(user.id);
@@ -4547,7 +4622,12 @@ app.post('/api/admin/manual-transactions/:transactionId/reject', isAdmin, async 
         return res.status(404).json({ error: 'Pending transaction not found or already processed.' });
     }
 
+
     const user = store.users[tx.userId];
+    if (tx.managedBy === 'agent' || user?.linkedAgentId) {
+        return res.status(403).json({ error: 'This transaction is assigned to an agent and is read-only for administrators.' });
+    }
+
     if (!user) {
         // Even if user not found, we can still mark transaction as rejected
         tx.status = 'rejected';
@@ -4558,6 +4638,9 @@ app.post('/api/admin/manual-transactions/:transactionId/reject', isAdmin, async 
     // On rejection, no balance change should occur. Funds are only moved on approval.
     // The previous logic incorrectly "refunded" money that was never taken.
     tx.status = 'rejected';
+    tx.managedBy = 'admin';
+    tx.resolvedBy = String(req.query.userId || 'admin');
+    tx.resolverUsername = 'Admin';
     await saveStoreAndWait();
     
     // Notify the user their request was rejected, but their balance is unchanged.
@@ -4657,8 +4740,9 @@ app.post('/api/admin/agents/create', isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const { username, password, commissionRate, location, phone, promoCode } = req.body;
 
-  if (!username || !password || !commissionRate || !phone) {
-    return res.status(400).json({ error: 'Username, password, commission rate, and phone are required.' });
+  const normalizedPromoCode = normalizePromoCode(promoCode);
+  if (!username || !password || !commissionRate || !phone || !normalizedPromoCode) {
+    return res.status(400).json({ error: 'Username, password, commission rate, phone, and promo code are required.' });
   }
 
   // More validation
@@ -4683,11 +4767,9 @@ app.post('/api/admin/agents/create', isAdmin, async (req, res) => {
     }
 
     // Check for promo code uniqueness
-    if (promoCode && typeof promoCode === 'string' && promoCode.trim() !== '') {
-        const promoCodeQuery = await agentsRef.where('promoCode', '==', promoCode.trim()).get();
-        if (!promoCodeQuery.empty) {
-            return res.status(400).json({ error: 'Promo code is already in use.' });
-        }
+    const matchingPromoDocs = await findAgentDocsByPromoCode(agentsRef, normalizedPromoCode);
+    if (matchingPromoDocs.length > 0) {
+        return res.status(400).json({ error: 'Promo code is already in use.' });
     }
 
     const agentId = `agent_${Date.now()}`;
@@ -4698,7 +4780,7 @@ app.post('/api/admin/agents/create', isAdmin, async (req, res) => {
       phone,
       location: location || '',
       commissionRate: rate,
-      promoCode: (promoCode && typeof promoCode === 'string') ? promoCode.trim() : '',
+      promoCode: normalizedPromoCode,
       balance: 0,
       floatBalance: 0,
       status: 'Active',
@@ -4737,16 +4819,20 @@ app.post('/api/admin/agents/:agentId/update', isAdmin, async (req, res) => {
             return res.status(400).json({ error: 'Full Admin agents are protected and cannot be edited, suspended, or deleted.' });
         }
 
+        const normalizedPromoCode = promoCode === undefined
+          ? undefined
+          : normalizePromoCode(promoCode);
+
+        if (normalizedPromoCode !== undefined && !normalizedPromoCode) {
+            return res.status(400).json({ error: 'Promo code cannot be empty.' });
+        }
+
         // Check for promo code uniqueness if it's being changed
-        if (promoCode && typeof promoCode === 'string' && promoCode.trim() !== '' && promoCode.trim() !== agentData.promoCode) {
+        if (normalizedPromoCode && normalizedPromoCode !== normalizePromoCode(agentData.promoCode)) {
             const agentsRef = db.collection('agents');
-            const promoCodeQuery = await agentsRef.where('promoCode', '==', promoCode.trim()).get();
-            if (!promoCodeQuery.empty) {
-                // Ensure the found agent is not the same one we are editing
-                const isSameAgent = promoCodeQuery.docs.some(doc => doc.id === agentId);
-                if (!isSameAgent) {
+            const matchingPromoDocs = await findAgentDocsByPromoCode(agentsRef, normalizedPromoCode);
+            if (matchingPromoDocs.some(doc => doc.id !== agentId)) {
                    return res.status(400).json({ error: 'Promo code is already in use by another agent.' });
-                }
             }
         }
 
@@ -4775,8 +4861,8 @@ app.post('/api/admin/agents/:agentId/update', isAdmin, async (req, res) => {
             updateData.location = location;
         }
 
-        if (promoCode !== undefined) {
-            updateData.promoCode = promoCode.trim();
+        if (normalizedPromoCode !== undefined) {
+            updateData.promoCode = normalizedPromoCode;
         }
 
         if (Object.keys(updateData).length === 0) {
@@ -4813,6 +4899,13 @@ app.delete('/api/admin/agents/:agentId/delete', isAdmin, async (req, res) => {
 
         if (isFullAdminAgent) {
             return res.status(400).json({ error: 'Full Admin agents are protected and cannot be deleted.' });
+        }
+
+        const linkedPlayers = Object.values(store.users).filter(user => user.linkedAgentId === agentId);
+        if (linkedPlayers.length > 0) {
+            return res.status(409).json({
+                error: `This agent has ${linkedPlayers.length} linked player(s). Reassign or unlink them before deleting the agent.`
+            });
         }
 
         await agentRef.delete();
@@ -5342,7 +5435,10 @@ app.get('/api/agent/requests', isAgent, async (req, res) => {
 app.get('/api/agent/player-requests', isAgent, (req, res) => {
     const agent: Agent = (req as any).agent;
 
-    const agentSpecificTxs = store.pendingManualTransactions.filter(tx => tx.status === 'pending' && tx.agentId === agent.id);
+    const agentSpecificTxs = store.pendingManualTransactions.filter(tx => {
+        const user = store.users[tx.userId];
+        return tx.status === 'pending' && tx.agentId === agent.id && (tx.managedBy === 'agent' || user?.linkedAgentId === agent.id);
+    });
 
     const responsePayload: PlayerAgentRequest[] = agentSpecificTxs.map(tx => {
         const user = store.users[tx.userId];
@@ -5375,6 +5471,10 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
 
     if (!tx || tx.status !== 'pending') {
         return res.status(404).json({ error: 'Pending transaction not found or already processed.' });
+    }
+
+    if (tx.agentId !== agent.id) {
+        return res.status(403).json({ error: 'This transaction request belongs to a different agent.' });
     }
 
     const user = store.users[tx.userId];
@@ -5469,6 +5569,11 @@ app.post('/api/agent/player-requests/:requestId/reject', isAgent, async (req, re
 
     if (!tx || tx.status !== 'pending') {
         return res.status(404).json({ error: 'Pending transaction not found or already processed.' });
+    }
+
+
+    if (tx.agentId !== agent.id) {
+        return res.status(403).json({ error: 'This transaction request belongs to a different agent.' });
     }
 
     const user = store.users[tx.userId];

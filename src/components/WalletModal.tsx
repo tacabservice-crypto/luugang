@@ -56,7 +56,10 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
               if (linkedAgent) {
                 setAgents([linkedAgent]);
               } else {
-                setAgents(data);
+                setAgents([]);
+                setError(language === 'so'
+                  ? 'Agent-ka koontadan ku xiran hadda ma shaqeynayo ama waa la waayey. Fadlan la xiriir admin-ka.'
+                  : 'The agent assigned to this account is inactive or unavailable. Please contact an administrator.');
               }
               setSelectedAgentId(user.linkedAgentId);
             } else {
@@ -96,7 +99,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 userId: user.id,
-                agentId: selectedAgentId,
+                agentId: user.linkedAgentId || undefined,
                 amount: parseFloat(amount),
                 phone: activeTab === 'withdraw' ? phone : (agents.find(a => a.id === selectedAgentId)?.phone || DEPOSIT_PHONE_NUMBER),
                 senderPhone: activeTab === 'deposit' ? senderPhone : undefined,
@@ -137,7 +140,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     }
 
     if (activeTab === 'deposit') {
-      if (!selectedAgentId) {
+      if (user.linkedAgentId && !selectedAgentId) {
         setError('Please select an agent to deposit to.');
         return;
       }
@@ -146,7 +149,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
         return;
       }
     } else { // withdraw
-      if (!selectedAgentId) {
+      if (user.linkedAgentId && !selectedAgentId) {
         setError('Please select an agent to withdraw from.');
         return;
       }
@@ -163,7 +166,9 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     }
       
     const selectedAgent = agents.find(a => a.id === selectedAgentId);
-    let targetPhone = activeTab === 'deposit' ? (selectedAgent?.phone || null) : phone;
+    let targetPhone = activeTab === 'deposit'
+      ? (user.linkedAgentId ? selectedAgent?.phone : DEPOSIT_PHONE_NUMBER)
+      : phone;
 
     if (activeTab === 'deposit' && !targetPhone) {
         setError("The selected agent does not have a phone number configured. Please choose another agent.");
@@ -304,7 +309,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
              ) : (
               <form className="space-y-4" onSubmit={handleGenerateUssd}>
                 
-                {(activeTab === 'deposit' || activeTab === 'withdraw') && (
+                {(activeTab === 'deposit' || activeTab === 'withdraw') && user.linkedAgentId && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
@@ -326,7 +331,11 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                           : 'border-white/10'
                       }`}
                     >
-                      {agents.length === 0 && <option value="">Loading agent...</option>}
+                      {agents.length === 0 && (
+                        <option value="">
+                          {user.linkedAgentId ? 'Assigned agent unavailable' : 'Loading agent...'}
+                        </option>
+                      )}
                       {agents.map(agent => (
                         <option key={agent.id} value={agent.id}>
                           {agent.username} ({agent.location || 'N/A'})
@@ -340,6 +349,19 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                           : 'Your account is locked to the agent whose promo code you registered with.'}
                       </p>
                     )}
+                  </div>
+                )}
+
+                {(activeTab === 'deposit' || activeTab === 'withdraw') && !user.linkedAgentId && (
+                  <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
+                    <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">
+                      {language === 'so' ? 'Admin Review' : 'Admin Review'}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-300">
+                      {language === 'so'
+                        ? 'Koontadan agent kuma xirna. Codsigaaga admin-ka ayaa si toos ah u hubinaya.'
+                        : 'This account is not linked to an agent. Your request will be reviewed directly by an administrator.'}
+                    </p>
                   </div>
                 )}
                 

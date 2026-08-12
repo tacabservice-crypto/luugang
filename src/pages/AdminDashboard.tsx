@@ -239,9 +239,11 @@ const AdminDashboard: React.FC = () => {
 
                 if (manualTransactions.length > 0) {
                     const existingIds = new Set(manualTransactions.map(tx => tx.id));
-                    const newTransactions = data.filter(tx => !existingIds.has(tx.id));
+                    const newTransactions = data.filter(tx =>
+                        !existingIds.has(tx.id) && tx.managedBy !== 'agent' && tx.status === 'pending'
+                    );
                     if (newTransactions.length > 0) {
-                        toast.success(`${newTransactions.length} new manual transaction request(s)!`);
+                        toast.success(`${newTransactions.length} new admin transaction request(s)!`);
                     }
                 }
                 

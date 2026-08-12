@@ -211,9 +211,9 @@ const AgentDashboard = () => {
         }
     };
 
-    const fetchPaymentInstructions = async () => {
+    const fetchPaymentInstructions = async (agentId: string) => {
         try {
-            const response = await fetch('/api/agent/payment-instructions');
+            const response = await fetch(`/api/agent/payment-instructions?agentId=${agentId}`);
             if (!response.ok) return;
             const data = await response.json();
             setPaymentInstructions(data.instructions || '');
@@ -284,7 +284,7 @@ const AgentDashboard = () => {
             await Promise.all([
                 fetchTransactions(data.id),
                 fetchAgentRequests(data.id),
-                fetchPaymentInstructions(),
+                fetchPaymentInstructions(data.id),
                 fetchLinkedPlayers(data.id)
             ]);
 
