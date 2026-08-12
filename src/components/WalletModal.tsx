@@ -16,6 +16,7 @@ interface WalletModalProps {
 }
 
 const DEPOSIT_PHONE_NUMBER = '907243775'; // Fallback admin number
+const cityOnly = (location?: string) => location?.split(',')[0]?.trim() || 'N/A';
 
 export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletModalProps) {
   const { t, language } = useLanguage();
@@ -338,7 +339,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                       )}
                       {agents.map(agent => (
                         <option key={agent.id} value={agent.id}>
-                          {agent.username} ({agent.location || 'N/A'})
+                          {agent.username} ({cityOnly(agent.location)})
                         </option>
                       ))}
                     </select>

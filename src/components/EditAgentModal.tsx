@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Agent } from '../types/game';
 import { isFullAdmin } from '../utils/admin';
+import LocationPicker from './LocationPicker';
 
 interface EditAgentModalProps {
     agent: Agent;
@@ -45,8 +46,8 @@ const EditAgentModal: React.FC<EditAgentModalProps> = ({ agent, onClose, onSave 
             setError('New password must be at least 6 characters long.');
             return;
         }
-        if (!phone) {
-            setError('Phone number is required.');
+        if (!phone || !location) {
+            setError('Phone number and location are required.');
             return;
         }
 
@@ -103,7 +104,7 @@ const EditAgentModal: React.FC<EditAgentModalProps> = ({ agent, onClose, onSave 
                     </div>
                      <div>
                         <label className="block text-sm font-medium text-gray-400">Location</label>
-                        <input type="text" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g., Mogadishu" className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1" />
+                        <LocationPicker value={location} onChange={setLocation} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1" />
                     </div>
                 </div>
                 {error && <p className="text-red-500 text-sm mt-4">{error}</p>}

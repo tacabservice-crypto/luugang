@@ -91,7 +91,7 @@ function PhysicalDice({
   };
 
   return (
-    <div className="flex flex-col items-center justify-center py-4">
+    <div className="flex flex-col items-center justify-center py-2 sm:py-4">
       {/* 3D Perspective Container */}
       <div 
         className={`w-20 h-20 cursor-pointer flex items-center justify-center relative ${
@@ -159,7 +159,7 @@ function PhysicalDice({
 
       {/* Tap Instruction / Status Glow */}
       {!disabled && !isRolling && !value && (
-        <span className="text-[9px] font-black uppercase tracking-widest text-blue-400 animate-pulse mt-2">
+        <span className="mt-1 text-[9px] font-black uppercase tracking-widest text-blue-400 animate-pulse sm:mt-2">
           TAABO SI AAD U LA REEDO 🎲
         </span>
       )}

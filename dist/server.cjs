@@ -122,6 +122,24 @@ async function findAgentDocsByPromoCode(agentsRef, promoCode) {
   );
 }
 app.use(import_express.default.json());
+function formatGeocodedLocation(address) {
+  const city = address?.city || address?.town || address?.village || address?.municipality || address?.county || address?.state;
+  const country = address?.country;
+  return [city, country].filter(Boolean).join(", ");
+}
+app.get("/api/locations/search", async (req, res) => {
+  const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (query.length < 2) return res.json([]);
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&q=${encodeURIComponent(query)}`, { headers: { "User-Agent": "LudoSom-Agent-Location/1.0" } });
+    if (!response.ok) throw new Error(`Geocoder returned ${response.status}`);
+    const results = await response.json();
+    res.json([...new Set(results.map((item) => formatGeocodedLocation(item.address)).filter(Boolean))].slice(0, 8));
+  } catch (error) {
+    console.error("Location search failed:", error);
+    res.status(502).json({ error: "Location search is temporarily unavailable." });
+  }
+});
 app.use(import_express.default.static(import_path.default.join(process.cwd(), "public")));
 app.use(import_express.default.static(getDistDirectory()));
 var db = null;
@@ -814,6 +832,7 @@ function executeBotTurnIfActive(room) {
       const d = Math.floor(Math.random() * 6) + 1;
       room.gameState.diceRoll = d;
       room.gameState.hasRolled = true;
+      broadcastToRoom(room.id, "game_update", room);
       addLog(room, `\u{1F916} Bot ${activePlayer.username} rolled a ${d}!`);
       const playerTokens = room.gameState.tokens.filter((t) => t.color === activePlayer.color);
       const validTokens = playerTokens.filter((t) => isMoveValid(t, d));
@@ -823,7 +842,7 @@ function executeBotTurnIfActive(room) {
           advanceTurn(room);
           broadcastToRoom(room.id, "game_update", room);
           executeBotTurnIfActive(room);
-        }, 500);
+        }, 900);
       } else {
         let selectedToken = validTokens[0];
         for (const token of validTokens) {
@@ -849,7 +868,7 @@ function executeBotTurnIfActive(room) {
           moveTokenLogic(room, selectedToken.id, d);
           broadcastToRoom(room.id, "game_update", room);
           executeBotTurnIfActive(room);
-        }, 500);
+        }, 900);
       }
     }
   }, 400);
@@ -3667,8 +3686,8 @@ app.post("/api/admin/agents/create", hasPermission("agents"), async (req, res) =
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   const { username, password, commissionRate, location, phone, promoCode } = req.body;
   const normalizedPromoCode = normalizePromoCode(promoCode);
-  if (!username || !password || !commissionRate || !phone || !normalizedPromoCode) {
-    return res.status(400).json({ error: "Username, password, commission rate, phone, and promo code are required." });
+  if (!username || !password || !commissionRate || !phone || !normalizedPromoCode || !location) {
+    return res.status(400).json({ error: "Username, password, commission rate, phone, promo code, and location are required." });
   }
   if (typeof username !== "string" || username.length < 3) {
     return res.status(400).json({ error: "Username must be a string of at least 3 characters." });
@@ -4028,7 +4047,8 @@ app.post("/api/agent/login", async (req, res) => {
     if (agent.status !== "Active") {
       return res.status(403).json({ error: "This agent account is not active." });
     }
-    res.json({ success: true, agent });
+    const { password: _, ...safeAgent } = agent;
+    res.json({ success: true, agent: safeAgent });
   } catch (error) {
     console.error("Agent login failed:", error);
     res.status(500).json({ error: "An internal server error occurred during login." });
@@ -4059,7 +4079,72 @@ async function isAgent(req, res, next) {
 }
 app.get("/api/agent/profile", isAgent, (req, res) => {
   const agent = req.agent;
-  res.json(agent);
+  const { password: _, ...safeAgent } = agent;
+  res.json(safeAgent);
+});
+app.put("/api/agent/location", isAgent, async (req, res) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const agent = req.agent;
+  const latitude = Number(req.body.latitude);
+  const longitude = Number(req.body.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return res.status(400).json({ error: "Invalid location coordinates." });
+  }
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${latitude}&lon=${longitude}`, { headers: { "User-Agent": "LudoSom-Agent-Location/1.0" } });
+    if (!response.ok) throw new Error(`Geocoder returned ${response.status}`);
+    const result = await response.json();
+    const location = formatGeocodedLocation(result.address);
+    if (!location) return res.status(422).json({ error: "Could not identify a city for this location." });
+    await db.collection("agents").doc(agent.id).update({ location });
+    const { password: _, ...safeAgent } = { ...agent, location };
+    res.json({ success: true, agent: safeAgent });
+  } catch (error) {
+    console.error(`Failed to detect agent location ${agent.id}:`, error);
+    res.status(502).json({ error: "Location service is temporarily unavailable. Please try again." });
+  }
+});
+app.put("/api/agent/profile", isAgent, async (req, res) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const agent = req.agent;
+  const agentId = req.query.agentId;
+  const username = typeof req.body.username === "string" ? req.body.username.trim() : "";
+  const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : "";
+  const location = typeof req.body.location === "string" ? req.body.location.trim() : "";
+  const currentPassword = req.body.currentPassword;
+  const newPassword = req.body.newPassword;
+  const confirmPassword = req.body.confirmPassword;
+  if (!username || username.length < 3 || !phone || !location) {
+    return res.status(400).json({ error: "Username must be at least 3 characters; phone and detected location are required." });
+  }
+  if (typeof currentPassword !== "string" || agent.password !== currentPassword) {
+    return res.status(400).json({ error: "Current password is incorrect." });
+  }
+  if (newPassword) {
+    if (typeof newPassword !== "string" || newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters." });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "New password and confirmation do not match." });
+    }
+  }
+  try {
+    if (username.toLowerCase() !== String(agent.username).toLowerCase()) {
+      const usernameSnapshot = await db.collection("agents").where("username", "==", username).get();
+      if (usernameSnapshot.docs.some((doc) => doc.id !== agentId)) {
+        return res.status(409).json({ error: "That agent username is already in use." });
+      }
+    }
+    const updateData = { username, phone, location };
+    if (newPassword) updateData.password = newPassword;
+    await db.collection("agents").doc(agentId).update(updateData);
+    const updatedDoc = await db.collection("agents").doc(agentId).get();
+    const { password: _, ...safeAgent } = updatedDoc.data();
+    res.json({ success: true, agent: safeAgent, message: "Profile updated successfully." });
+  } catch (error) {
+    console.error(`Failed to update agent profile ${agentId}:`, error);
+    res.status(500).json({ error: "Failed to update agent profile." });
+  }
 });
 app.get("/api/agent/player-lookup", isAgent, (req, res) => {
   const agent = req.agent;

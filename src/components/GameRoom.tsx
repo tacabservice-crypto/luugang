@@ -111,6 +111,7 @@ export default function GameRoomView({
   const [activePanel, setActivePanel] = useState<'chat' | 'logs'>('logs');
   const [isRolling, setIsRolling] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
+  const [showDicePrompt, setShowDicePrompt] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
@@ -258,12 +259,13 @@ export default function GameRoomView({
       setIsRolling(true);
       if (isSpeakerOn && diceAudioRef.current) {
         diceAudioRef.current.volume = 0.5;
+        diceAudioRef.current.currentTime = 0;
         diceAudioRef.current.play().catch(e => console.error("Error playing dice sound:", e));
       }
       const timer = setTimeout(() => setIsRolling(false), 800);
       return () => clearTimeout(timer);
     }
-  }, [room.gameState.diceRoll, room.gameState.hasRolled, isSpeakerOn]);
+  }, [room.gameState.diceRoll, room.gameState.hasRolled, room.gameState.turn, activePlayer?.userId, isSpeakerOn]);
 
   // Win/Loss sound effect
   useEffect(() => {
@@ -346,6 +348,16 @@ export default function GameRoomView({
       return () => clearTimeout(delay);
     }
   }, [autoRoll, isActiveTurn, room.gameState.hasRolled, isRolling, onRollDice]);
+
+  // Remind the active player to roll after five seconds of inactivity.
+  useEffect(() => {
+    setShowDicePrompt(false);
+
+    if (!isActiveTurn || room.gameState.hasRolled || isRolling) return;
+
+    const promptDelay = setTimeout(() => setShowDicePrompt(true), 5000);
+    return () => clearTimeout(promptDelay);
+  }, [isActiveTurn, room.gameState.turn, room.gameState.hasRolled, isRolling]);
 
   // Handle the case where the player has been rejected by the host.
   if (hasBeenRejected) {
@@ -831,7 +843,16 @@ export default function GameRoomView({
           // The original 4-player and teams rendering logic
           <div className={`grid grid-cols-2 gap-2 relative z-10`}>
             {/* Player Group 1 (Green / Red+Yellow) */}
-            <>
+            <div className={`p-2.5 rounded-xl border transition-all duration-300 ${
+              room.gameMode === 'team'
+                ? 'bg-gradient-to-br from-red-500/5 to-yellow-500/5 border-red-500/20 shadow-lg shadow-red-500/5'
+                : 'bg-black/20 border-white/5'
+            }`}>
+              <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider mb-2">
+                <span className="text-red-400 tracking-widest font-black text-[9px]">TEAM CAS & JAALLE</span>
+                {room.gameMode === 'team' && <span className="text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded text-[8px] font-bold">XULAFA</span>}
+              </div>
+              <div className="space-y-1.5">
               {['red', 'yellow'].map((color) => {
                 const pl = room.players.find(p => p.color === color);
                 const isCurrent = activePlayer?.color === color;
@@ -853,7 +874,8 @@ export default function GameRoomView({
                   </div>
                 );
               })}
-            </>
+              </div>
+            </div>
 
             {/* Player Group 2 (Yellow / Green+Blue) */}
             <div className={`p-2.5 rounded-xl border transition-all duration-300 ${
@@ -911,9 +933,9 @@ export default function GameRoomView({
             4. ACTIVE CONTROLLER PANEL (DICE ROLLER)
            ========================================== */}
         {room.status === 'playing' ? (
-          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center space-y-3 relative overflow-hidden shadow-xl">
+          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 sm:p-4 flex flex-col items-center justify-center space-y-2 sm:space-y-3 relative overflow-hidden shadow-xl">
             {/* Turn Announcement Banner */}
-            <div className="text-center">
+            <div className="hidden text-center sm:block">
               {isActiveTurn ? (
                 <div className="space-y-1">
                   <div className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center justify-center gap-1">
@@ -953,25 +975,28 @@ export default function GameRoomView({
               />
 
               {isActiveTurn && room.gameState.hasRolled && validTokenMoves.length > 0 && (
-                <div className="bg-blue-500/10 px-4 py-2 rounded-xl border border-blue-500/20 text-center animate-pulse mt-1">
-                  <span className="text-[10px] font-black text-blue-400 uppercase block">Dooro Boorinka</span>
-                  <span className="text-[9px] text-slate-400 font-bold block">Taabo boorinka kor ku iftiimaya si aad u dhaqaajiso!</span>
-                </div>
+                <span className="absolute right-2 top-2 z-10 animate-pulse text-[10px] font-black uppercase tracking-wide text-blue-400 sm:right-3 sm:top-3">
+                  Dooro Boorinka
+                </span>
+              )}
+
+              {showDicePrompt && isActiveTurn && !room.gameState.hasRolled && (
+                <span className="absolute right-2 top-2 z-10 animate-pulse text-[10px] font-black uppercase tracking-wide text-yellow-400 sm:right-3 sm:top-3">
+                  Taabo Laadhuuda
+                </span>
               )}
             </div>
 
-            {/* Auto Roll Toggle Switch */}
-            <div className="flex items-center justify-between w-full bg-black/20 p-2 text-xs rounded-xl border border-white/5 mt-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">⚡</span>
-                <div>
-                  <span className="text-[10px] font-black text-slate-200 block">Duubid Toos Ah</span>
-                  <span className="text-[8px] font-bold text-slate-500 block">Auto-rolls on your turn</span>
-                </div>
-              </div>
+            {/* Auto-roll toggle pinned to the card's top-left without taking layout space. */}
+            <div className="absolute left-2 top-2 z-10 sm:left-3 sm:top-3">
               <button
                 onClick={() => setAutoRoll(!autoRoll)}
-                className={`w-10 h-5 rounded-full p-0.5 transition-all relative ${
+                type="button"
+                role="switch"
+                aria-checked={autoRoll}
+                aria-label="Duubid Toos Ah"
+                title="Duubid Toos Ah"
+                className={`w-10 h-5 rounded-full p-0.5 transition-all relative shadow-md ${
                   autoRoll ? 'bg-purple-600' : 'bg-slate-700'
                 }`}
               >

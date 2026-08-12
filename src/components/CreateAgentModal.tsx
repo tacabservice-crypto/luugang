@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import LocationPicker from './LocationPicker';
 
 interface CreateAgentModalProps {
     isOpen: boolean;
@@ -20,8 +21,8 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
 
     const handleSubmit = async () => {
         setError(null);
-        if (!phone || !promoCode.trim()) {
-            setError("Phone number and promo code are required.");
+        if (!phone || !promoCode.trim() || !location) {
+            setError("Phone number, promo code, and location are required.");
             return;
         }
         setIsSubmitting(true);
@@ -84,14 +85,7 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
                         className="bg-gray-700 text-white w-full px-4 py-2 rounded"
                         disabled={isSubmitting}
                     />
-                    <input
-                        type="text"
-                        value={location}
-                        onChange={(e) => setLocation(e.target.value)}
-                        placeholder="Location (e.g., Mogadishu)"
-                        className="bg-gray-700 text-white w-full px-4 py-2 rounded"
-                        disabled={isSubmitting}
-                    />
+                    <LocationPicker value={location} onChange={setLocation} disabled={isSubmitting} className="bg-gray-700 text-white w-full px-4 py-2 rounded" />
                 </div>
                 <div className="mt-6 flex justify-end space-x-4">
                     <button onClick={onClose} className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded" disabled={isSubmitting}>

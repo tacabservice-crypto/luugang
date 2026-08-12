@@ -35,7 +35,12 @@ import {
     History as HistoryIcon,
     Eye,
     EyeOff,
-    X
+    X,
+    UserCog,
+    Save,
+    Lock,
+    MoreVertical,
+    Languages
 } from 'lucide-react';
 
 // Transaction Detail Modal Component
@@ -164,13 +169,19 @@ const AgentDashboard = () => {
     const [linkedPlayers, setLinkedPlayers] = useState<UserProfile[]>([]);
 
     // Navigation and filtering state
-    const [activeTab, setActiveTab] = useState<'overview' | 'requests' | 'requestFloat' | 'players' | 'history' | 'floatHistory'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'requests' | 'requestFloat' | 'players' | 'history' | 'floatHistory' | 'settings'>('overview');
     const [requestFilter, setRequestFilter] = useState<'all' | 'pending' | 'deposit' | 'withdrawal' | 'approved' | 'rejected'>('all');
     const [requestSearch, setRequestSearch] = useState('');
     const [playerSearch, setPlayerSearch] = useState('');
     const [txTypeFilter, setTxTypeFilter] = useState<string>('all');
     const [copiedPromo, setCopiedPromo] = useState(false);
     const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+    const [profileForm, setProfileForm] = useState({ username: '', phone: '', location: '', currentPassword: '', newPassword: '', confirmPassword: '' });
+    const [savingProfile, setSavingProfile] = useState(false);
+    const [detectingLocation, setDetectingLocation] = useState(false);
+    const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+    const [language, setLanguage] = useState<'en' | 'so'>(() => localStorage.getItem('app_language') === 'so' ? 'so' : 'en');
+    const text = (english: string, somali: string) => language === 'so' ? somali : english;
 
     const ITEMS_PER_PAGE = 10;
 
@@ -279,6 +290,7 @@ const AgentDashboard = () => {
             }
             const data = await response.json();
             setAgent(data);
+            setProfileForm(current => ({ ...current, username: data.username || '', phone: data.phone || '', location: data.location || '' }));
             setIsLoggedIn(true);
             
             await Promise.all([
@@ -405,6 +417,78 @@ const AgentDashboard = () => {
         setUsername('');
         setPassword('');
         toast.success('Logged out successfully');
+    };
+
+    const toggleAgentLanguage = () => {
+        const nextLanguage = language === 'en' ? 'so' : 'en';
+        setLanguage(nextLanguage);
+        localStorage.setItem('app_language', nextLanguage);
+        setHeaderMenuOpen(false);
+        toast.success(nextLanguage === 'so' ? 'Luuqadda waxaa loo beddelay Soomaali' : 'Language changed to English');
+    };
+
+    const handleSaveProfile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!agent) return;
+        if (!profileForm.currentPassword) {
+            toast.error('Enter your current password to save changes.');
+            return;
+        }
+        setSavingProfile(true);
+        try {
+            const response = await fetch(`/api/agent/profile?agentId=${agent.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(profileForm),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to update profile.');
+            setAgent(data.agent);
+            setProfileForm(current => ({ ...current, username: data.agent.username || '', phone: data.agent.phone || '', location: data.agent.location || '', currentPassword: '', newPassword: '', confirmPassword: '' }));
+            toast.success(data.message || 'Profile updated successfully.');
+        } catch (err: any) {
+            toast.error(err.message || 'Failed to update profile.');
+        } finally {
+            setSavingProfile(false);
+        }
+    };
+
+    const handleDetectLocation = () => {
+        if (!navigator.geolocation) {
+            toast.error('Location detection is not supported by this browser.');
+            return;
+        }
+        setDetectingLocation(true);
+        navigator.geolocation.getCurrentPosition(
+            async position => {
+                try {
+                    if (!agent) return;
+                    const response = await fetch(`/api/agent/location?agentId=${agent.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+                    });
+                    const contentType = response.headers.get('content-type') || '';
+                    if (!contentType.includes('application/json')) {
+                        throw new Error('Location API is unavailable. Please refresh after the server restarts.');
+                    }
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || 'Unable to save detected location.');
+                    setAgent(data.agent);
+                    setProfileForm(current => ({ ...current, location: data.agent.location || '' }));
+                    toast.success(`Location updated: ${data.agent.location}`);
+                } catch (err: any) {
+                    toast.error(err.message || 'Unable to save detected location.');
+                } finally {
+                    setDetectingLocation(false);
+                }
+            },
+            error => {
+                setDetectingLocation(false);
+                toast.error(error.code === error.PERMISSION_DENIED ? 'Please allow location access in your browser.' : 'Unable to detect your location. Please try again.');
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }
+        );
     };
 
     // Initial auth check
@@ -602,59 +686,86 @@ const AgentDashboard = () => {
 
             {/* Top Navigation Bar */}
             <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 lg:px-8 py-3.5">
-                <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+                <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
                     
                     {/* Brand */}
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-600/20 border border-purple-400/20">
+                    <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                        <div className="hidden w-10 h-10 shrink-0 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-xl sm:flex items-center justify-center shadow-lg shadow-purple-600/20 border border-purple-400/20">
                             <ShieldCheck className="w-6 h-6 text-white" />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                                <h1 className="text-lg font-bold bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent">
+                                <h1 className="truncate text-sm font-bold bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent sm:text-lg">
                                     Agent Portal
                                 </h1>
-                                <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center gap-1">
+                                <span className="hidden px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full sm:flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                                     Active
                                 </span>
                             </div>
-                            <p className="text-xs text-slate-400 flex items-center gap-1">
+                            <p className="flex max-w-32 items-center gap-1 truncate text-[10px] text-slate-400 sm:max-w-none sm:text-xs">
                                 <span>{agent.username}</span>
-                                {agent.location && <span className="text-slate-500">• {agent.location}</span>}
+                                {agent.location && <span className="hidden truncate text-slate-500 md:inline">• {agent.location}</span>}
                             </p>
                         </div>
                     </div>
 
                     {/* Quick Stats Header Actions */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-right sm:px-3">
+                            <span className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-400 sm:block">{language === 'so' ? 'Haraaga' : 'Balance'}</span>
+                            <span className="block text-xs font-extrabold font-mono text-emerald-400 sm:text-sm">${(agent.floatBalance ?? agent.balance ?? 0).toFixed(2)}</span>
+                        </div>
                         {/* Refresh button */}
                         <button
                             onClick={() => fetchProfile(agent.id, true)}
                             disabled={refreshing}
                             className="p-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-700/80 transition-all flex items-center gap-2 text-xs font-medium"
-                            title="Refresh Dashboard"
+                            title={text('Refresh Dashboard', 'Cusbooneysii Dashboard-ka')}
                         >
                             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-purple-400' : ''}`} />
-                            <span className="hidden sm:inline">Refresh</span>
+                            <span className="hidden sm:inline">{text('Refresh', 'Cusbooneysii')}</span>
                         </button>
 
-                        {/* Logout button */}
-                        <button
-                            onClick={handleLogout}
-                            className="p-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/20 transition-all flex items-center gap-2 text-xs font-semibold"
-                        >
-                            <LogOut className="w-4 h-4" />
-                            <span className="hidden sm:inline">Logout</span>
-                        </button>
+                        <div className="relative">
+                            <button onClick={() => setHeaderMenuOpen(open => !open)} className="rounded-xl border border-slate-700/80 bg-slate-800/80 p-2.5 text-slate-300 transition-all hover:bg-slate-800 hover:text-white" aria-label="Open account menu">
+                                <MoreVertical className="h-4 w-4" />
+                            </button>
+                            {headerMenuOpen && <>
+                                <button className="fixed inset-0 z-40 cursor-default" onClick={() => setHeaderMenuOpen(false)} aria-label="Close account menu" />
+                                <div className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl">
+                                    <button onClick={() => { setActiveTab('settings'); setHeaderMenuOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800"><UserCog className="h-4 w-4 text-purple-400" />{language === 'so' ? 'Dejinta Profile-ka' : 'Profile Settings'}</button>
+                                    <button onClick={toggleAgentLanguage} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800"><Languages className="h-4 w-4 text-blue-400" />{language === 'so' ? 'U beddel English' : 'U beddel Soomaali'}</button>
+                                    <div className="my-1 border-t border-slate-800" />
+                                    <button onClick={handleLogout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-red-400 hover:bg-red-500/10"><LogOut className="h-4 w-4" />{language === 'so' ? 'Ka bax' : 'Logout'}</button>
+                                </div>
+                            </>}
+                        </div>
                     </div>
 
                 </div>
             </header>
 
             {/* Sub-header Navigation Tabs */}
-            <div className="bg-slate-900/50 border-b border-slate-800/60 px-4 lg:px-8 overflow-x-auto scrollbar-none">
-                <div className="max-w-7xl mx-auto flex items-center gap-2 py-2 text-xs font-medium">
+            <div className="bg-slate-900/50 border-b border-slate-800/60 px-4 lg:px-8">
+                <div className="max-w-7xl mx-auto py-2">
+                    <label className="sm:hidden block">
+                        <span className="sr-only">{text('Choose dashboard section', 'Dooro qaybta dashboard-ka')}</span>
+                        <select
+                            value={activeTab}
+                            onChange={e => setActiveTab(e.target.value as typeof activeTab)}
+                            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm font-semibold text-white outline-none focus:border-purple-500"
+                        >
+                            <option value="overview">{text('Overview', 'Guudmar')}</option>
+                            <option value="requests">{text('Player Requests', 'Codsiyada Ciyaartoyda')}{pendingRequestsCount ? ` (${pendingRequestsCount})` : ''}</option>
+                            <option value="requestFloat">{text('Request Float', 'Codso Float')}</option>
+                            <option value="players">{text('My Players', 'Ciyaartoydayda')} ({linkedPlayers.length})</option>
+                            <option value="history">{text('Transaction History', 'Taariikhda Dhaqdhaqaaqa')}</option>
+                            <option value="floatHistory">{text('Float Requests Log', 'Diiwaanka Codsiyada Float')}</option>
+                            <option value="settings">{text('Profile Settings', 'Dejinta Profile-ka')}</option>
+                        </select>
+                    </label>
+                    <div className="hidden sm:flex items-center gap-2 overflow-x-auto scrollbar-none text-xs font-medium">
                     <button
                         onClick={() => setActiveTab('overview')}
                         className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
@@ -664,7 +775,7 @@ const AgentDashboard = () => {
                         }`}
                     >
                         <Layers className="w-4 h-4" />
-                        <span>Overview</span>
+                        <span>{text('Overview', 'Guudmar')}</span>
                     </button>
 
                     <button
@@ -676,7 +787,7 @@ const AgentDashboard = () => {
                         }`}
                     >
                         <CreditCard className="w-4 h-4" />
-                        <span>Player Requests</span>
+                        <span>{text('Player Requests', 'Codsiyada Ciyaartoyda')}</span>
                         {pendingRequestsCount > 0 && (
                             <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950 animate-bounce">
                                 {pendingRequestsCount}
@@ -693,7 +804,7 @@ const AgentDashboard = () => {
                         }`}
                     >
                         <PlusCircle className="w-4 h-4" />
-                        <span>Request Float</span>
+                        <span>{text('Request Float', 'Codso Float')}</span>
                     </button>
 
                     <button
@@ -705,7 +816,7 @@ const AgentDashboard = () => {
                         }`}
                     >
                         <Users className="w-4 h-4" />
-                        <span>My Players ({linkedPlayers.length})</span>
+                        <span>{text('My Players', 'Ciyaartoydayda')} ({linkedPlayers.length})</span>
                     </button>
 
                     <button
@@ -717,7 +828,7 @@ const AgentDashboard = () => {
                         }`}
                     >
                         <HistoryIcon className="w-4 h-4" />
-                        <span>Transaction History</span>
+                        <span>{text('Transaction History', 'Taariikhda Dhaqdhaqaaqa')}</span>
                     </button>
 
                     <button
@@ -729,8 +840,21 @@ const AgentDashboard = () => {
                         }`}
                     >
                         <Clock className="w-4 h-4" />
-                        <span>Float Requests Log</span>
+                        <span>{text('Float Requests Log', 'Diiwaanka Codsiyada Float')}</span>
                     </button>
+
+                    <button
+                        onClick={() => setActiveTab('settings')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            activeTab === 'settings'
+                                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        }`}
+                    >
+                        <UserCog className="w-4 h-4" />
+                        <span>{text('Profile Settings', 'Dejinta Profile-ka')}</span>
+                    </button>
+                    </div>
                 </div>
             </div>
 
@@ -738,14 +862,14 @@ const AgentDashboard = () => {
             <main className="max-w-7xl mx-auto px-4 lg:px-8 py-6 space-y-6">
 
                 {/* Top Metrics Cards Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {activeTab === 'overview' && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     
                     {/* Float Balance Card */}
                     <div className="bg-gradient-to-br from-slate-900 to-slate-900/90 border border-emerald-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl group-hover:bg-emerald-500/20 transition-all" />
                         <div className="flex justify-between items-start mb-3">
                             <div>
-                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Available Float</span>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">{text('Available Float', 'Float-ka La Heli Karo')}</span>
                                 <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-emerald-400 mt-1">
                                     ${(agent.floatBalance ?? agent.balance ?? 0).toFixed(2)}
                                 </h3>
@@ -755,12 +879,12 @@ const AgentDashboard = () => {
                             </div>
                         </div>
                         <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800/80 text-slate-400">
-                            <span>Ready for player deposits</span>
+                            <span>{text('Ready for player deposits', 'Diyaar u ah dhigaalka ciyaartoyda')}</span>
                             <button
                                 onClick={() => setActiveTab('requestFloat')}
                                 className="text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1"
                             >
-                                Top Up <ChevronRight className="w-3 h-3" />
+                                {text('Top Up', 'Ku Shubo')} <ChevronRight className="w-3 h-3" />
                             </button>
                         </div>
                     </div>
@@ -769,7 +893,7 @@ const AgentDashboard = () => {
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
                         <div className="flex justify-between items-start mb-3">
                             <div>
-                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Commission Rate</span>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">{text('Commission Rate', 'Heerka Komishanka')}</span>
                                 <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-purple-400 mt-1">
                                     {((agent.commissionRate || 0) * 100).toFixed(1)}%
                                 </h3>
@@ -779,7 +903,7 @@ const AgentDashboard = () => {
                             </div>
                         </div>
                         <div className="text-xs pt-2 border-t border-slate-800/80 text-slate-400">
-                            Discount on float purchases
+                            {text('Discount on float purchases', 'Qiimo-dhimista iibsiga float-ka')}
                         </div>
                     </div>
 
@@ -790,7 +914,7 @@ const AgentDashboard = () => {
                     >
                         <div className="flex justify-between items-start mb-3">
                             <div>
-                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Pending Player Requests</span>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">{text('Pending Player Requests', 'Codsiyada Ciyaartoyda ee Sugaya')}</span>
                                 <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-amber-400 mt-1 flex items-center gap-2">
                                     <span>{pendingRequestsCount}</span>
                                     {pendingRequestsCount > 0 && (
@@ -803,9 +927,9 @@ const AgentDashboard = () => {
                             </div>
                         </div>
                         <div className="text-xs pt-2 border-t border-slate-800/80 text-slate-400 flex items-center justify-between">
-                            <span>Requires your review</span>
+                            <span>{text('Requires your review', 'Waxay sugayaan hubintaada')}</span>
                             <span className="text-amber-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5 font-semibold">
-                                View <ChevronRight className="w-3 h-3" />
+                                {text('View', 'Eeg')} <ChevronRight className="w-3 h-3" />
                             </span>
                         </div>
                     </div>
@@ -814,7 +938,7 @@ const AgentDashboard = () => {
                     <div className="bg-gradient-to-br from-indigo-950/60 to-purple-950/60 border border-indigo-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
                         <div className="flex justify-between items-start mb-2">
                             <div>
-                                <span className="text-xs uppercase tracking-wider text-indigo-300 font-semibold">My Promo Code</span>
+                                <span className="text-xs uppercase tracking-wider text-indigo-300 font-semibold">{text('My Promo Code', 'Promo Code-kayga')}</span>
                                 <div className="mt-1 flex items-center gap-2">
                                     <span className="text-lg font-bold font-mono text-white bg-slate-900/80 px-3 py-1 rounded-lg border border-indigo-500/30">
                                         {agent.promoCode || 'N/A'}
@@ -839,7 +963,7 @@ const AgentDashboard = () => {
                         </div>
                     </div>
 
-                </div>
+                </div>}
 
                 {/* Error Banner */}
                 {error && (
@@ -867,9 +991,9 @@ const AgentDashboard = () => {
                                         <div className="p-2 bg-purple-500/10 text-purple-400 rounded-xl">
                                             <Info className="w-5 h-5" />
                                         </div>
-                                        <h2 className="text-base font-bold text-slate-100">Payment Instructions for Float</h2>
+                                        <h2 className="text-base font-bold text-slate-100">{text('Payment Instructions for Float', 'Tilmaamaha Bixinta Float-ka')}</h2>
                                     </div>
-                                    <span className="text-xs text-slate-400">Admin Instructions</span>
+                                    <span className="text-xs text-slate-400">{text('Admin Instructions', 'Tilmaamaha Admin-ka')}</span>
                                 </div>
 
                                 {paymentInstructions ? (
@@ -900,7 +1024,7 @@ const AgentDashboard = () => {
                                         <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl">
                                             <Users className="w-5 h-5" />
                                         </div>
-                                        <h2 className="text-base font-bold text-slate-100">Linked Players Overview</h2>
+                                        <h2 className="text-base font-bold text-slate-100">{text('Linked Players Overview', 'Guudmarka Ciyaartoyda Kugu Xiran')}</h2>
                                     </div>
                                     <span className="text-xs text-slate-400 font-mono font-semibold">
                                         Total: {linkedPlayers.length}
@@ -909,11 +1033,11 @@ const AgentDashboard = () => {
 
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                                        <span className="text-xs text-slate-400 block">Total Player Balances</span>
+                                        <span className="text-xs text-slate-400 block">{text('Total Player Balances', 'Wadarta Haraaga Ciyaartoyda')}</span>
                                         <span className="text-lg font-bold font-mono text-emerald-400">${totalLinkedPlayerBalance.toFixed(2)}</span>
                                     </div>
                                     <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                                        <span className="text-xs text-slate-400 block">Active Player Requests</span>
+                                        <span className="text-xs text-slate-400 block">{text('Active Player Requests', 'Codsiyada Ciyaartoyda ee Firfircoon')}</span>
                                         <span className="text-lg font-bold font-mono text-amber-400">{pendingRequestsCount}</span>
                                     </div>
                                 </div>
@@ -1069,9 +1193,9 @@ const AgentDashboard = () => {
                             <div>
                                 <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
                                     <CreditCard className="w-5 h-5 text-purple-400" />
-                                    <span>Player Transaction Requests</span>
+                                    <span>{text('Player Transaction Requests', 'Codsiyada Lacagta Ciyaartoyda')}</span>
                                 </h2>
-                                <p className="text-xs text-slate-400">Review, approve, or decline deposit and withdrawal requests from players</p>
+                                <p className="text-xs text-slate-400">{text('Review, approve, or decline deposit and withdrawal requests from players', 'Hubi, aqbal ama diid codsiyada dhigaalka iyo la-bixidda ciyaartoyda')}</p>
                             </div>
 
                             {/* Search bar */}
@@ -1226,9 +1350,9 @@ const AgentDashboard = () => {
                             <div>
                                 <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
                                     <PlusCircle className="w-5 h-5 text-purple-400" />
-                                    <span>Request Float Top-Up</span>
+                                    <span>{text('Request Float Top-Up', 'Codso Kordhinta Float-ka')}</span>
                                 </h2>
-                                <p className="text-xs text-slate-400">Request additional float balance from admin to process player deposits</p>
+                                <p className="text-xs text-slate-400">{text('Request additional float balance from admin to process player deposits', 'Admin-ka ka codso float dheeraad ah si aad u fuliso dhigaalka ciyaartoyda')}</p>
                             </div>
 
                             {/* Preset Buttons */}
@@ -1340,7 +1464,7 @@ const AgentDashboard = () => {
                             <div>
                                 <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
                                     <Users className="w-5 h-5 text-indigo-400" />
-                                    <span>My Linked Players</span>
+                                    <span>{text('My Linked Players', 'Ciyaartoyda Igu Xiran')}</span>
                                 </h2>
                                 <p className="text-xs text-slate-400">Players registered using your promo code ({agent.promoCode})</p>
                             </div>
@@ -1366,15 +1490,15 @@ const AgentDashboard = () => {
                         {/* Stats Banner */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                             <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-                                <span className="text-xs text-slate-400 block">Total Linked Players</span>
+                                <span className="text-xs text-slate-400 block">{text('Total Linked Players', 'Wadarta Ciyaartoyda Kugu Xiran')}</span>
                                 <span className="text-lg font-bold font-mono text-indigo-400">{linkedPlayers.length}</span>
                             </div>
                             <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-                                <span className="text-xs text-slate-400 block">Combined Balance</span>
+                                <span className="text-xs text-slate-400 block">{text('Combined Balance', 'Wadarta Haraaga')}</span>
                                 <span className="text-lg font-bold font-mono text-emerald-400">${totalLinkedPlayerBalance.toFixed(2)}</span>
                             </div>
                             <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
-                                <span className="text-xs text-slate-400 block">Your Promo Code</span>
+                                <span className="text-xs text-slate-400 block">{text('Your Promo Code', 'Promo Code-kaaga')}</span>
                                 <span className="text-lg font-bold font-mono text-purple-400">{agent.promoCode || 'None'}</span>
                             </div>
                         </div>
@@ -1425,9 +1549,9 @@ const AgentDashboard = () => {
                             <div>
                                 <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
                                     <HistoryIcon className="w-5 h-5 text-purple-400" />
-                                    <span>Agent Transaction Log</span>
+                                    <span>{text('Agent Transaction Log', 'Diiwaanka Dhaqdhaqaaqa Agent-ka')}</span>
                                 </h2>
-                                <p className="text-xs text-slate-400">Complete record of deposits, withdrawals, and float purchases</p>
+                                <p className="text-xs text-slate-400">{text('Complete record of deposits, withdrawals, and float purchases', 'Diiwaan buuxa oo dhigaal, la-bixid iyo iibsiga float-ka ah')}</p>
                             </div>
 
                             {/* Filter dropdown */}
@@ -1534,16 +1658,16 @@ const AgentDashboard = () => {
                             <div>
                                 <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
                                     <Clock className="w-5 h-5 text-purple-400" />
-                                    <span>My Float Requests Log</span>
+                                    <span>{text('My Float Requests Log', 'Diiwaanka Codsiyadayda Float')}</span>
                                 </h2>
-                                <p className="text-xs text-slate-400">History of float top-up requests submitted to platform admin</p>
+                                <p className="text-xs text-slate-400">{text('History of float top-up requests submitted to platform admin', 'Taariikhda codsiyada kordhinta float-ka ee loo diray admin-ka')}</p>
                             </div>
                             <button
                                 onClick={() => setActiveTab('requestFloat')}
                                 className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs px-3.5 py-2 rounded-xl transition-all shadow flex items-center gap-1.5"
                             >
                                 <PlusCircle className="w-4 h-4" />
-                                <span>New Float Request</span>
+                                <span>{text('New Float Request', 'Codsi Float Cusub')}</span>
                             </button>
                         </div>
 
@@ -1591,6 +1715,53 @@ const AgentDashboard = () => {
                                 <p className="text-xs text-slate-500">Submit a request whenever you need to replenish your agent float balance.</p>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {activeTab === 'settings' && (
+                    <div className="mx-auto max-w-3xl bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl">
+                        <div className="border-b border-slate-800 pb-4 mb-6">
+                            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2"><UserCog className="w-5 h-5 text-purple-400" /> {text('Profile Settings', 'Dejinta Profile-ka')}</h2>
+                            <p className="text-xs text-slate-400 mt-1">{text('Update your personal details or change your password.', 'Cusbooneysii xogtaada gaarka ah ama beddel password-kaaga.')}</p>
+                        </div>
+                        <form onSubmit={handleSaveProfile} className="space-y-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <label className="text-xs font-semibold text-slate-300">Username
+                                    <input value={profileForm.username} onChange={e => setProfileForm({ ...profileForm, username: e.target.value })} minLength={3} required className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-500" />
+                                </label>
+                                <label className="text-xs font-semibold text-slate-300">Phone
+                                    <input value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} required className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-500" />
+                                </label>
+                                <div className="sm:col-span-2">
+                                    <span className="text-xs font-semibold text-slate-300">{text('Location', 'Goobta')}</span>
+                                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                        <div className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-300">{profileForm.location || 'Location not detected yet'}</div>
+                                        <button type="button" onClick={handleDetectLocation} disabled={detectingLocation} className="rounded-xl border border-purple-500/40 bg-purple-500/10 px-4 py-2.5 text-sm font-bold text-purple-300 hover:bg-purple-500/20 disabled:opacity-60">
+                                            {detectingLocation ? text('Detecting...', 'Waa la raadinayaa...') : text('Detect My Location', 'Ogow Goobtayda')}
+                                        </button>
+                                    </div>
+                                    <p className="mt-2 text-xs text-slate-500">Your browser will ask permission and select the nearest supported service area.</p>
+                                </div>
+                            </div>
+                            <div className="border-t border-slate-800 pt-5">
+                                <h3 className="flex items-center gap-2 text-sm font-bold text-slate-200"><Lock className="w-4 h-4 text-purple-400" /> {text('Password & Security', 'Password iyo Amniga')}</h3>
+                                <p className="mt-1 text-xs text-slate-500">Leave the new password fields empty if you only want to update your profile.</p>
+                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <label className="text-xs font-semibold text-slate-300 sm:col-span-2">Current Password
+                                        <input type="password" value={profileForm.currentPassword} onChange={e => setProfileForm({ ...profileForm, currentPassword: e.target.value })} required className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-500" />
+                                    </label>
+                                    <label className="text-xs font-semibold text-slate-300">New Password
+                                        <input type="password" value={profileForm.newPassword} onChange={e => setProfileForm({ ...profileForm, newPassword: e.target.value })} minLength={6} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-500" />
+                                    </label>
+                                    <label className="text-xs font-semibold text-slate-300">Confirm New Password
+                                        <input type="password" value={profileForm.confirmPassword} onChange={e => setProfileForm({ ...profileForm, confirmPassword: e.target.value })} minLength={6} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-500" />
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit" disabled={savingProfile} className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-60 px-5 py-2.5 text-sm font-bold text-white transition-all">
+                                {savingProfile ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {text('Save Changes', 'Keydi Isbeddellada')}
+                            </button>
+                        </form>
                     </div>
                 )}
 
