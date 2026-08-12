@@ -785,6 +785,26 @@ async function findUserProfileInFirestore(firebaseUid: string, email?: string) {
   return null;
 }
 
+async function refreshUserProfileById(userId: string): Promise<UserProfile | null> {
+  if (!db) return store.users[userId] || null;
+  const knownUser = store.users[userId];
+  if (knownUser?.firebaseUid) {
+    const uidDoc = await db.collection('users').doc(knownUser.firebaseUid).get();
+    if (uidDoc.exists) {
+      const profile = uidDoc.data() as UserProfile;
+      store.users[profile.id] = profile;
+      return profile;
+    }
+  }
+  const snapshot = await db.collection('users').where('id', '==', userId).limit(1).get();
+  if (!snapshot.empty) {
+    const profile = snapshot.docs[0].data() as UserProfile;
+    store.users[profile.id] = profile;
+    return profile;
+  }
+  return knownUser || null;
+}
+
 async function syncToFirestore() {
   if (!db) return;
 
@@ -2142,8 +2162,8 @@ app.get('/api/users/online', async (req, res) => {
 });
 
 // Retrieve single profile
-app.get('/api/users/:userId', (req, res) => {
-  const user = store.users[req.params.userId];
+app.get('/api/users/:userId', async (req, res) => {
+  const user = await refreshUserProfileById(req.params.userId);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
@@ -2237,7 +2257,7 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
     return res.status(400).json({ error: 'Invalid transaction type.' });
   }
 
-  const user = store.users[userId];
+  const user = await refreshUserProfileById(userId);
   if (!user) {
     return res.status(404).json({ error: 'User not found.' });
   }
@@ -2999,7 +3019,7 @@ app.get('/api/agents', async (req, res) => {
     const agentsSnapshot = await db.collection('agents').where('status', '==', 'Active').get();
     const activeAgents = agentsSnapshot.docs.map(doc => {
       const { password, ...agentData } = doc.data() as Agent;
-      return agentData;
+      return { ...agentData, id: agentData.id || doc.id };
     });
 
     if (playerLocation) {

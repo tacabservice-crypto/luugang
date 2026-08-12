@@ -31,6 +31,8 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
+  const [linkedAgentId, setLinkedAgentId] = useState(user.linkedAgentId || '');
+  const [profileLoading, setProfileLoading] = useState(true);
   
   const [provider, setProvider] = useState<'evc' | 'edahab' | 'sahal' | 'zaad' | 'premier'>('evc');
   const [paymentSettings, setPaymentSettings] = useState<Record<string, any>>({});
@@ -53,14 +55,27 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
 
   useEffect(() => {
     const fetchPrerequisites = async () => {
+      let currentLinkedAgentId = user.linkedAgentId || '';
+      try {
+        const profileRes = await fetch(`/api/users/${user.id}`);
+        if (profileRes.ok) {
+          const currentProfile: UserProfile = await profileRes.json();
+          currentLinkedAgentId = currentProfile.linkedAgentId || '';
+          setLinkedAgentId(currentLinkedAgentId);
+        }
+      } catch (err) {
+        console.error('Failed to refresh wallet profile', err);
+      } finally {
+        setProfileLoading(false);
+      }
       // Fetch agents for deposit and withdraw tabs
       if (activeTab === 'deposit' || activeTab === 'withdraw') {
         try {
           const agentsRes = await fetch(`/api/agents?location=${user.location || ''}`);
           if (agentsRes.ok) {
             const data: Agent[] = await agentsRes.json();
-            if (user.linkedAgentId) {
-              const linkedAgent = data.find(a => a.id === user.linkedAgentId);
+            if (currentLinkedAgentId) {
+              const linkedAgent = data.find(a => a.id === currentLinkedAgentId);
               if (linkedAgent) {
                 setAgents([linkedAgent]);
               } else {
@@ -69,7 +84,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                   ? 'Agent-ka koontadan ku xiran hadda ma shaqeynayo ama waa la waayey. Fadlan la xiriir admin-ka.'
                   : 'The agent assigned to this account is inactive or unavailable. Please contact an administrator.');
               }
-              setSelectedAgentId(user.linkedAgentId);
+              setSelectedAgentId(currentLinkedAgentId);
             } else {
               setAgents(data);
               if (data.length > 0 && !selectedAgentId) {
@@ -109,7 +124,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 userId: user.id,
                 // Send the agent actually selected in the wallet. The server still
                 // gives a promo-linked agent priority and rejects mismatches.
-                agentId: selectedAgentId || user.linkedAgentId || undefined,
+                agentId: selectedAgentId || linkedAgentId || undefined,
                 amount: parseFloat(amount),
                 phone: activeTab === 'withdraw' ? phone : (agents.find(a => a.id === selectedAgentId)?.phone || DEPOSIT_PHONE_NUMBER),
                 senderPhone: activeTab === 'deposit' ? senderPhone : undefined,
@@ -150,7 +165,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     }
 
     if (activeTab === 'deposit') {
-      if (user.linkedAgentId && !selectedAgentId) {
+      if (linkedAgentId && !selectedAgentId) {
         setError('Please select an agent to deposit to.');
         return;
       }
@@ -159,7 +174,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
         return;
       }
     } else { // withdraw
-      if (user.linkedAgentId && !selectedAgentId) {
+      if (linkedAgentId && !selectedAgentId) {
         setError('Please select an agent to withdraw from.');
         return;
       }
@@ -177,7 +192,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
       
     const selectedAgent = agents.find(a => a.id === selectedAgentId);
     let targetPhone = activeTab === 'deposit'
-      ? (user.linkedAgentId ? selectedAgent?.phone : DEPOSIT_PHONE_NUMBER)
+      ? (linkedAgentId ? selectedAgent?.phone : DEPOSIT_PHONE_NUMBER)
       : phone;
 
     if (activeTab === 'deposit' && !targetPhone) {
@@ -323,13 +338,13 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
              ) : (
               <form className="space-y-4" onSubmit={handleGenerateUssd}>
                 
-                {(activeTab === 'deposit' || activeTab === 'withdraw') && user.linkedAgentId && (
+                {!profileLoading && (activeTab === 'deposit' || activeTab === 'withdraw') && linkedAgentId && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
                         {activeTab === 'deposit' ? 'Deposit to Agent' : 'Withdraw from Agent'}
                       </label>
-                      {user.linkedAgentId && (
+                      {linkedAgentId && (
                         <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2.5 py-0.5 rounded-full font-bold">
                           {language === 'so' ? 'Agent-kaaga gaarka ah (Locked)' : 'Assigned Agent (Locked)'}
                         </span>
@@ -337,17 +352,17 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                     </div>
                     <select
                       value={selectedAgentId}
-                      onChange={(e) => !user.linkedAgentId && setSelectedAgentId(e.target.value)}
-                      disabled={!!user.linkedAgentId}
+                      onChange={(e) => !linkedAgentId && setSelectedAgentId(e.target.value)}
+                      disabled={!!linkedAgentId}
                       className={`w-full bg-black/40 border rounded-xl px-4 py-2.5 text-sm text-white ${
-                        user.linkedAgentId
+                        linkedAgentId
                           ? 'border-purple-500/40 bg-purple-950/20 text-purple-200 cursor-not-allowed opacity-90'
                           : 'border-white/10'
                       }`}
                     >
                       {agents.length === 0 && (
                         <option value="">
-                          {user.linkedAgentId ? 'Assigned agent unavailable' : 'Loading agent...'}
+                          {linkedAgentId ? 'Assigned agent unavailable' : 'Loading agent...'}
                         </option>
                       )}
                       {agents.map(agent => (
@@ -356,7 +371,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                         </option>
                       ))}
                     </select>
-                    {user.linkedAgentId && (
+                    {linkedAgentId && (
                       <p className="text-[11px] text-purple-300/80 italic">
                         {language === 'so'
                           ? 'Koontadaada waxay ku xiran tahay agent-ka promo code-kiisa aad adeegsatay.'
@@ -366,7 +381,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                   </div>
                 )}
 
-                {(activeTab === 'deposit' || activeTab === 'withdraw') && !user.linkedAgentId && (
+                {!profileLoading && (activeTab === 'deposit' || activeTab === 'withdraw') && !linkedAgentId && (
                   <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
                     <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">
                       {language === 'so' ? 'Admin Review' : 'Admin Review'}

@@ -606,6 +606,25 @@ async function findUserProfileInFirestore(firebaseUid, email) {
   }
   return null;
 }
+async function refreshUserProfileById(userId) {
+  if (!db) return store.users[userId] || null;
+  const knownUser = store.users[userId];
+  if (knownUser?.firebaseUid) {
+    const uidDoc = await db.collection("users").doc(knownUser.firebaseUid).get();
+    if (uidDoc.exists) {
+      const profile = uidDoc.data();
+      store.users[profile.id] = profile;
+      return profile;
+    }
+  }
+  const snapshot = await db.collection("users").where("id", "==", userId).limit(1).get();
+  if (!snapshot.empty) {
+    const profile = snapshot.docs[0].data();
+    store.users[profile.id] = profile;
+    return profile;
+  }
+  return knownUser || null;
+}
 async function syncToFirestore() {
   if (!db) return;
   try {
@@ -1635,8 +1654,8 @@ app.get("/api/users/online", async (req, res) => {
   });
   res.json(onlineList);
 });
-app.get("/api/users/:userId", (req, res) => {
-  const user = store.users[req.params.userId];
+app.get("/api/users/:userId", async (req, res) => {
+  const user = await refreshUserProfileById(req.params.userId);
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
@@ -1707,7 +1726,7 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   if (transactionType !== "deposit" && transactionType !== "withdraw") {
     return res.status(400).json({ error: "Invalid transaction type." });
   }
-  const user = store.users[userId];
+  const user = await refreshUserProfileById(userId);
   if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
@@ -2291,7 +2310,7 @@ app.get("/api/agents", async (req, res) => {
     const agentsSnapshot = await db.collection("agents").where("status", "==", "Active").get();
     const activeAgents = agentsSnapshot.docs.map((doc) => {
       const { password, ...agentData } = doc.data();
-      return agentData;
+      return { ...agentData, id: agentData.id || doc.id };
     });
     if (playerLocation) {
       const localAgents = activeAgents.filter((agent) => agent.location && agent.location.toLowerCase() === playerLocation.toLowerCase());
