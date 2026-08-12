@@ -145,6 +145,7 @@ app.use(cors({
 const rawPort = process.env.PORT || 3002;
 const PORT = typeof rawPort === 'string' && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
 const DB_FILE = path.join(process.cwd(), 'db_store.json');
+const WELCOME_BONUS = 1.0;
 
 app.use(express.json());
 
@@ -316,11 +317,31 @@ if (serviceAccount) {
     db = getFirestore();
     auth = getAuth();
     console.log('Firebase Firestore and Auth initialized successfully with Admin SDK.');
-  } catch (err) {
-    console.error('Failed to initialize Firebase Admin SDK:', err);
+  } catch (err: any) {
+    console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    console.error('!! FAILED TO INITIALIZE FIREBASE ADMIN SDK !!');
+    console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    console.error('Error Code:', err.code);
+    console.error('Error Message:', err.message);
+    console.error('Stack Trace:', err.stack);
+    console.error('Full Error Object:', JSON.stringify(err, null, 2));
+    console.error('---------------------------------------------------------------');
+    console.error('This means the server will NOT be able to connect to Firestore or verify user tokens.');
+    console.error('Potential causes:');
+    console.error('  1. The FIREBASE_SERVICE_ACCOUNT environment variable is not set or is incorrect.');
+    console.error('  2. The service account key file (e.g., firebase-admin-key.json) is missing or corrupted.');
+    console.error('  3. The service account does not have the correct permissions in Google Cloud IAM.');
+    console.error('See the "getFirebaseServiceAccount" function in server.ts for credential loading logic.');
+    console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
   }
 } else {
-  console.log('No Firebase Admin credentials configured. Set FIREBASE_SERVICE_ACCOUNT or firebase-admin-key.json for login/auth to work.');
+  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+  console.error('!! NO FIREBASE ADMIN CREDENTIALS FOUND !!');
+  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+  console.error('The "getFirebaseServiceAccount" function did not find any valid credentials.');
+  console.error('Server will run without Firestore persistence or Firebase Auth verification.');
+  console.error('Set the FIREBASE_SERVICE_ACCOUNT environment variable or place a valid service account key file in the project root.');
+  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
 }
 
 // ==========================================
@@ -547,17 +568,109 @@ async function loadStoreFromFirestore() {
         console.log('Database loaded successfully from Firebase Firestore.');
         // Update local file backup
         fs.writeFileSync(DB_FILE, payload.data, 'utf8');
+        await loadUserProfilesFromFirestore();
+        await syncUserProfilesToFirestore();
         return;
       }
     }
     console.log('No existing state in Firestore. Loading from local store fallback...');
     loadStore();
-    // Immediately seed the empty Firestore with the loaded local data
-    // syncToFirestore();
+    await loadUserProfilesFromFirestore();
+    await syncUserProfilesToFirestore();
   } catch (err) {
     console.error('Failed to load store from Firestore:', err);
     loadStore();
   }
+}
+
+// User profiles are stored separately because the complete store can exceed
+// Firestore's single-document size limit. The existing in-memory store remains
+// unchanged and continues to be the source used by the rest of the app.
+const persistedUserProfiles = new Map<string, string>();
+let userProfileSyncQueue: Promise<void> = Promise.resolve();
+
+function serializeUserProfile(user: UserProfile) {
+  return JSON.stringify(user);
+}
+
+async function loadUserProfilesFromFirestore() {
+  if (!db) return;
+
+  const snapshot = await db.collection('users').get();
+  snapshot.forEach((userDoc) => {
+    const profile = userDoc.data() as UserProfile;
+    if (profile?.id) {
+      store.users[profile.id] = profile;
+      persistedUserProfiles.set(userDoc.id, serializeUserProfile(profile));
+    }
+  });
+}
+
+async function syncUserProfilesToFirestore() {
+  if (!db) return;
+
+  const users = Object.values(store.users).filter((user) => {
+    if (user.id.startsWith('user_sim_') || user.id.startsWith('bot_')) return false;
+    const documentId = user.firebaseUid || user.id;
+    return persistedUserProfiles.get(documentId) !== serializeUserProfile(user);
+  });
+
+  for (let offset = 0; offset < users.length; offset += 500) {
+    const batch = db.batch();
+    for (const user of users.slice(offset, offset + 500)) {
+      const documentId = user.firebaseUid || user.id;
+      const cleanProfile = JSON.parse(JSON.stringify(user));
+      batch.set(db.collection('users').doc(documentId), cleanProfile, { merge: true });
+    }
+    await batch.commit();
+    for (const user of users.slice(offset, offset + 500)) {
+      persistedUserProfiles.set(user.firebaseUid || user.id, serializeUserProfile(user));
+    }
+  }
+}
+
+function queueUserProfileSync() {
+  userProfileSyncQueue = userProfileSyncQueue
+    .then(() => syncUserProfilesToFirestore())
+    .catch((error) => console.error('Failed to synchronize user profiles to Firestore:', error));
+  return userProfileSyncQueue;
+}
+
+async function saveUserProfileToFirestore(user: UserProfile) {
+  if (!db) return;
+  const documentId = user.firebaseUid || user.id;
+  const cleanProfile = JSON.parse(JSON.stringify(user));
+  await db.collection('users').doc(documentId).set(cleanProfile, { merge: true });
+  persistedUserProfiles.set(documentId, serializeUserProfile(user));
+}
+
+async function findUserProfileInFirestore(firebaseUid: string, email?: string) {
+  if (!db) return null;
+
+  const uidDoc = await db.collection('users').doc(firebaseUid).get();
+  if (uidDoc.exists) {
+    return uidDoc.data() as UserProfile;
+  }
+
+  const uidSnapshot = await db.collection('users')
+    .where('firebaseUid', '==', firebaseUid)
+    .limit(1)
+    .get();
+  if (!uidSnapshot.empty) {
+    return uidSnapshot.docs[0].data() as UserProfile;
+  }
+
+  if (email) {
+    const emailSnapshot = await db.collection('users')
+      .where('email', '==', email.trim().toLowerCase())
+      .limit(1)
+      .get();
+    if (!emailSnapshot.empty) {
+      return emailSnapshot.docs[0].data() as UserProfile;
+    }
+  }
+
+  return null;
 }
 
 async function syncToFirestore() {
@@ -577,7 +690,7 @@ async function syncToFirestore() {
 function saveStore() {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
-    // syncToFirestore(); // Fire-and-forget for non-critical updates
+    void queueUserProfileSync();
   } catch (error) {
     console.error('Failed to write database to disk.', error);
   }
@@ -588,6 +701,7 @@ async function saveStoreAndWait() {
     try {
       fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
       await syncToFirestore();
+      await queueUserProfileSync();
     } catch (error) {
       console.error('Failed to write database to disk.', error);
     }
@@ -1491,6 +1605,63 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/admin/migrate-users', async (req, res) => {
+  if (!auth) {
+    return res.status(503).json({ error: 'Firebase Admin not configured. Cannot perform migration.' });
+  }
+
+  try {
+    const listUsersResult = await auth.listUsers(1000);
+    const allAuthUsers = listUsersResult.users;
+    const existingFirestoreUids = new Set(Object.values(store.users).map(u => u.firebaseUid));
+    
+    let createdCount = 0;
+    let failedCount = 0;
+
+    for (const userRecord of allAuthUsers) {
+      if (userRecord.uid && !existingFirestoreUids.has(userRecord.uid)) {
+        // This user exists in Firebase Auth but not in our Firestore user profiles
+        try {
+          const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const newUser: UserProfile = {
+            id: userId,
+            firebaseUid: userRecord.uid,
+            username: userRecord.displayName || userRecord.email?.split('@')[0] || `user${Date.now()}`,
+            email: userRecord.email,
+            avatar: '🎲',
+            balance: 1.0, // New user bonus
+            winCount: 0,
+            lossCount: 0,
+          };
+          
+          store.users[userId] = newUser;
+          addTransaction(userId, 'deposit', 1.0, undefined, 'Welcome bonus (migrated user)');
+          createdCount++;
+        } catch (e) {
+            failedCount++;
+            console.error(`Failed to create profile for user UID: ${userRecord.uid}`, e);
+        }
+      }
+    }
+
+    if (createdCount > 0) {
+        await saveStoreAndWait();
+    }
+
+    res.json({
+      message: 'User migration complete.',
+      created_profiles: createdCount,
+      failed_profiles: failedCount,
+      total_auth_users: allAuthUsers.length,
+    });
+
+  } catch (error) {
+    console.error('Error during user migration:', error);
+    res.status(500).json({ error: 'Failed to migrate users.', details: error.message });
+  }
+});
+
+
 // Debug Firebase endpoint
 app.get('/api/debug/firebase', async (req, res) => {
   if (!db) {
@@ -1617,25 +1788,43 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   let foundUser = Object.values(store.users).find(u => u.firebaseUid === firebaseUid);
 
   if (foundUser) {
-    // If user exists, just return their profile. No need for username.
+    await saveUserProfileToFirestore(foundUser);
     return res.json(foundUser);
+  }
+
+  // A server restart or deployment must not lock out an account whose profile
+  // has already been persisted in Firestore.
+  const persistedUser = await findUserProfileInFirestore(firebaseUid, email);
+  if (persistedUser?.id) {
+    persistedUser.firebaseUid = firebaseUid;
+    persistedUser.email = persistedUser.email || email || undefined;
+    store.users[persistedUser.id] = persistedUser;
+    await saveUserProfileToFirestore(persistedUser);
+    saveStore();
+    return res.json(persistedUser);
   }
 
   // If not found by UID, maybe it's an old account we can link.
   if (email) {
-    const userByEmail = Object.values(store.users).find(u => u.email === email && !u.firebaseUid);
+    const normalizedEmail = email.trim().toLowerCase();
+    const userByEmail = Object.values(store.users).find(
+      u => u.email?.trim().toLowerCase() === normalizedEmail && !u.firebaseUid
+    );
     if (userByEmail) {
       userByEmail.firebaseUid = firebaseUid; // Link account
+      userByEmail.email = normalizedEmail;
+      await saveUserProfileToFirestore(userByEmail);
       await saveStoreAndWait();
       return res.json(userByEmail);
     }
   }
 
-  // If we're here, it's a new registration. NOW we require a username.
-  if (!username) {
-    return res.status(400).json({ error: 'Username is required for new registration' });
-  }
-  const cleanUsername = username.trim().substring(0, 20);
+  // Signup sends a username. If it is absent, Firebase Auth has already
+  // confirmed this is an existing account whose app profile was lost before
+  // profiles were persisted separately; rebuild a minimal profile so the user
+  // can sign in again.
+  const recoveredUsername = req.user.name || email?.split('@')[0] || `user${Date.now()}`;
+  const cleanUsername = (username || recoveredUsername).trim().substring(0, 20);
 
   let linkedAgentId: string | undefined = undefined;
 
@@ -1660,16 +1849,17 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     id: userId,
     firebaseUid: firebaseUid,
     username: cleanUsername,
-    email: email || undefined,
+    email: email?.trim().toLowerCase() || undefined,
     avatar: avatar || '🌸',
-    balance: 10.0,
+    balance: WELCOME_BONUS,
     winCount: 0,
     lossCount: 0,
     linkedAgentId: linkedAgentId, // Add the linked agent ID
   };
 
   store.users[userId] = newUser;
-  addTransaction(userId, 'deposit', 10.0, undefined, 'Welcome signup bonus.');
+  addTransaction(userId, 'deposit', WELCOME_BONUS, undefined, 'Welcome signup bonus.');
+  await saveUserProfileToFirestore(newUser);
   await saveStoreAndWait();
 
   res.json(newUser);
