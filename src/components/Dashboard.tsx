@@ -240,6 +240,7 @@ export default function Dashboard({
   };
 
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
 
   const fetchLeaderboard = async () => {
     try {
@@ -252,6 +253,8 @@ export default function Dashboard({
       if (err?.message !== 'Failed to fetch' && err?.message !== 'Load failed') {
         console.error('Error fetching leaderboard:', err);
       }
+    } finally {
+      setLeaderboardLoading(false);
     }
   };
 
@@ -1099,8 +1102,12 @@ export default function Dashboard({
           </div>
 
           <div className="p-3 divide-y divide-white/5 bg-black/10">
-            {leaderboard.map((player) => (
-              <div key={player.rank} className="py-2 flex items-center justify-between text-xs">
+            {leaderboardLoading ? (
+              <p className="py-6 text-center text-xs font-semibold text-slate-500">Loading earnings...</p>
+            ) : leaderboard.length === 0 ? (
+              <p className="py-6 text-center text-xs font-semibold text-slate-500">No game earnings yet.</p>
+            ) : leaderboard.map((player) => (
+              <div key={player.id || player.rank} className="py-2 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <span className={`w-5 font-black ${player.rank === 1 ? 'text-yellow-400' : 'text-slate-500'}`}>
                     #{player.rank}

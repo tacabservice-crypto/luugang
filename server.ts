@@ -87,19 +87,33 @@ interface VipTier {
 }
 
 const VIP_TIERS: Record<string, VipTier> = {
+  silver: {
+    name: 'Silver VIP',
+    price: 4,
+    durationMonths: 1,
+    rakeDiscount: 0.01,
+    features: ['VIP profile badge', '1% rake discount', 'Save $1 on every $100 prize pool'],
+  },
   gold: {
     name: 'Gold VIP',
     price: 10,
     durationMonths: 1,
-    rakeDiscount: 0.02, // 2% discount on rake
-    features: ['Ad-free experience', 'Exclusive avatar borders', '2% Rake Discount', 'Priority Customer Support'],
+    rakeDiscount: 0.02,
+    features: ['Gold profile badge', '2% rake discount', 'Save $2 on every $100 prize pool'],
   },
   platinum: {
     name: 'Platinum VIP',
     price: 25,
     durationMonths: 3,
-    rakeDiscount: 0.05, // 5% discount on rake
-    features: ['All Gold features', 'Unique animated avatars', '5% Rake Discount', 'Early access to new game modes'],
+    rakeDiscount: 0.04,
+    features: ['Platinum profile badge', '4% rake discount', 'Save $4 on every $100 prize pool', '3 months of access'],
+  },
+  diamond: {
+    name: 'Diamond VIP',
+    price: 45,
+    durationMonths: 6,
+    rakeDiscount: 0.05,
+    features: ['Diamond profile badge', '5% rake discount', 'Save $5 on every $100 prize pool', '6 months of access'],
   },
 };
 
@@ -164,6 +178,20 @@ async function findAgentDocsByPromoCode(agentsRef: FirebaseFirestore.CollectionR
   return allAgentsSnapshot.docs.filter(
     (agentDoc) => normalizePromoCode(agentDoc.data().promoCode) === promoCode
   );
+}
+
+async function resolveActiveAgentByPromoCode(promoCode: unknown): Promise<Agent | null> {
+  const normalizedPromoCode = normalizePromoCode(promoCode);
+  if (!normalizedPromoCode || !db) return null;
+  const matchingAgentDocs = await findAgentDocsByPromoCode(db.collection('agents'), normalizedPromoCode);
+  if (!matchingAgentDocs.length) return null;
+  const agentDoc = matchingAgentDocs[0];
+  const agent = { ...agentDoc.data(), id: agentDoc.data().id || agentDoc.id } as Agent;
+  if (agent.status !== 'Active') return null;
+  if (agent.promoCode !== normalizedPromoCode || agentDoc.data().id !== agent.id) {
+    await agentDoc.ref.set({ promoCode: normalizedPromoCode, id: agent.id }, { merge: true });
+  }
+  return agent;
 }
 
 app.use(express.json());
@@ -393,12 +421,13 @@ interface PaymentProviderConfig {
   accountNumber?: string;
 }
 
-type PaymentProviderKey = 'evc' | 'edahab' | 'sahal' | 'premier';
+type PaymentProviderKey = 'evc' | 'edahab' | 'sahal' | 'zaad' | 'premier';
 
 const DEFAULT_PAYMENT_PROVIDERS: Record<PaymentProviderKey, PaymentProviderConfig> = {
   evc: { enabled: false },
   edahab: { enabled: false },
   sahal: { enabled: false },
+  zaad: { enabled: false },
   premier: { enabled: false },
 };
 
@@ -424,6 +453,7 @@ interface DBStore {
   paymentProviders: Record<PaymentProviderKey, PaymentProviderConfig>;
   agentFloatInstructions: string;
   adminSettings: AdminSettings;
+  vipTiers: Record<string, VipTier>;
   agents: Record<string, Agent>;
   agentTransactions: AgentTransaction[];
   tournaments: Record<string, Tournament>;
@@ -471,6 +501,7 @@ let store: DBStore = {
   paymentProviders: { ...DEFAULT_PAYMENT_PROVIDERS },
   agentFloatInstructions: '',
   adminSettings: { ...DEFAULT_ADMIN_SETTINGS },
+  vipTiers: { ...VIP_TIERS },
   agents: {},
   agentTransactions: [],
   tournaments: {}
@@ -562,6 +593,7 @@ function loadStore() {
         ...(parsed.paymentProviders || {})
       };
       store.agentFloatInstructions = parsed.agentFloatInstructions || '';
+      store.vipTiers = { ...VIP_TIERS, ...(parsed.vipTiers || {}) };
       store.tournaments = parsed.tournaments || {};
       seedDefaultTournaments();
       const persistedRoles = Array.isArray(parsed.adminSettings?.roles) ? parsed.adminSettings.roles : [];
@@ -609,6 +641,7 @@ async function loadStoreFromFirestore() {
           ...(parsed.paymentProviders || {})
         };
         store.agentFloatInstructions = parsed.agentFloatInstructions || '';
+        store.vipTiers = { ...VIP_TIERS, ...(parsed.vipTiers || {}) };
         const persistedRoles = Array.isArray(parsed.adminSettings?.roles) ? parsed.adminSettings.roles : [];
         store.adminSettings = {
           username: parsed.adminSettings?.username || process.env.ADMIN_USERNAME || 'admin',
@@ -1342,7 +1375,7 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
         if (winnerProfile) {
           let effectiveRakePercentage = RAKE_PERCENTAGE;
           if (winnerProfile.vip && winnerProfile.vip.expires > Date.now()) {
-            const vipTier = VIP_TIERS[winnerProfile.vip.tier];
+            const vipTier = store.vipTiers[winnerProfile.vip.tier];
             if (vipTier) {
               effectiveRakePercentage = Math.max(0, RAKE_PERCENTAGE - vipTier.rakeDiscount);
             }
@@ -1428,7 +1461,7 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
         if (winnerProfile && !isBotPlayer(winnerProfile.id)) {
           let effectiveRakePercentage = RAKE_PERCENTAGE;
           if (winnerProfile.vip && winnerProfile.vip.expires > Date.now()) {
-            const vipTier = VIP_TIERS[winnerProfile.vip.tier];
+            const vipTier = store.vipTiers[winnerProfile.vip.tier];
             if (vipTier) {
               effectiveRakePercentage = Math.max(0, RAKE_PERCENTAGE - vipTier.rakeDiscount);
             }
@@ -1674,7 +1707,7 @@ const checkVipStatus = (req: any, res: any, next: any) => {
     const user = Object.values(store.users).find(u => u.firebaseUid === req.user.uid);
     if (user && user.vip && user.vip.expires > Date.now()) {
       req.isVip = true;
-      const vipTier = VIP_TIERS[user.vip.tier];
+      const vipTier = store.vipTiers[user.vip.tier];
       if (vipTier) {
         req.vipRakeDiscount = vipTier.rakeDiscount;
       }
@@ -1870,6 +1903,11 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   let foundUser = Object.values(store.users).find(u => u.firebaseUid === firebaseUid);
 
   if (foundUser) {
+    if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
+      const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
+      if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
+      foundUser.linkedAgentId = linkedAgent.id;
+    }
     await saveUserProfileToFirestore(foundUser);
     return res.json(foundUser);
   }
@@ -1880,6 +1918,11 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   if (persistedUser?.id) {
     persistedUser.firebaseUid = firebaseUid;
     persistedUser.email = persistedUser.email || email || undefined;
+    if (!persistedUser.linkedAgentId && normalizePromoCode(promoCode)) {
+      const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
+      if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
+      persistedUser.linkedAgentId = linkedAgent.id;
+    }
     store.users[persistedUser.id] = persistedUser;
     await saveUserProfileToFirestore(persistedUser);
     saveStore();
@@ -1916,21 +1959,9 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     if (!db) {
         return res.status(503).json({ error: 'Promo code validation is temporarily unavailable.' });
     }
-    const agentsRef = db.collection('agents');
-    const matchingAgentDocs = await findAgentDocsByPromoCode(agentsRef, normalizedPromoCode);
-
-    if (matchingAgentDocs.length === 0) {
+    const agent = await resolveActiveAgentByPromoCode(normalizedPromoCode);
+    if (!agent) {
         return res.status(400).json({ error: 'Invalid or expired promo code.' });
-    }
-
-    const agentDoc = matchingAgentDocs[0];
-    const agent = agentDoc.data() as Agent;
-    if (agent.status !== 'Active') {
-      return res.status(400).json({ error: 'This promo code belongs to an inactive agent.' });
-    }
-    if (agent.promoCode !== normalizedPromoCode) {
-      await agentDoc.ref.update({ promoCode: normalizedPromoCode });
-      agent.promoCode = normalizedPromoCode;
     }
     linkedAgentId = agent.id;
   }
@@ -1957,33 +1988,37 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
 });
 
 // Dynamic Leaderboard (Global Earnings Board) from active store data
-app.get('/api/users/leaderboard', (req, res) => {
+app.get('/api/users/leaderboard', async (req, res) => {
+  await loadUserProfilesFromFirestore();
   const allUsers = Object.values(store.users).filter(u => !u.id.startsWith('user_sim_') && !u.id.startsWith('bot_'));
 
-  allUsers.forEach(u => {
+  const rankedUsers = allUsers.map(u => {
     const userTransactions = store.transactions.filter(t => t.userId === u.id);
-    const totalWins = userTransactions.filter(t => t.type === 'win_payout').reduce((sum, t) => sum + t.amount, 0);
-    const totalCommission = userTransactions.filter(t => t.type === 'app_commission').reduce((sum, t) => sum + t.amount, 0);
-    u.earnings = totalWins - totalCommission;
+    const payoutsAndRefunds = userTransactions
+      .filter(t => t.type === 'win_payout' || t.type === 'refund')
+      .reduce((sum, t) => sum + t.amount, 0);
+    const gameStakes = userTransactions
+      .filter(t => t.type === 'bet_escrow_locked')
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    return { user: u, earnings: payoutsAndRefunds - gameStakes };
   });
 
   // Sort users by earnings descending
-  const sorted = [...allUsers]
+  const sorted = rankedUsers
     .sort((a, b) => {
-      const aEarnings = a.earnings || 0;
-      const bEarnings = b.earnings || 0;
-      return bEarnings - aEarnings;
+      if (b.earnings !== a.earnings) return b.earnings - a.earnings;
+      return (b.user.winCount || 0) - (a.user.winCount || 0);
     })
     .slice(0, 5);
 
-  let rank = 1;
-  const result = sorted.map(u => {
+  const result = sorted.map(({ user: u, earnings }, index) => {
     return {
-      rank: rank++,
+      id: u.id,
+      rank: index + 1,
       name: u.username,
       avatar: u.avatar || '🎮',
       wins: u.winCount || 0,
-      earnings: u.earnings || 0
+      earnings
     };
   });
 
@@ -2338,6 +2373,35 @@ app.post('/api/wallet/process-api-payment', async (req, res) => {
 });
 
 // VIP Subscription
+app.get('/api/vip/tiers', (_req, res) => {
+  res.json(store.vipTiers);
+});
+
+const saveVipTiersFromAdmin = async (req: express.Request, res: express.Response) => {
+  const submitted = req.body?.vipTiers;
+  if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) {
+    return res.status(400).json({ error: 'VIP plans are required.' });
+  }
+
+  const normalized: Record<string, VipTier> = {};
+  for (const [key, value] of Object.entries(submitted as Record<string, Partial<VipTier>>)) {
+    const id = key.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const price = Number(value.price);
+    const durationMonths = Number(value.durationMonths);
+    const rakeDiscount = Number(value.rakeDiscount);
+    const features = Array.isArray(value.features) ? value.features.map(String).map(item => item.trim()).filter(Boolean).slice(0, 8) : [];
+    if (!id || !String(value.name || '').trim() || !Number.isFinite(price) || price <= 0 || !Number.isInteger(durationMonths) || durationMonths < 1 || !Number.isFinite(rakeDiscount) || rakeDiscount < 0 || rakeDiscount > RAKE_PERCENTAGE) {
+      return res.status(400).json({ error: `Invalid settings for VIP plan "${key}".` });
+    }
+    normalized[id] = { name: String(value.name).trim(), price, durationMonths, rakeDiscount, features };
+  }
+  if (!Object.keys(normalized).length) return res.status(400).json({ error: 'At least one VIP plan is required.' });
+
+  store.vipTiers = normalized;
+  await saveStoreAndWait();
+  res.json({ success: true, vipTiers: store.vipTiers });
+};
+
 app.post('/api/vip/subscribe', verifyFirebaseToken, async (req: any, res) => {
   const { tier } = req.body;
   const firebaseUid = req.user.uid;
@@ -2347,7 +2411,7 @@ app.post('/api/vip/subscribe', verifyFirebaseToken, async (req: any, res) => {
     return res.status(404).json({ error: 'User not found.' });
   }
 
-  const vipTier = VIP_TIERS[tier];
+  const vipTier = store.vipTiers[tier];
   if (!vipTier) {
     return res.status(400).json({ error: 'Invalid VIP tier specified.' });
   }
@@ -2360,8 +2424,8 @@ app.post('/api/vip/subscribe', verifyFirebaseToken, async (req: any, res) => {
   user.balance -= vipTier.price;
 
   // Calculate expiration date
-  const startDate = Date.now();
-  // Using 30 days for a month. A more accurate date calculation might use a library like moment.js or Date.UTC for precision
+  const currentVipIsSameTier = user.vip?.tier === tier && user.vip.expires > Date.now();
+  const startDate = currentVipIsSameTier ? user.vip!.expires : Date.now();
   const endDate = startDate + (vipTier.durationMonths * 30 * 24 * 60 * 60 * 1000); 
 
   // Update user's VIP status
@@ -2373,10 +2437,17 @@ app.post('/api/vip/subscribe', verifyFirebaseToken, async (req: any, res) => {
   // Record transaction
   addTransaction(user.id, 'app_commission', vipTier.price, undefined, `VIP Subscription (${vipTier.name}) purchase.`);
 
+  await saveUserProfileToFirestore(user);
   await saveStoreAndWait();
   broadcastUserUpdate(user.id);
 
-  res.json({ success: true, user, message: `Successfully subscribed to ${vipTier.name} VIP!` });
+  res.json({
+    success: true,
+    user,
+    message: currentVipIsSameTier
+      ? `${vipTier.name} renewed successfully.`
+      : `Successfully subscribed to ${vipTier.name}!`
+  });
 });
 
 
@@ -4378,6 +4449,9 @@ app.post('/api/admin/tournaments/:id/edit', hasPermission('tournaments'), async 
   res.json({ success: true, tournament, message: `Tournament "${tournament.name}" updated successfully!` });
 });
 
+app.get('/api/admin/vip-tiers', hasPermission('settings'), (_req, res) => res.json(store.vipTiers));
+app.post('/api/admin/vip-tiers', hasPermission('settings'), saveVipTiersFromAdmin);
+
 app.get('/api/admin/settings', hasPermission('settings'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
     
@@ -4398,6 +4472,7 @@ app.get('/api/admin/settings', hasPermission('settings'), async (req, res) => {
             username: store.adminSettings?.username || process.env.ADMIN_USERNAME || 'admin',
             passwordConfigured: Boolean(store.adminSettings?.password),
             roles: roles,
+            vipTiers: store.vipTiers,
         });
     } catch (error) {
         console.error('Failed to retrieve admin roles:', error);
@@ -5097,9 +5172,10 @@ app.post('/api/admin/agents/:agentId/credit', hasPermission('agents'), async (re
   const creditAmount = parseFloat(amount);
   const discountAmount = parseFloat(discount) || 0;
 
-  if (!agentId || !creditAmount || creditAmount <= 0) {
-    return res.status(400).json({ error: 'Valid agentId and a positive amount are required.' });
+  if (!agentId || !Number.isFinite(creditAmount) || creditAmount === 0) {
+    return res.status(400).json({ error: 'Valid agentId and a non-zero adjustment amount are required.' });
   }
+  const safeDiscountAmount = creditAmount > 0 ? Math.max(0, discountAmount) : 0;
 
   try {
     const agentRef = db.collection('agents').doc(agentId);
@@ -5110,9 +5186,11 @@ app.post('/api/admin/agents/:agentId/credit', hasPermission('agents'), async (re
       agentId: agentId,
       type: 'FloatPurchase',
       amount: creditAmount,
-      discountAmount: discountAmount,
+      discountAmount: safeDiscountAmount,
       timestamp: Date.now(),
-      description: `Admin credited ${creditAmount} to float with a ${discountAmount} discount.`
+      description: creditAmount > 0
+        ? `Admin added $${creditAmount.toFixed(2)} to agent float with a $${safeDiscountAmount.toFixed(2)} commission discount.`
+        : `Admin deducted $${Math.abs(creditAmount).toFixed(2)} from agent float as a balance correction.`
     };
 
     await db.runTransaction(async (t) => {
@@ -5122,6 +5200,9 @@ app.post('/api/admin/agents/:agentId/credit', hasPermission('agents'), async (re
       }
       const currentFloat = agentDoc.data()?.floatBalance || 0;
       const newFloatBalance = currentFloat + creditAmount;
+      if (newFloatBalance < 0) {
+        throw new Error(`Adjustment exceeds current float balance of $${currentFloat.toFixed(2)}.`);
+      }
 
       t.update(agentRef, { floatBalance: newFloatBalance });
       t.set(transactionRef, transactionData);
@@ -5135,6 +5216,9 @@ app.post('/api/admin/agents/:agentId/credit', hasPermission('agents'), async (re
     // Basic error handling, could check for specific error types
     if ((error as Error).message === 'Agent not found.') {
         return res.status(404).json({ error: 'Agent not found.' });
+    }
+    if ((error as Error).message.includes('exceeds current float balance')) {
+        return res.status(400).json({ error: (error as Error).message });
     }
     res.status(500).json({ error: 'Failed to credit agent float in database.' });
   }
@@ -5700,7 +5784,7 @@ app.get('/api/agent/player-requests', isAgent, async (req, res) => {
 
     const agentSpecificTxs = store.pendingManualTransactions.filter(tx => {
         const user = store.users[tx.userId];
-        return tx.status === 'pending' && tx.agentId === agent.id && (tx.managedBy === 'agent' || user?.linkedAgentId === agent.id);
+        return tx.agentId === agent.id && (tx.managedBy === 'agent' || user?.linkedAgentId === agent.id);
     });
 
     const responsePayload: PlayerAgentRequest[] = agentSpecificTxs.map(tx => {
@@ -5749,23 +5833,26 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
         return res.status(400).json({ error: 'This player is locked to a different agent via promo code.' });
     }
 
-    let newAgentFloat: number;
-
     try {
         if (!db) {
             throw new Error("Database not initialized");
         }
 
+        let approvedUserBalance = user.balance;
         await db.runTransaction(async (t) => {
             const agentRef = db.collection('agents').doc(agent.id);
+            const userRef = db.collection('users').doc(user.firebaseUid || user.id);
             const agentDoc = await t.get(agentRef);
+            const userDoc = await t.get(userRef);
 
             if (!agentDoc.exists) {
                 throw new Error("Agent not found in database");
             }
             const agentData = agentDoc.data() as Agent;
             const currentFloat = agentData.floatBalance || 0;
+            const persistedBalance = Number(userDoc.data()?.balance ?? user.balance);
             let newAgentFloat: number;
+            let newUserBalance: number;
 
             if (tx.transactionType === 'deposit') {
                 // Agent gives money to player, agent float decreases.
@@ -5773,17 +5860,15 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
                     throw new Error("Insufficient float balance to approve this deposit.");
                 }
                 newAgentFloat = currentFloat - tx.amount;
-                user.balance += tx.amount;
-                addTransaction(user.id, 'deposit', tx.amount, undefined, `Manual deposit approved by agent ${agent.username}. Request ID: ${tx.id}`);
+                newUserBalance = persistedBalance + tx.amount;
             } else { // withdrawal
                 // Agent receives money from player, agent float increases.
-                if (user.balance < tx.amount) {
+                if (persistedBalance < tx.amount) {
                     // This transaction should just fail, not be rejected. Rejection is an explicit agent action.
                     throw new Error('Player has insufficient balance for this withdrawal.');
                 }
                 newAgentFloat = currentFloat + tx.amount;
-                user.balance -= tx.amount;
-                addTransaction(user.id, 'withdrawal', tx.amount, undefined, `Manual withdrawal approved by agent ${agent.username}. Request ID: ${tx.id}`);
+                newUserBalance = persistedBalance - tx.amount;
             }
 
             // Create the agent transaction record
@@ -5802,13 +5887,24 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
 
             // Update the agent's float balance
             t.update(agentRef, { floatBalance: newAgentFloat });
+            t.set(userRef, { balance: newUserBalance, id: user.id, firebaseUid: user.firebaseUid || null }, { merge: true });
+            approvedUserBalance = newUserBalance;
         });
 
         // If transaction is successful, update in-memory store
+        user.balance = approvedUserBalance;
+        addTransaction(
+          user.id,
+          tx.transactionType === 'deposit' ? 'deposit' : 'withdrawal',
+          tx.amount,
+          undefined,
+          `Manual ${tx.transactionType} approved by agent ${agent.username}. Request ID: ${tx.id}`
+        );
         tx.status = 'approved';
         (tx as any).resolvedBy = agent.id;
         (tx as any).resolverUsername = agent.username;
         await saveManualRequestToFirestore(tx);
+        await saveUserProfileToFirestore(user);
         await saveStoreAndWait();
 
         broadcastUserUpdate(user.id);

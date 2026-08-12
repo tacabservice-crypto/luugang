@@ -174,7 +174,7 @@ export interface PlayerAgentRequest {
   agentId: string;
   playerPhone: string; // for withdrawals
   senderPhone?: string; // for deposits
-  provider: 'evc' | 'edahab' | 'sahal' | 'premier' | string;
+  provider: 'evc' | 'edahab' | 'sahal' | 'zaad' | 'premier' | string;
   type: 'deposit' | 'withdrawal' | 'withdraw';
   amount: number;
   status: 'pending' | 'approved' | 'rejected';

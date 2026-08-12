@@ -13,12 +13,14 @@ import Tournaments from './pages/Tournaments';
 import InstallPwaPrompt from './components/InstallPwaPrompt';
 import { Toaster } from 'react-hot-toast';
 import { VoiceChatProvider } from './context/VoiceChatContext';
+import { useLanguage } from './context/LanguageContext';
 import { auth } from './firebase-client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
+  const { language } = useLanguage();
   const API_BASE_URL = (() => {
     if (typeof window === 'undefined') {
       // Server-side rendering
@@ -735,29 +737,31 @@ export default function App() {
     }
 
     try {
+      // Close the confirmation immediately so the action has clear feedback.
+      setShowConfirmLeave(false);
+
       const response = await fetch(`${API_BASE_URL}/api/rooms/leave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, roomId: activeRoom.id })
       });
-      const data = await response.json();
 
-      if (data.success && data.room) {
-        // If the server returned a completed room state (meaning forfeit happened)
-        // update the activeRoom to display the loss screen.
-        // The user will then click "Play Another Game" which calls handleLeaveRoom again.
-        setActiveRoom(data.room);
-      } else {
-        // If it's not a completed game (e.g., leaving a waiting room)
-        // or if the room is already completed and the user clicked "Play Another Game"
-        setActiveRoom(null);
-        localStorage.removeItem('ludo_active_room_id');
-        handleRefreshBalance();
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to leave room.');
       }
-      setShowConfirmLeave(false);
+
+      // Leaving means leaving: clear the room after the server records the forfeit.
+      setActiveRoom(null);
+      localStorage.removeItem('ludo_active_room_id');
+      handleRefreshBalance();
     } catch (err) {
       console.error(err);
-      setErrorToast('Failed to leave room. Please try again.');
+      setErrorToast(
+        language === 'so'
+          ? 'Qolka lagama bixi karin. Fadlan mar kale isku day.'
+          : 'Failed to leave the room. Please try again.'
+      );
     }
   };
 
@@ -892,21 +896,31 @@ export default function App() {
       {showConfirmLeave && (
         <div className="fixed inset-0 z-[98] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#0b1220] border border-white/10 max-w-xs w-full rounded-2xl p-5 text-center space-y-4 shadow-2xl">
-            <h3 className="font-black text-xs text-red-400 uppercase tracking-widest">⚠️ KA BIXITAANKA CIYAARTA</h3>
-            <p className="text-xs text-slate-200 font-bold leading-relaxed">Ciyaartu hadda way socotaa. Haddii aad hadda ka baxdo, lacagta aad gelisay waad luminaysaa!</p>
-            <p className="text-[10px] text-slate-500 font-bold">Miyaad hubtaa inaad rabto inaad ka baxdo ciyaarta oo aad khasaarto?</p>
+            <h3 className="font-black text-xs text-red-400 uppercase tracking-widest">
+              ⚠️ {language === 'so' ? 'KA BIXITAANKA CIYAARTA' : 'LEAVE GAME'}
+            </h3>
+            <p className="text-xs text-slate-200 font-bold leading-relaxed">
+              {language === 'so'
+                ? 'Ciyaartu hadda way socotaa. Haddii aad hadda ka baxdo, lacagta aad gelisay waad luminaysaa!'
+                : 'The game is currently in progress. If you leave now, you will lose the money you entered!' }
+            </p>
+            <p className="text-[10px] text-slate-500 font-bold">
+              {language === 'so'
+                ? 'Miyaad hubtaa inaad rabto inaad ka baxdo ciyaarta oo aad khasaarto?'
+                : 'Are you sure you want to leave the game and forfeit your stake?'}
+            </p>
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => handleLeaveRoom(true)}
                 className="flex-1 bg-red-600 hover:bg-red-500 text-white font-black text-xs py-2 rounded-xl cursor-pointer"
               >
-                Haa, Ka Bax
+                {language === 'so' ? 'Haa, Ka Bax' : 'Yes, Leave'}
               </button>
               <button
                 onClick={() => setShowConfirmLeave(false)}
                 className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 font-black text-xs py-2 rounded-xl cursor-pointer"
               >
-                Maya, Joog
+                {language === 'so' ? 'Maya, Joog' : 'No, Stay'}
               </button>
             </div>
           </div>

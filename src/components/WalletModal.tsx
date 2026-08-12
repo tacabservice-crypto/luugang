@@ -32,7 +32,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   
-  const [provider, setProvider] = useState<'evc' | 'edahab' | 'sahal' | 'premier'>('evc');
+  const [provider, setProvider] = useState<'evc' | 'edahab' | 'sahal' | 'zaad' | 'premier'>('evc');
   const [paymentSettings, setPaymentSettings] = useState<Record<string, any>>({});
   const [apiProcessing, setApiProcessing] = useState(false);
   const [apiMessage, setApiMessage] = useState<string>('');
@@ -43,6 +43,13 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   const [confirmationLoading, setConfirmationLoading] = useState(false);
   const [withdrawPreviewVisible, setWithdrawPreviewVisible] = useState(false);
   const [depositAwaitingConfirmation, setDepositAwaitingConfirmation] = useState(false);
+  const providerDetails = {
+    evc: { label: 'EVC Plus', placeholder: 'e.g. 061XXXXXXX', hint: 'Hormuud • 061' },
+    edahab: { label: 'eDahab', placeholder: 'e.g. 065XXXXXXX', hint: 'Somtel • USSD *110#' },
+    sahal: { label: 'SAHAL', placeholder: 'e.g. 090XXXXXXX', hint: 'Golis • 090' },
+    zaad: { label: 'ZAAD', placeholder: 'e.g. 063XXXXXXX', hint: 'Telesom • 063' },
+    premier: { label: 'Premier Card', placeholder: 'Enter card/account number', hint: 'Card payment' },
+  } as const;
 
   useEffect(() => {
     const fetchPrerequisites = async () => {
@@ -183,6 +190,10 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
       case 'evc': code = `*712*${targetPhone}*${amtFloat}#`; break;
       case 'sahal': code = `*883*${targetPhone}*${amtFloat}#`; break;
       case 'edahab': code = `*110*${targetPhone}*${amtFloat}#`; break;
+      case 'zaad': code = `*880*${targetPhone}*${amtFloat}#`; break;
+      case 'premier':
+        setError('Premier Card processing will be available after card payment configuration is completed.');
+        return;
       default: setError('Unknown provider.'); return;
     }
 
@@ -370,10 +381,11 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Payment Provider</label>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {['evc', 'edahab', 'sahal', 'premier'].map((p) => (
-                      <button key={p} type="button" onClick={() => setProvider(p as any)} className={`p-2 rounded-xl text-center border ${provider === p ? 'bg-white/10 border-blue-400' : 'bg-black/30 border-white/5'}`}>
-                        <span className="text-xs font-black uppercase">{p}</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                    {(Object.keys(providerDetails) as Array<keyof typeof providerDetails>).map((p) => (
+                      <button key={p} type="button" onClick={() => setProvider(p)} className={`min-h-14 p-2 rounded-xl text-center border transition-all ${provider === p ? (p === 'premier' ? 'bg-amber-500/10 border-amber-400' : 'bg-white/10 border-blue-400') : 'bg-black/30 border-white/5'}`}>
+                        <span className={`block text-xs font-black uppercase ${p === 'premier' ? 'text-amber-300' : ''}`}>{providerDetails[p].label}</span>
+                        <span className="mt-0.5 block text-[8px] text-slate-500">{providerDetails[p].hint}</span>
                       </button>
                     ))}
                   </div>
@@ -381,15 +393,15 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
 
                 {activeTab === 'withdraw' && (
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Withdrawal Phone Number</label>
-                    <input type="tel" required placeholder="e.g. 061XXXXXXX" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white" />
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">{provider === 'premier' ? 'Premier Card / Account Number' : 'Withdrawal Phone Number'}</label>
+                    <input type={provider === 'premier' ? 'text' : 'tel'} required placeholder={providerDetails[provider].placeholder} value={phone} onChange={(e) => setPhone(e.target.value)} className={`w-full bg-black/40 rounded-xl px-4 py-2.5 text-sm text-white ${provider === 'premier' ? 'border border-amber-400/40' : 'border border-white/10'}`} />
                   </div>
                 )}
                  
                 {activeTab === 'deposit' && (
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Your Phone Number (Sending From)</label>
-                    <input type="tel" required placeholder="e.g. 061XXXXXXX" value={senderPhone} onChange={(e) => setSenderPhone(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white" />
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">{provider === 'premier' ? 'Premier Card / Account Number' : 'Your Phone Number (Sending From)'}</label>
+                    <input type={provider === 'premier' ? 'text' : 'tel'} required placeholder={providerDetails[provider].placeholder} value={senderPhone} onChange={(e) => setSenderPhone(e.target.value)} className={`w-full bg-black/40 rounded-xl px-4 py-2.5 text-sm text-white ${provider === 'premier' ? 'border border-amber-400/40' : 'border border-white/10'}`} />
                   </div>
                 )}
 

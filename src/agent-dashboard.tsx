@@ -54,7 +54,7 @@ const TransactionDetailModal: React.FC<{ transaction: AgentTransaction; onClose:
         setTimeout(() => setCopiedId(false), 2000);
     };
 
-    const isPositive = transaction.type === 'PlayerDeposit' || (transaction.type as string) === 'deposit' || transaction.type === 'FloatPurchase';
+    const isPositive = transaction.amount >= 0 && (transaction.type === 'PlayerDeposit' || (transaction.type as string) === 'deposit' || transaction.type === 'FloatPurchase');
 
     return (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
@@ -100,7 +100,7 @@ const TransactionDetailModal: React.FC<{ transaction: AgentTransaction; onClose:
 
                     <div className="flex justify-between items-center pb-3 border-b border-slate-800">
                         <span className="text-slate-400">Amount</span>
-                        <span className="text-lg font-bold font-mono text-slate-100">${transaction.amount.toFixed(2)}</span>
+                        <span className="text-lg font-bold font-mono text-slate-100">{transaction.amount < 0 ? '-' : ''}${Math.abs(transaction.amount).toFixed(2)}</span>
                     </div>
 
                     {transaction.discountAmount !== undefined && transaction.discountAmount > 0 && (
@@ -162,6 +162,7 @@ const AgentDashboard = () => {
     const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
     const [playerRequests, setPlayerRequests] = useState<PlayerAgentRequest[]>([]);
     const [currentPage, setCurrentPage] = useState(1);
+    const [requestPage, setRequestPage] = useState(1);
     const [lastFetchedRequestIds, setLastFetchedRequestIds] = useState<Set<string>>(new Set());
     const [selectedTransaction, setSelectedTransaction] = useState<AgentTransaction | null>(null);
     const [paymentInstructions, setPaymentInstructions] = useState('');
@@ -538,6 +539,18 @@ const AgentDashboard = () => {
             return matchesFilter && matchesSearch;
         });
     }, [playerRequests, requestFilter, requestSearch]);
+
+    const REQUESTS_PER_PAGE = 15;
+    const totalRequestPages = Math.ceil(filteredPlayerRequests.length / REQUESTS_PER_PAGE) || 1;
+    const currentPlayerRequests = useMemo(() => {
+        const start = (requestPage - 1) * REQUESTS_PER_PAGE;
+        return filteredPlayerRequests.slice(start, start + REQUESTS_PER_PAGE);
+    }, [filteredPlayerRequests, requestPage]);
+
+    useEffect(() => setRequestPage(1), [requestFilter, requestSearch]);
+    useEffect(() => {
+        if (requestPage > totalRequestPages) setRequestPage(totalRequestPages);
+    }, [requestPage, totalRequestPages]);
 
     const filteredLinkedPlayers = useMemo(() => {
         const query = playerSearch.toLowerCase().trim();
@@ -1228,7 +1241,7 @@ const AgentDashboard = () => {
                             ].map(f => (
                                 <button
                                     key={f.id}
-                                    onClick={() => setRequestFilter(f.id as any)}
+                                    onClick={() => { setRequestFilter(f.id as any); setRequestPage(1); }}
                                     className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap font-medium flex items-center gap-1.5 ${
                                         requestFilter === f.id
                                             ? 'bg-purple-600 text-white font-semibold shadow'
@@ -1261,7 +1274,7 @@ const AgentDashboard = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/70 bg-slate-900/40">
-                                        {filteredPlayerRequests.map(req => (
+                                        {currentPlayerRequests.map(req => (
                                             <tr key={req.id} className="hover:bg-slate-850/60 transition-colors">
                                                 <td className="px-4 py-3.5 text-slate-400 font-mono text-[11px]">
                                                     {new Date(req.createdAt).toLocaleString()}
@@ -1330,6 +1343,20 @@ const AgentDashboard = () => {
                                         ))}
                                     </tbody>
                                 </table>
+                                {totalRequestPages > 1 && (
+                                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/60 px-4 py-3">
+                                        <span className="text-[11px] text-slate-400">
+                                            {text('Showing', 'Waxaa muuqda')} {(requestPage - 1) * REQUESTS_PER_PAGE + 1}–{Math.min(requestPage * REQUESTS_PER_PAGE, filteredPlayerRequests.length)} {text('of', 'oo ka mid ah')} {filteredPlayerRequests.length}
+                                        </span>
+                                        <div className="flex flex-wrap items-center justify-end gap-1">
+                                            <button onClick={() => setRequestPage(page => Math.max(1, page - 1))} disabled={requestPage === 1} className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300 disabled:opacity-40">‹</button>
+                                            {Array.from({ length: totalRequestPages }, (_, index) => index + 1).map(page => (
+                                                <button key={page} onClick={() => setRequestPage(page)} className={`min-w-8 rounded-lg px-2 py-1.5 text-xs font-bold ${requestPage === page ? 'bg-purple-600 text-white' : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'}`}>{page}</button>
+                                            ))}
+                                            <button onClick={() => setRequestPage(page => Math.min(totalRequestPages, page + 1))} disabled={requestPage === totalRequestPages} className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300 disabled:opacity-40">›</button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="p-12 text-center text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-2">
@@ -1587,7 +1614,7 @@ const AgentDashboard = () => {
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/70 bg-slate-900/40">
                                         {currentTransactions.map(tx => {
-                                            const isDeposit = tx.type === 'PlayerDeposit' || (tx.type as string) === 'deposit';
+                                            const isDeduction = tx.amount < 0 || tx.type === 'PlayerDeposit' || (tx.type as string) === 'deposit';
                                             return (
                                                 <tr
                                                     key={tx.id}
@@ -1599,7 +1626,7 @@ const AgentDashboard = () => {
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                                                            isDeposit
+                                                            isDeduction
                                                                 ? 'bg-red-500/20 text-red-300 border border-red-500/30'
                                                                 : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                                                         }`}>
@@ -1608,9 +1635,9 @@ const AgentDashboard = () => {
                                                     </td>
                                                     <td className="px-4 py-3 text-slate-300">{tx.description || '—'}</td>
                                                     <td className={`px-4 py-3 text-right font-mono font-bold text-sm ${
-                                                        isDeposit ? 'text-red-400' : 'text-emerald-400'
+                                                        isDeduction ? 'text-red-400' : 'text-emerald-400'
                                                     }`}>
-                                                        {isDeposit ? '-' : '+'}${tx.amount.toFixed(2)}
+                                                        {isDeduction ? '-' : '+'}${Math.abs(tx.amount).toFixed(2)}
                                                     </td>
                                                 </tr>
                                             );

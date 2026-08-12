@@ -57,7 +57,9 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           username: isLogin ? undefined : username,
           email: firebaseUser.email,
           avatar: isLogin ? undefined : avatar,
-          promoCode: isLogin ? undefined : promoCode,
+          // Keep the entered promo code on a retry/login too. Firebase Auth may
+          // have created the account even when the first backend sync failed.
+          promoCode: promoCode.trim() || undefined,
         }),
       });
 

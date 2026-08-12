@@ -597,6 +597,18 @@ const AdminDashboard: React.FC = () => {
         }
     };
 
+    const handleSaveVipTiers = async (vipTiers: any) => {
+        if (!adminId) return;
+        const response = await fetch(`/api/admin/vip-tiers?userId=${adminId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vipTiers }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to save VIP plans');
+        setAdminSettings((current: any) => ({ ...current, vipTiers: data.vipTiers }));
+    };
+
     const handleApproveTransaction = async (transactionId: string) => {
         if (!adminUser || !window.confirm('Are you sure you want to approve this transaction?')) return;
         setError(null);
@@ -758,6 +770,7 @@ const AdminDashboard: React.FC = () => {
                 adminSettings={{...adminSettings, usersByRole}}
                 paymentSettings={paymentSettings} 
                 onSavePaymentSettings={handleSavePaymentSettings}
+                onSaveVipTiers={handleSaveVipTiers}
                 onCreateRole={() => setCreateRoleModalOpen(true)}
                 onDeleteRole={handleDeleteRole}
                 onUpdateRole={handleUpdateRole}

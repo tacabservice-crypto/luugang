@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff, ShieldCheck } from 'lucide-react';
+import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff, ShieldCheck, Crown, Plus } from 'lucide-react';
 import ChangePasswordForm from '../ChangePasswordForm';
 import { isFullAdmin } from '../../utils/admin';
 
@@ -7,6 +7,7 @@ const Settings = ({
     adminSettings, 
     paymentSettings, 
     onSavePaymentSettings, 
+    onSaveVipTiers,
     onCreateRole,
     onDeleteRole,
     onUpdateRole,
@@ -17,11 +18,16 @@ const Settings = ({
 }) => {
   const [settingsView, setSettingsView] = useState('roles');
   const [editablePaymentSettings, setEditablePaymentSettings] = useState(paymentSettings);
+  const [editableVipTiers, setEditableVipTiers] = useState(adminSettings?.vipTiers || {});
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   useEffect(() => {
     setEditablePaymentSettings(paymentSettings);
   }, [paymentSettings]);
+
+  useEffect(() => setEditableVipTiers(adminSettings?.vipTiers || {}), [adminSettings?.vipTiers]);
+
+  const updateVipTier = (key, field, value) => setEditableVipTiers(current => ({ ...current, [key]: { ...current[key], [field]: value } }));
 
   const handlePaymentSettingsChange = (provider, key, value) => {
     const updated = JSON.parse(JSON.stringify(editablePaymentSettings || {}));
@@ -65,6 +71,9 @@ const Settings = ({
           <button onClick={() => setSettingsView('payment')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'payment' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             Payment Settings
           </button>
+          <button onClick={() => setSettingsView('vip')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'vip' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+            VIP Plans
+          </button>
           <button onClick={() => setSettingsView('admin')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'admin' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             Admin Management
           </button>
@@ -78,6 +87,29 @@ const Settings = ({
         )}
 
       <div className="mt-6">
+        {settingsView === 'vip' && (
+          <div>
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><h3 className="flex items-center gap-2 text-xl font-bold"><Crown className="text-amber-500" /> VIP Plans</h3><p className="mt-1 text-sm text-gray-500">Changes saved here are shown to players and applied to game payouts.</p></div>
+              <button onClick={async () => { try { await onSaveVipTiers(editableVipTiers); showNotification('success', 'VIP plans saved and synced with players.'); } catch (error:any) { showNotification('error', error.message); } }} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white hover:bg-purple-700">Save VIP Plans</button>
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {Object.entries(editableVipTiers).map(([key, tier]: [string, any]) => (
+                <div key={key} className="rounded-xl border border-gray-200 bg-gray-50 p-4 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between"><span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-black uppercase text-purple-700">{key}</span><button onClick={() => setEditableVipTiers(current => Object.fromEntries(Object.entries(current).filter(([id]) => id !== key)))} className="text-red-500" title="Remove plan"><Trash2 size={17} /></button></div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <label className="sm:col-span-3 text-sm font-medium text-gray-700">Plan name<input value={tier.name || ''} onChange={e => updateVipTier(key, 'name', e.target.value)} className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2" /></label>
+                    <label className="text-sm font-medium text-gray-700">Price ($)<input type="number" min="0.01" step="0.01" value={tier.price} onChange={e => updateVipTier(key, 'price', Number(e.target.value))} className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2" /></label>
+                    <label className="text-sm font-medium text-gray-700">Months<input type="number" min="1" step="1" value={tier.durationMonths} onChange={e => updateVipTier(key, 'durationMonths', Number(e.target.value))} className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2" /></label>
+                    <label className="text-sm font-medium text-gray-700">Rake discount %<input type="number" min="0" max="10" step="0.5" value={(tier.rakeDiscount || 0) * 100} onChange={e => updateVipTier(key, 'rakeDiscount', Number(e.target.value) / 100)} className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2" /></label>
+                    <label className="sm:col-span-3 text-sm font-medium text-gray-700">Benefits (one per line)<textarea rows={4} value={(tier.features || []).join('\n')} onChange={e => updateVipTier(key, 'features', e.target.value.split('\n'))} className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2" /></label>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => { const base = 'plan'; let index = Object.keys(editableVipTiers).length + 1; while (editableVipTiers[`${base}${index}`]) index++; setEditableVipTiers(current => ({ ...current, [`${base}${index}`]: { name: 'New VIP Plan', price: 5, durationMonths: 1, rakeDiscount: 0.01, features: ['VIP profile badge'] } })); }} className="mt-4 flex items-center gap-2 rounded-md border border-purple-300 px-4 py-2 font-bold text-purple-700 hover:bg-purple-50"><Plus size={17} /> Add Plan</button>
+          </div>
+        )}
         {settingsView === 'admin' && (
           <div>
             <h3 className="text-xl font-bold mb-4">Admin Management</h3>
