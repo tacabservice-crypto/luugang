@@ -657,7 +657,6 @@ async function saveStoreAndWait() {
     console.error("Failed to write database to disk.", error);
   }
 }
-loadStoreFromFirestore();
 function purgeSimulatedUsers() {
   let changed = false;
   Object.keys(store.users).forEach((id) => {
@@ -1585,7 +1584,6 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   res.json(newUser);
 });
 app.get("/api/users/leaderboard", async (req, res) => {
-  await loadUserProfilesFromFirestore();
   const allUsers = Object.values(store.users).filter((u) => !u.id.startsWith("user_sim_") && !u.id.startsWith("bot_"));
   const rankedUsers = allUsers.map((u) => {
     const userTransactions = store.transactions.filter((t) => t.userId === u.id);
@@ -4624,6 +4622,17 @@ app.get("/agent", (req, res) => {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.sendFile(agentFile);
+});
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+});
+app.use((error, req, res, next) => {
+  if (!req.path.startsWith("/api")) return next(error);
+  console.error(`Unhandled API error for ${req.method} ${req.path}:`, error);
+  const quotaExceeded = error?.code === 8 || String(error?.message || "").includes("RESOURCE_EXHAUSTED");
+  res.status(quotaExceeded ? 503 : 500).json({
+    error: quotaExceeded ? "Database quota is temporarily exhausted. Please try again after the quota resets." : "The server could not complete this request."
+  });
 });
 app.get(/^(?!\/api).*/, (req, res) => {
   if (req.path.startsWith("/assets/") || /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|mp3|wav|woff|woff2|ttf|map|webmanifest)$/i.test(req.path)) {

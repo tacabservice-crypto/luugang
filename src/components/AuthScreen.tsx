@@ -48,6 +48,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [otp, setOtp] = useState('');
   const [otpUser, setOtpUser] = useState<User | null>(null);
 
+  const readApiJson = async (response: Response) => {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(`Server-ku API JSON ma soo celin (${response.status}). Hubi backend deployment-ka iyo routing-ka.`);
+    }
+    return response.json();
+  };
+
   const handleBackendLogin = async (firebaseUser: User) => {
     try {
       const token = await firebaseUser.getIdToken();
@@ -74,7 +82,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         }),
       });
 
-      const profileData = await response.json();
+      const profileData = await readApiJson(response);
 
       if (!response.ok) {
         throw new Error(profileData.error || 'Failed to sync with server.');
@@ -114,7 +122,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         if (!userCredential.user.emailVerified) {
           const token = await userCredential.user.getIdToken();
           const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-          const otpData = await otpResponse.json();
+          const otpData = await readApiJson(otpResponse);
           if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
           setOtpUser(userCredential.user);
           setVerificationPending(true);
@@ -130,7 +138,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
         const token = await userCredential.user.getIdToken();
         const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-        const otpData = await otpResponse.json();
+        const otpData = await readApiJson(otpResponse);
         if (!otpResponse.ok) throw new Error(otpData.error || 'OTP could not be sent.');
         setOtpUser(userCredential.user);
         setVerificationPending(true);
@@ -171,7 +179,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     try {
       const token = await otpUser.getIdToken();
       const response = await fetch(`${API_BASE_URL}/api/auth/otp/verify`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ otp }) });
-      const data = await response.json();
+      const data = await readApiJson(response);
       if (!response.ok) throw new Error(data.error || 'OTP verification failed.');
       await otpUser.reload();
       await otpUser.getIdToken(true);
@@ -185,7 +193,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     try {
       const token = await otpUser.getIdToken();
       const response = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-      const data = await response.json();
+      const data = await readApiJson(response);
       if (!response.ok) throw new Error(data.error || 'OTP could not be resent.');
       setSuccessMessage('OTP cusub ayaa loo diray email-kaaga.');
     } catch (err:any) { setError(err.message); } finally { setLoading(false); }

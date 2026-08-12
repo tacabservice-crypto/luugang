@@ -867,8 +867,6 @@ async function saveStoreAndWait() {
     }
   }
 
-loadStoreFromFirestore();
-
 // ==========================================
 // PURGE SIMULATED USERS TO KEEP ONLY REAL REGISTERED USER SESSIONS ON THE RADAR
 // ==========================================
@@ -2088,7 +2086,6 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
 
 // Dynamic Leaderboard (Global Earnings Board) from active store data
 app.get('/api/users/leaderboard', async (req, res) => {
-  await loadUserProfilesFromFirestore();
   const allUsers = Object.values(store.users).filter(u => !u.id.startsWith('user_sim_') && !u.id.startsWith('bot_'));
 
   const rankedUsers = allUsers.map(u => {
@@ -6091,6 +6088,23 @@ app.get('/agent', (req, res) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.sendFile(agentFile);
+});
+
+// API routes must always return JSON, including unexpected failures. This also
+// prevents the SPA HTML fallback from surfacing as an "Unexpected token <" error.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
+});
+
+app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!req.path.startsWith('/api')) return next(error);
+  console.error(`Unhandled API error for ${req.method} ${req.path}:`, error);
+  const quotaExceeded = error?.code === 8 || String(error?.message || '').includes('RESOURCE_EXHAUSTED');
+  res.status(quotaExceeded ? 503 : 500).json({
+    error: quotaExceeded
+      ? 'Database quota is temporarily exhausted. Please try again after the quota resets.'
+      : 'The server could not complete this request.'
+  });
 });
 
 // For all other non-API routes, serve the main app's index.html file.
