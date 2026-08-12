@@ -3274,7 +3274,7 @@ app.get("/api/admin/settings", hasPermission("settings"), async (req, res) => {
     res.status(500).json({ error: "Failed to retrieve admin roles." });
   }
 });
-app.post("/api/admin/settings", hasPermission("settings"), async (req, res) => {
+app.post("/api/admin/settings", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   const { currentPassword, newPassword, confirmPassword } = req.body;
   const adminId = req.query.userId;

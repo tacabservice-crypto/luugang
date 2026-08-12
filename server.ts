@@ -4337,7 +4337,9 @@ app.get('/api/admin/settings', hasPermission('settings'), async (req, res) => {
     }
 });
 
-app.post('/api/admin/settings', hasPermission('settings'), async (req, res) => {
+// Every active admin may change only their own password. Platform settings remain
+// protected by the separate settings-permission endpoints above and below.
+app.post('/api/admin/settings', isAdmin, async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
 
     const { currentPassword, newPassword, confirmPassword } = req.body;

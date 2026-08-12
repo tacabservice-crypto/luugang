@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards } from 'lucide-react';
+import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards, UserCog } from 'lucide-react';
 
 const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -13,6 +13,7 @@ const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children })
     { name: 'agent-requests', label: 'Agent Float Requests', icon: WalletCards, permission: 'agents' },
     { name: 'tournaments', label: 'Tournaments', icon: Trophy, permission: 'tournaments' },
     { name: 'settings', label: 'Settings', icon: Settings, permission: 'settings' },
+    { name: 'my-settings', label: 'My Settings', icon: UserCog, permission: 'self' },
   ];
 
   useEffect(() => setMobileOpen(false), [view]);

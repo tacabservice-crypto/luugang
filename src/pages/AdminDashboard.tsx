@@ -18,13 +18,26 @@ import AgentRequestsTable from '../components/admin/AgentRequestsTable';
 import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
 import { isFullAdmin } from '../utils/admin';
+import ChangePasswordForm from '../components/ChangePasswordForm';
 
 const VIEW_PERMISSIONS: Record<string, string> = {
     stats: 'stats', users: 'users', rooms: 'rooms', transactions: 'transactions',
     'manual-transactions': 'transactions', agents: 'agents', 'agent-requests': 'agents',
-    tournaments: 'tournaments', settings: 'settings',
+    tournaments: 'tournaments', settings: 'settings', 'my-settings': 'self',
 };
-const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'agents', 'agent-requests', 'tournaments', 'settings'];
+const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
+
+const canAccessView = (user: { username: string; role?: string; permissions?: string[] }, targetView: string) => {
+    const permissions = user.permissions || [];
+    return permissions.includes('all')
+        || user.username === 'admin'
+        || user.role === 'Super Admin'
+        || VIEW_PERMISSIONS[targetView] === 'self'
+        || permissions.includes(VIEW_PERMISSIONS[targetView]);
+};
+
+const getInitialView = (user: { username: string; role?: string; permissions?: string[] }) =>
+    VIEW_ORDER.find(candidate => canAccessView(user, candidate)) || 'my-settings';
 
 const AdminDashboard: React.FC = () => {
     // Define AdminUser interface to match backend
@@ -53,7 +66,7 @@ const AdminDashboard: React.FC = () => {
     const adminId = adminUser?.id;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'agents' | 'tournaments' | 'settings' | 'agent-requests'>('stats');
+    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>('stats');
     const [error, setError] = useState<string | null>(null);
     
     // Data states
@@ -71,11 +84,8 @@ const AdminDashboard: React.FC = () => {
 
     useEffect(() => {
         if (!adminUser) return;
-        const permissions = adminUser.permissions || [];
-        const fullAccess = permissions.includes('all') || adminUser.username === 'admin' || adminUser.role === 'Super Admin';
-        if (fullAccess || permissions.includes(VIEW_PERMISSIONS[view])) return;
-        const firstAllowedView = VIEW_ORDER.find(candidate => permissions.includes(VIEW_PERMISSIONS[candidate]));
-        if (firstAllowedView) setView(firstAllowedView as typeof view);
+        if (canAccessView(adminUser, view)) return;
+        setView(getInitialView(adminUser) as typeof view);
     }, [adminUser, view]);
 
     // Modal state
@@ -216,6 +226,7 @@ const AdminDashboard: React.FC = () => {
             const data = await response.json();
             if (data.success && data.user) {
                 localStorage.setItem('admin_user', JSON.stringify(data.user));
+                setView(getInitialView(data.user) as typeof view);
                 setAdminUser(data.user);
             } else {
                 throw new Error(data.error || 'Login failed');
@@ -228,7 +239,8 @@ const AdminDashboard: React.FC = () => {
 
     useEffect(() => {
         if (adminUser) {
-            fetchData(view);
+            if (!canAccessView(adminUser, view)) return;
+            if (view !== 'my-settings') fetchData(view);
             if (view === 'settings') {
                 fetchData('payment-settings', false);
                 fetchData('settings', false);
@@ -649,6 +661,7 @@ const AdminDashboard: React.FC = () => {
     }
     
     const hasPermission = (permission: string) => {
+        if (permission === 'self') return true;
         if (!adminUser) return false;
         // Super admin has all permissions
         if (adminUser.username === 'admin' || adminUser.role === 'Super Admin') return true;
@@ -753,6 +766,25 @@ const AdminDashboard: React.FC = () => {
                 permissionsList={permissionsList}
                 adminUser={adminUser}
             />;
+            case 'my-settings': return (
+                <div className="mx-auto w-full max-w-2xl rounded-xl bg-white p-4 shadow-md sm:p-6">
+                    <h2 className="text-xl font-bold text-gray-900">My Settings</h2>
+                    <p className="mt-1 text-sm text-gray-500">Manage your own admin account securely.</p>
+                    <div className="mt-6 rounded-lg bg-gray-50 p-4">
+                        <div className="mb-4 border-b border-gray-200 pb-4">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Signed in as</p>
+                            <p className="mt-1 font-semibold text-gray-900">{adminUser.username}</p>
+                            <p className="text-sm text-gray-500">{adminUser.role || 'Admin role'}</p>
+                        </div>
+                        <h3 className="mb-3 text-lg font-bold text-gray-900">Change Password</h3>
+                        <ChangePasswordForm
+                            adminId={adminUser.id}
+                            onSuccess={(message) => toast.success(message)}
+                            onError={(message) => toast.error(message)}
+                        />
+                    </div>
+                </div>
+            );
             default: return null;
         }
     };
