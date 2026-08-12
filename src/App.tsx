@@ -111,6 +111,15 @@ export default function App() {
       window.clearTimeout(authLoadingTimeout);
       if (firebaseUser) {
         try {
+          await firebaseUser.reload();
+          const providerId = firebaseUser.providerData[0]?.providerId;
+          if (!firebaseUser.emailVerified && providerId === 'password') {
+            await signOut(auth);
+            setError('Please verify your email address before signing in. Check your inbox or spam folder.');
+            setUser(null);
+            setAuthLoading(false);
+            return;
+          }
           const token = await firebaseUser.getIdToken();
           // Fetch user profile from your backend
           const response = await fetch(`${API_BASE_URL}/api/auth/login`, {

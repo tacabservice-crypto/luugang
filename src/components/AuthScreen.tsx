@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Sparkles, Mail, Lock, LogIn, UserPlus, Ticket } from 'lucide-react';
+import { Sparkles, Mail, Lock, LogIn, UserPlus, Ticket, RefreshCw } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import LanguageToggle from './LanguageToggle';
 import { UserProfile } from '../types/game';
@@ -12,7 +12,9 @@ import { auth } from '../firebase-client'; // Import client-side auth
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
-  getIdToken,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
   User
 } from 'firebase/auth';
 
@@ -42,10 +44,19 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(initialError || '');
   const [successMessage, setSuccessMessage] = useState('');
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpUser, setOtpUser] = useState<User | null>(null);
 
   const handleBackendLogin = async (firebaseUser: User) => {
     try {
       const token = await firebaseUser.getIdToken();
+      const pendingKey = `ludosom_pending_signup_${firebaseUser.email?.trim().toLowerCase() || firebaseUser.uid}`;
+      let pendingSignup: { username?: string; avatar?: string; promoCode?: string } | null = null;
+      try {
+        const rawPending = localStorage.getItem(pendingKey);
+        pendingSignup = rawPending ? JSON.parse(rawPending) : null;
+      } catch { /* ignore invalid local signup state */ }
       
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
@@ -54,12 +65,12 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          username: isLogin ? undefined : username,
+          username: pendingSignup?.username || (isLogin ? undefined : username),
           email: firebaseUser.email,
-          avatar: isLogin ? undefined : avatar,
+          avatar: pendingSignup?.avatar || (isLogin ? undefined : avatar),
           // Keep the entered promo code on a retry/login too. Firebase Auth may
           // have created the account even when the first backend sync failed.
-          promoCode: promoCode.trim() || undefined,
+          promoCode: pendingSignup?.promoCode || promoCode.trim() || undefined,
         }),
       });
 
@@ -68,7 +79,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       if (!response.ok) {
         throw new Error(profileData.error || 'Failed to sync with server.');
       }
-      
+      localStorage.removeItem(pendingKey);
       onLoginSuccess(profileData, token);
 
     } catch (err: any) {
@@ -99,14 +110,31 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       if (isLogin) {
         // Handle Login
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        await userCredential.user.reload();
+        if (!userCredential.user.emailVerified) {
+          const token = await userCredential.user.getIdToken();
+          const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+          const otpData = await otpResponse.json();
+          if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
+          setOtpUser(userCredential.user);
+          setVerificationPending(true);
+          setSuccessMessage(otpResponse.ok ? '6-digit OTP ayaa loo diray email-kaaga.' : otpData.error);
+          return;
+        }
         await handleBackendLogin(userCredential.user);
 
       } else {
         // Handle Registration
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        setSuccessMessage('Registration successful! Logging you in...');
-        // After creating the user, we immediately log them into our backend
-        await handleBackendLogin(userCredential.user);
+        const pendingKey = `ludosom_pending_signup_${userCredential.user.email?.trim().toLowerCase() || userCredential.user.uid}`;
+        localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
+        const token = await userCredential.user.getIdToken();
+        const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+        const otpData = await otpResponse.json();
+        if (!otpResponse.ok) throw new Error(otpData.error || 'OTP could not be sent.');
+        setOtpUser(userCredential.user);
+        setVerificationPending(true);
+        setSuccessMessage('Account-ka waa la sameeyay. 6-digit OTP ayaa loo diray email-kaaga.');
       }
     } catch (err: any) {
       // Firebase provides detailed error messages
@@ -131,6 +159,48 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       } else {
         setError(err.message);
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpUser || !/^\d{6}$/.test(otp)) return setError('Geli 6-da lambar ee OTP-ga.');
+    setLoading(true); setError('');
+    try {
+      const token = await otpUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/auth/otp/verify`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ otp }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'OTP verification failed.');
+      await otpUser.reload();
+      await otpUser.getIdToken(true);
+      await handleBackendLogin(otpUser);
+    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
+  };
+
+  const handleResendOtp = async () => {
+    if (!otpUser) return;
+    setLoading(true); setError('');
+    try {
+      const token = await otpUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'OTP could not be resent.');
+      setSuccessMessage('OTP cusub ayaa loo diray email-kaaga.');
+    } catch (err:any) { setError(err.message); } finally { setLoading(false); }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const credential = await signInWithPopup(auth, provider);
+      await handleBackendLogin(credential.user);
+    } catch (err: any) {
+      if (err?.code !== 'auth/popup-closed-by-user') setError(err?.message || 'Google sign-in failed.');
     } finally {
       setLoading(false);
     }
@@ -171,7 +241,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {verificationPending ? (
+          <form onSubmit={handleVerifyOtp} className="space-y-4">
+            <div className="text-center"><h2 className="text-xl font-black">Verify Your Email</h2><p className="mt-2 text-xs text-slate-400">Geli 6-digit code-ka loo diray {otpUser?.email}</p></div>
+            <input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" className="w-full rounded-xl border border-purple-400/40 bg-black/30 px-4 py-4 text-center text-3xl font-black tracking-[0.5em] text-white outline-none focus:border-purple-300" />
+            <button disabled={loading || otp.length !== 6} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3.5 text-sm font-black disabled:opacity-50">{loading ? 'Verifying...' : 'Verify OTP'}</button>
+            <button type="button" onClick={handleResendOtp} disabled={loading} className="w-full text-xs font-bold text-blue-300 hover:text-blue-200">Resend OTP</button>
+          </form>
+        ) : <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
             <>
               <div className="space-y-2">
@@ -238,7 +315,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                 className="w-full bg-black/30 border border-white/10 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all"
               />
             </div>
-          
+
           {!isLogin && (
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
@@ -268,7 +345,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
               </>
             )}
           </button>
-        </form>
+        </form>}
+
+        <div className="flex items-center gap-3"><div className="h-px flex-1 bg-white/10" /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">or</span><div className="h-px flex-1 bg-white/10" /></div>
+        <button type="button" onClick={handleGoogleSignIn} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white px-4 py-3 text-sm font-extrabold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50">
+          <span className="text-lg font-black text-blue-600">G</span> Continue with Google
+        </button>
+
+        {verificationPending && <p className="flex items-center justify-center gap-2 text-center text-[11px] text-emerald-300"><RefreshCw className="h-3.5 w-3.5" /> Hubi Inbox iyo Spam/Junk folder-ka.</p>}
 
         <div className="text-center text-xs text-slate-400">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}

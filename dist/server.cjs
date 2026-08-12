@@ -26,6 +26,7 @@ var import_express = __toESM(require("express"), 1);
 var import_cors = __toESM(require("cors"), 1);
 var import_path = __toESM(require("path"), 1);
 var import_fs = __toESM(require("fs"), 1);
+var import_crypto = __toESM(require("crypto"), 1);
 var import_url = require("url");
 var import_dotenv = __toESM(require("dotenv"), 1);
 var import_vite = require("vite");
@@ -122,6 +123,31 @@ var rawPort = process.env.PORT || 3002;
 var PORT = typeof rawPort === "string" && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
 var DB_FILE = import_path.default.join(process.cwd(), "db_store.json");
 var WELCOME_BONUS = 1;
+var OTP_TTL_MS = 10 * 60 * 1e3;
+var OTP_RESEND_MS = 60 * 1e3;
+function hashEmailOtp(uid, otp) {
+  return import_crypto.default.createHash("sha256").update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || "ludosom"}`).digest("hex");
+}
+async function sendOtpEmail(email, otp) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.OTP_FROM_EMAIL;
+  if (!apiKey || !from) throw new Error("OTP email service is not configured.");
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from,
+      to: [email],
+      subject: "LudoSom - Email Verification Code",
+      html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;color:#17112b"><h2>LudoSom (Faaiido Qar$oon)</h2><p>Ku soo dhowow LudoSom. Geli code-kan gudaha app-ka si aad u xaqiijiso email-kaaga:</p><div style="font-size:34px;font-weight:800;letter-spacing:10px;background:#f3efff;border-radius:12px;padding:18px;text-align:center;color:#5b21b6">${otp}</div><p>Code-ku wuxuu dhacayaa 10 daqiiqo kadib. Haddii aadan adigu codsan, fariintan iska dhaaf.</p><p>Mahadsanid,<br><strong>LudoSom Team</strong></p></div>`
+    })
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    console.error("OTP email provider rejected the request:", response.status, details);
+    throw new Error("Verification email could not be sent.");
+  }
+}
 function normalizePromoCode(value) {
   return typeof value === "string" ? value.trim().toUpperCase() : "";
 }
@@ -1311,6 +1337,49 @@ var checkVipStatus = (req, res, next) => {
   }
   next();
 };
+app.post("/api/auth/otp/request", verifyFirebaseToken, async (req, res) => {
+  if (!db || !auth) return res.status(500).json({ error: "Firebase is not configured." });
+  const uid = req.user.uid;
+  const email = String(req.user.email || "").trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: "This account has no email address." });
+  if (req.user.firebase?.sign_in_provider !== "password") return res.status(400).json({ error: "OTP is only required for email/password accounts." });
+  const ref = db.collection("emailOtps").doc(uid);
+  const existing = await ref.get();
+  const sentAt = Number(existing.data()?.sentAt || 0);
+  if (Date.now() - sentAt < OTP_RESEND_MS) {
+    return res.status(429).json({ error: `Please wait ${Math.ceil((OTP_RESEND_MS - (Date.now() - sentAt)) / 1e3)} seconds before requesting another code.` });
+  }
+  const otp = import_crypto.default.randomInt(1e5, 1e6).toString();
+  await sendOtpEmail(email, otp);
+  await ref.set({ email, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0 });
+  res.json({ success: true, message: "A 6-digit verification code was sent to your email.", expiresIn: OTP_TTL_MS / 1e3 });
+});
+app.post("/api/auth/otp/verify", verifyFirebaseToken, async (req, res) => {
+  if (!db || !auth) return res.status(500).json({ error: "Firebase is not configured." });
+  const otp = String(req.body?.otp || "").trim();
+  if (!/^\d{6}$/.test(otp)) return res.status(400).json({ error: "Enter a valid 6-digit code." });
+  const ref = db.collection("emailOtps").doc(req.user.uid);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) return res.status(400).json({ error: "No active verification code. Request a new code." });
+  const record = snapshot.data();
+  if (Number(record.expiresAt) < Date.now()) {
+    await ref.delete();
+    return res.status(400).json({ error: "This code has expired. Request a new code." });
+  }
+  if (Number(record.attempts || 0) >= 5) {
+    await ref.delete();
+    return res.status(429).json({ error: "Too many incorrect attempts. Request a new code." });
+  }
+  const suppliedHash = Buffer.from(hashEmailOtp(req.user.uid, otp), "hex");
+  const storedHash = Buffer.from(String(record.otpHash), "hex");
+  if (suppliedHash.length !== storedHash.length || !import_crypto.default.timingSafeEqual(suppliedHash, storedHash)) {
+    await ref.update({ attempts: Number(record.attempts || 0) + 1 });
+    return res.status(400).json({ error: "Incorrect verification code." });
+  }
+  await auth.updateUser(req.user.uid, { emailVerified: true });
+  await ref.delete();
+  res.json({ success: true, message: "Email verified successfully." });
+});
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
 });
@@ -1463,6 +1532,10 @@ data: ${JSON.stringify(seekingData)}
 app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res) => {
   const { username, email, avatar, promoCode } = req.body;
   const firebaseUid = req.user.uid;
+  const signInProvider = req.user.firebase?.sign_in_provider;
+  if (!req.user.email_verified && signInProvider === "password") {
+    return res.status(403).json({ error: "Please verify your email address before signing in." });
+  }
   let foundUser = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
   if (foundUser) {
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
