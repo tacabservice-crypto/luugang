@@ -21,7 +21,7 @@ const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children })
   const sidebar = (
     <div className="flex h-full w-72 max-w-[86vw] flex-col bg-gray-900 text-white shadow-2xl lg:w-64">
       <div className="flex items-center justify-between border-b border-gray-700 p-4">
-        <div><h2 className="text-xl font-bold">Admin Panel</h2><p className="text-sm text-gray-400">Ludo Game</p></div>
+        <div className="flex min-w-0 items-center gap-3"><img src="/ludosom-logo.png" alt="LudoSom" className="h-11 w-11 shrink-0 rounded-xl object-cover ring-1 ring-yellow-400/40"/><div><h2 className="text-xl font-bold">Admin Panel</h2><p className="text-sm text-gray-400">LudoSom Landhu</p></div></div>
         <button onClick={() => setMobileOpen(false)} className="rounded-lg p-2 hover:bg-gray-800 lg:hidden" aria-label="Close menu"><X size={20} /></button>
       </div>
       <nav className="flex-1 overflow-y-auto p-2">

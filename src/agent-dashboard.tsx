@@ -704,9 +704,7 @@ const AgentDashboard = () => {
                     
                     {/* Brand */}
                     <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                        <div className="hidden w-10 h-10 shrink-0 bg-gradient-to-tr from-purple-600 to-indigo-600 rounded-xl sm:flex items-center justify-center shadow-lg shadow-purple-600/20 border border-purple-400/20">
-                            <ShieldCheck className="w-6 h-6 text-white" />
-                        </div>
+                        <img src="/ludosom-logo.png" alt="LudoSom" className="hidden h-10 w-10 shrink-0 rounded-xl object-cover shadow-lg shadow-purple-600/20 ring-1 ring-yellow-400/40 sm:block" />
                         <div className="min-w-0">
                             <div className="flex items-center gap-2">
                                 <h1 className="truncate text-sm font-bold bg-gradient-to-r from-purple-400 to-indigo-300 bg-clip-text text-transparent sm:text-lg">

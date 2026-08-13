@@ -16,7 +16,7 @@ interface UserEditModalProps {
     roles?: Role[];
 }
 
-const AVATARS = ['😀', '😎', '🚀', '🧠', '👑', '💪', '🎉', '🔥', '💯', '🎲', '🤔','😂','😃','😄','😅','😆','😉','😊','😋','😌','😍','😏','😐','😑','😒','😓','pensive','😕','😖','😗','😘','😙','😚','😛','😜','😝','😞','😟','😠','😡','😢','😣','😤','😥','😦','😧','😨','😩','😪','😫','😬','😭','😮','😯','😰','😱','😲','😳','😴','😵','😶','😷'];
+const AVATARS = ['/ludosom-logo.png', '😀', '😎', '🚀', '🧠', '👑', '💪', '🎉', '🔥', '💯', '🎲', '🤔','😂','😃','😄','😅','😆','😉','😊','😋','😌','😍','😏','😐','😑','😒','😓','pensive','😕','😖','😗','😘','😙','😚','😛','😜','😝','😞','😟','😠','😡','😢','😣','😤','😥','😦','😧','😨','😩','😪','😫','😬','😭','😮','😯','😰','😱','😲','😳','😴','😵','😶','😷'];
 
 const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, isAdmin = false, roles = [] }) => {
     const isProtected = isFullAdmin(user);
@@ -95,7 +95,7 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
                                                     onClick={() => handleAvatarSelect(avatar)} 
                                                     className={`text-2xl rounded-lg p-1 transition-all ${formData.avatar === avatar ? 'bg-purple-600 ring-2 ring-purple-400' : 'hover:bg-gray-600'}`}
                                                 >
-                                                    {avatar}
+                                                {avatar.startsWith('/') ? <img src={avatar} alt="LudoSom avatar" className="h-8 w-8 rounded-lg object-cover" /> : avatar}
                                                 </button>
                                             ))}
                                         </div>

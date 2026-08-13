@@ -19,7 +19,7 @@ import {
   User
 } from 'firebase/auth';
 
-const AVATARS = ['🎮', '🏆', '🔥', '👑', '🎲', '⚡', '🤖', '🦊', '🐯', '🐼', '🦁', '🦄'];
+const AVATARS = ['/ludosom-logo.png', '🎮', '🏆', '🔥', '👑', '🎲', '⚡', '🤖', '🦊', '🐯', '🐼', '🦁', '🦄'];
 
 interface AuthScreenProps {
   onLoginSuccess: (profile: UserProfile, token: string) => void;
@@ -282,9 +282,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
 
       <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl shadow-blue-500/5 space-y-6 relative z-10">
         <div className="flex flex-col items-center text-center space-y-2">
-          <div className="w-16 h-16 bg-gradient-to-tr from-purple-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-500/20">
-            <Sparkles className="w-8 h-8 text-white" />
-          </div>
+          <img src="/ludosom-logo.png" alt="LudoSom Landhu" className="h-20 w-20 rounded-2xl object-cover shadow-lg shadow-purple-500/20 ring-1 ring-yellow-400/40" />
           <h1 className="text-3xl font-black tracking-widest bg-gradient-to-r from-yellow-400 via-white to-purple-400 bg-clip-text text-transparent">
             {isLogin ? 'Welcome Back' : 'Create Account'}
           </h1>
@@ -337,7 +335,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                           : 'hover:bg-white/5'
                       }`}
                     >
-                      {av}
+                      {av.startsWith('/') ? <img src={av} alt="LudoSom avatar" className="h-8 w-8 rounded-lg object-cover" /> : av}
                     </button>
                   ))}
                 </div>

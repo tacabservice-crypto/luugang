@@ -11,7 +11,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'logo.svg', 'dice.mp3', 'win.mp3'],
+        includeAssets: ['ludosom-logo.png', 'dice.mp3', 'win.mp3'],
         manifest: {
           name: 'Ludo$om',
           short_name: 'Ludo$om',
@@ -20,14 +20,16 @@ export default defineConfig(() => {
           theme_color: '#ffffff',
           icons: [
             {
-              src: 'logo.svg',
+              src: 'ludosom-logo.png',
               sizes: '192x192',
-              type: 'image/svg+xml',
+              type: 'image/png',
+              purpose: 'any maskable',
             },
             {
-              src: 'logo.svg',
+              src: 'ludosom-logo.png',
               sizes: '512x512',
-              type: 'image/svg+xml',
+              type: 'image/png',
+              purpose: 'any maskable',
             },
           ],
         },
