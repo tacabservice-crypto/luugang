@@ -2278,10 +2278,6 @@ app.get('/api/users/online', async (req, res) => {
   // Return all registered users searching or online
   Object.values(store.users).forEach(u => {
     if (u.id.startsWith('user_sim_')) return; // Skip simulated players
-    const isConnected = activeIds.has(u.id);
-    const inGame = Object.values(store.rooms).some(r =>
-      r.status === 'playing' && r.players.some(p => p.userId === u.id && p.status !== 'left')
-    );
 
     let status = 'offline';
     let seekingDetails: any = null;

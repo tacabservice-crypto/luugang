@@ -1747,10 +1747,6 @@ app.get("/api/users/online", async (req, res) => {
   const onlineList = [];
   Object.values(store.users).forEach((u) => {
     if (u.id.startsWith("user_sim_")) return;
-    const isConnected = activeIds.has(u.id);
-    const inGame = Object.values(store.rooms).some(
-      (r) => r.status === "playing" && r.players.some((p) => p.userId === u.id && p.status !== "left")
-    );
     let status = "offline";
     let seekingDetails = null;
     for (const [qKey, queueUserIds] of Object.entries(store.matchmakingQueues)) {
