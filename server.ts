@@ -1767,7 +1767,8 @@ app.post('/api/auth/otp/request', verifyFirebaseToken, async (req: any, res) => 
   const uid = req.user.uid;
   const email = String(req.user.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'This account has no email address.' });
-  if (req.user.firebase?.sign_in_provider !== 'password') return res.status(400).json({ error: 'OTP is only required for email/password accounts.' });
+  const provider = req.user.firebase?.sign_in_provider;
+  if (provider !== 'password' && provider !== 'google.com') return res.status(400).json({ error: 'This sign-in provider does not support email OTP.' });
 
   const ref = db.collection('emailOtps').doc(uid);
   const existing = await ref.get();
@@ -1778,7 +1779,7 @@ app.post('/api/auth/otp/request', verifyFirebaseToken, async (req: any, res) => 
 
   const otp = crypto.randomInt(100000, 1000000).toString();
   await sendOtpEmail(email, otp);
-  await ref.set({ email, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0 });
+  await ref.set({ email, provider, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0, verifiedAt: null });
   res.json({ success: true, message: 'A 6-digit verification code was sent to your email.', expiresIn: OTP_TTL_MS / 1000 });
 });
 
@@ -1804,9 +1805,14 @@ app.post('/api/auth/otp/verify', verifyFirebaseToken, async (req: any, res) => {
     await ref.update({ attempts: Number(record.attempts || 0) + 1 });
     return res.status(400).json({ error: 'Incorrect verification code.' });
   }
-  await auth.updateUser(req.user.uid, { emailVerified: true });
-  await ref.delete();
+  if (req.user.firebase?.sign_in_provider === 'password') await auth.updateUser(req.user.uid, { emailVerified: true });
+  await ref.set({ otpHash: null, expiresAt: null, attempts: 0, verifiedAt: Date.now() }, { merge: true });
   res.json({ success: true, message: 'Email verified successfully.' });
+});
+
+app.get('/api/auth/profile-status', verifyFirebaseToken, async (req: any, res) => {
+  const profile = await findUserProfileInFirestore(req.user.uid, req.user.email);
+  res.json({ exists: Boolean(profile?.id) });
 });
 
 app.get("/api/health", (req, res) => {
@@ -1989,7 +1995,7 @@ data: ${JSON.stringify(seekingData)}
 
 // Authentication / Session
 app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any, res) => {
-  const { username, email, avatar, promoCode } = req.body;
+  const { username, email, avatar, promoCode, onboardingComplete } = req.body;
   const firebaseUid = req.user.uid;
   const signInProvider = req.user.firebase?.sign_in_provider;
   if (!req.user.email_verified && signInProvider === 'password') {
@@ -2039,6 +2045,18 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
       await saveStoreAndWait();
       return res.json(userByEmail);
     }
+  }
+
+  if (signInProvider === 'google.com') {
+    if (onboardingComplete !== true || !db) {
+      return res.status(428).json({ error: 'Complete email OTP verification and the promo-code step before continuing.' });
+    }
+    const otpVerification = await db.collection('emailOtps').doc(firebaseUid).get();
+    const verifiedAt = Number(otpVerification.data()?.verifiedAt || 0);
+    if (!verifiedAt || Date.now() - verifiedAt > 30 * 60 * 1000) {
+      return res.status(403).json({ error: 'Google onboarding OTP verification is required.' });
+    }
+    await otpVerification.ref.delete();
   }
 
   // Signup sends a username. If it is absent, Firebase Auth has already
@@ -6129,10 +6147,6 @@ app.get(/^(?!\/api).*/, (req, res) => {
 // 7. VITE MIDDLEWARE SETUP
 // ==========================================
 async function startServer() {
-  // Load authoritative state from Firebase Firestore on startup
-  await loadStoreFromFirestore();
-  purgeSimulatedUsers(); // Ensure simulated users are purged from the memory state
-
   let vite: ViteDevServer | undefined;
   if (process.env.NODE_ENV === "development") {
     vite = await createViteServer({
@@ -6149,6 +6163,16 @@ async function startServer() {
     : app.listen(PORT, () => {
         console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
       });
+
+  // Hostinger requires listen() within three seconds. Load persistent state only
+  // after binding the port; loadStoreFromFirestore already falls back to disk.
+  try {
+    await loadStoreFromFirestore();
+    purgeSimulatedUsers();
+    console.log('Application state initialization completed.');
+  } catch (error) {
+    console.error('Application state initialization failed; continuing with local fallback:', error);
+  }
 
   // Handle Vite HMR WebSocket upgrade requests
   server.on('upgrade', (req, socket, head) => {

@@ -47,6 +47,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [verificationPending, setVerificationPending] = useState(false);
   const [otp, setOtp] = useState('');
   const [otpUser, setOtpUser] = useState<User | null>(null);
+  const [googleOnboarding, setGoogleOnboarding] = useState(false);
+  const [promoStep, setPromoStep] = useState(false);
 
   const readApiJson = async (response: Response) => {
     const contentType = response.headers.get('content-type') || '';
@@ -56,7 +58,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     return response.json();
   };
 
-  const handleBackendLogin = async (firebaseUser: User) => {
+  const handleBackendLogin = async (firebaseUser: User, onboardingComplete = false) => {
     try {
       const token = await firebaseUser.getIdToken();
       const pendingKey = `ludosom_pending_signup_${firebaseUser.email?.trim().toLowerCase() || firebaseUser.uid}`;
@@ -73,12 +75,13 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          username: pendingSignup?.username || (isLogin ? undefined : username),
+          username: pendingSignup?.username || (onboardingComplete ? firebaseUser.displayName || undefined : (isLogin ? undefined : username)),
           email: firebaseUser.email,
-          avatar: pendingSignup?.avatar || (isLogin ? undefined : avatar),
+          avatar: pendingSignup?.avatar || (onboardingComplete ? firebaseUser.photoURL || undefined : (isLogin ? undefined : avatar)),
           // Keep the entered promo code on a retry/login too. Firebase Auth may
           // have created the account even when the first backend sync failed.
           promoCode: pendingSignup?.promoCode || promoCode.trim() || undefined,
+          onboardingComplete,
         }),
       });
 
@@ -183,7 +186,13 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       if (!response.ok) throw new Error(data.error || 'OTP verification failed.');
       await otpUser.reload();
       await otpUser.getIdToken(true);
-      await handleBackendLogin(otpUser);
+      if (googleOnboarding) {
+        setVerificationPending(false);
+        setPromoStep(true);
+        setSuccessMessage('Email-ka waa la xaqiijiyay. Hadda geli promo code ama Skip dooro.');
+      } else {
+        await handleBackendLogin(otpUser);
+      }
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   };
 
@@ -206,12 +215,34 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const credential = await signInWithPopup(auth, provider);
-      await handleBackendLogin(credential.user);
+      const token = await credential.user.getIdToken();
+      const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
+      const status = await readApiJson(statusResponse);
+      if (!statusResponse.ok) throw new Error(status.error || 'Could not check account status.');
+      if (status.exists) {
+        await handleBackendLogin(credential.user);
+      } else {
+        const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+        const otpData = await readApiJson(otpResponse);
+        if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
+        setOtpUser(credential.user);
+        setGoogleOnboarding(true);
+        setVerificationPending(true);
+        setSuccessMessage(otpResponse.ok ? '6-digit OTP ayaa loo diray Gmail-kaaga.' : otpData.error);
+      }
     } catch (err: any) {
       if (err?.code !== 'auth/popup-closed-by-user') setError(err?.message || 'Google sign-in failed.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const finishGoogleOnboarding = async () => {
+    if (!otpUser) return;
+    setLoading(true); setError('');
+    try {
+      await handleBackendLogin(otpUser, true);
+    } catch (err:any) { setError(err.message); } finally { setLoading(false); }
   };
 
   return (
@@ -249,7 +280,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </div>
         )}
 
-        {verificationPending ? (
+        {promoStep ? (
+          <div className="space-y-4">
+            <div className="text-center"><h2 className="text-xl font-black">Promo Code</h2><p className="mt-2 text-xs leading-relaxed text-slate-400">Haddii aad agent ka heshay promo code, hadda geli. Haddii aadan haysan waad ka boodi kartaa.</p></div>
+            <div className="space-y-1"><label className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-400"><Ticket className="h-3 w-3" /> Promo Code (Optional)</label><input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="AGENTPROMO123" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-400" /></div>
+            <button type="button" onClick={finishGoogleOnboarding} disabled={loading} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3.5 text-sm font-black disabled:opacity-50">{loading ? 'Creating account...' : promoCode.trim() ? 'Continue with Promo Code' : 'Skip & Continue'}</button>
+            <p className="text-center text-[10px] text-slate-500">Marka account-ku agent ku xirmo, agent kale looma beddeli karo si caadi ah.</p>
+          </div>
+        ) : verificationPending ? (
           <form onSubmit={handleVerifyOtp} className="space-y-4">
             <div className="text-center"><h2 className="text-xl font-black">Verify Your Email</h2><p className="mt-2 text-xs text-slate-400">Geli 6-digit code-ka loo diray {otpUser?.email}</p></div>
             <input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" className="w-full rounded-xl border border-purple-400/40 bg-black/30 px-4 py-4 text-center text-3xl font-black tracking-[0.5em] text-white outline-none focus:border-purple-300" />
