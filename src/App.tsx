@@ -792,8 +792,15 @@ export default function App() {
         throw new Error(data?.error || 'Failed to leave room.');
       }
 
-      // Leaving means leaving: clear the room after the server records the forfeit.
-      setActiveRoom(null);
+      const data = await response.json();
+      // During a running game the server returns the completed forfeit result.
+      // Keep it mounted so the leaving player sees "WAA LAGU HELAY" and the
+      // final result before choosing Play Another Game.
+      if (data?.room?.status === 'completed') {
+        setActiveRoom(data.room);
+      } else {
+        setActiveRoom(null);
+      }
       localStorage.removeItem('ludo_active_room_id');
       handleRefreshBalance();
     } catch (err) {
