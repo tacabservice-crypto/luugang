@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types/game';
-import ChangePasswordModal from './ChangePasswordModal';
 import { isFullAdmin } from '../utils/admin';
+import FirebasePasswordSettings from './FirebasePasswordSettings';
 
 interface Role {
     id: string;
@@ -26,7 +26,6 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
         role: user.role || 'player',
     });
     const [newPassword, setNewPassword] = useState('');
-    const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
     const [customAvatar, setCustomAvatar] = useState('');
     const [avatarType, setAvatarType] = useState<'emoji' | 'url'>('emoji');
     const [isSaving, setIsSaving] = useState(false);
@@ -61,13 +60,6 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
         } finally {
             setIsSaving(false);
         }
-    };
-
-    const handlePasswordSave = (password: string) => {
-        // This is for the user changing their own password, not the admin reset
-        // We'll use the new simple text input for admin resets.
-        setNewPassword(password);
-        setIsPasswordModalOpen(false);
     };
 
     return (
@@ -114,11 +106,7 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
                                         </div>
                                     )}
                                 </div>
-                                <div>
-                                    <button onClick={() => setIsPasswordModalOpen(true)} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">
-                                        Change Password
-                                    </button>
-                                </div>
+                                <FirebasePasswordSettings />
                             </>
                         )}
                         {isAdmin && (
@@ -169,12 +157,6 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
                     {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
                 </div>
             </div>
-            {isPasswordModalOpen && (
-                <ChangePasswordModal 
-                    onClose={() => setIsPasswordModalOpen(false)}
-                    onSave={handlePasswordSave}
-                />
-            )}
         </>
     );
 };

@@ -1306,6 +1306,7 @@ const AgentDashboard = () => {
                                                 </td>
                                                 <td className="px-4 py-3.5 text-right font-mono font-extrabold text-slate-100 text-sm">
                                                     ${req.amount.toFixed(2)}
+                                                    {(req.type === 'withdrawal' || req.type === 'withdraw') && <span className="block text-[10px] font-semibold text-amber-300">Fee ${Number(req.fee || 0).toFixed(2)} · Pay ${Number(req.netAmount ?? req.amount).toFixed(2)}</span>}
                                                 </td>
                                                 <td className="px-4 py-3.5 text-center">
                                                     <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${

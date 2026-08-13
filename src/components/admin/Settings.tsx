@@ -223,7 +223,7 @@ const Settings = ({
                           />
                         </div>
                         <div className="col-span-1 md:col-span-2">
-                          <label className="block text-sm font-medium text-gray-700">Account Number / Merchant ID</label>
+                          <label className="block text-sm font-medium text-gray-700">Admin Deposit Number / Merchant ID</label>
                           <input
                             type="text"
                             value={config.accountNumber || ''}

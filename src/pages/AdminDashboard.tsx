@@ -591,7 +591,7 @@ const AdminDashboard: React.FC = () => {
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to save payment settings');
-            setPaymentSettings(data.paymentSettings);
+            setPaymentSettings({ ...data.paymentProviders, agentFloatInstructions: data.agentFloatInstructions || settings.instructions });
             alert('Payment settings saved.');
         } catch (err: any) {
             setError(userErrorMessage(err));

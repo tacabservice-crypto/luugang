@@ -150,6 +150,7 @@ const ManualTransactionsTable: React.FC<ManualTransactionsTableProps> = ({ trans
                   <td className="px-4 py-4">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${tx.transactionType === 'deposit' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>{tx.transactionType}</span>
                     <span className="ml-2 font-mono font-bold text-white">${Number(tx.amount || 0).toFixed(2)}</span>
+                    {tx.transactionType === 'withdraw' && <span className="mt-1 block text-xs text-amber-300">Fee: ${Number(tx.fee || 0).toFixed(2)} · Pay customer: ${Number(tx.netAmount ?? tx.amount).toFixed(2)}</span>}
                     <span className="mt-1 block text-xs uppercase text-slate-500">{tx.provider}</span>
                   </td>
                   <td className="px-4 py-4 text-xs">

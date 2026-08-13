@@ -72,6 +72,9 @@ interface ManualTransactionRequest {
   resolvedBy?: string;
   resolverUsername?: string;
   amount: number;
+  fee?: number;
+  netAmount?: number;
+  feeRate?: number;
   phone?: string; // For withdrawals
   senderPhone?: string; // For deposits
   provider: string;
@@ -167,6 +170,11 @@ const DB_FILE = path.join(process.cwd(), 'db_store.json');
 const WELCOME_BONUS = 1.0;
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_RESEND_MS = 60 * 1000;
+const MINIMUM_WITHDRAWAL = 2;
+const BONUS_UNLOCK_DEPOSIT_TOTAL = 5;
+const NORMAL_WITHDRAWAL_FEE_RATE = 0;
+const NO_PLAY_WITHDRAWAL_FEE_RATE = 0.10;
+const MINIMUM_WITHDRAWAL_FEE = 0.10;
 
 function hashEmailOtp(uid: string, otp: string): string {
   return crypto.createHash('sha256').update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || 'ludosom'}`).digest('hex');
@@ -1012,21 +1020,9 @@ function removeSSEClient(res: any) {
         }
       }
 
-      // Clean up from matchmaking queues
-      let changed = false;
-      for (const qKey of Object.keys(store.matchmakingQueues)) {
-        const lenBefore = store.matchmakingQueues[qKey].length;
-        store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter(id => id !== client.userId);
-        if (store.matchmakingQueues[qKey].length !== lenBefore) changed = true;
-      }
-      if (changed) {
-        saveStoreAndWait();
-      }
-      if (db) {
-        db.collection('matchmaking').doc(client.userId).delete().catch(err => {
-          console.error('Failed to delete matchmaking record from Firestore on disconnect:', err);
-        });
-      }
+      // Do not remove an active search merely because SSE reconnects or this
+      // hosting process loses the connection. Explicit leave/match/expiry owns
+      // queue removal, which keeps searches visible across server instances.
     }
     broadcastToAll('online_players_updated', {});
   }
@@ -1036,7 +1032,6 @@ function removeSSEClient(res: any) {
 // Clean up stale users from matchmaking queues
 function cleanupMatchmakingQueues() {
   let changed = false;
-  const activeUserIds = new Set(activeClients.map(c => c.userId));
   const now = Date.now();
 
   for (const qKey of Object.keys(store.matchmakingQueues)) {
@@ -1050,14 +1045,6 @@ function cleanupMatchmakingQueues() {
         r.status === 'playing' && r.players.some(p => p.userId === userId && p.status !== 'left')
       );
       if (inGame) return false;
-
-      // Must be currently connected via SSE
-      if (!activeUserIds.has(userId)) {
-        if (db) {
-          db.collection('matchmaking').doc(userId).delete().catch(() => {});
-        }
-        return false;
-      }
 
       // Must not be in queue longer than 3 minutes (180,000 ms)
       const u = store.users[userId];
@@ -1180,6 +1167,55 @@ function addTransaction(userId: string, type: WalletTransaction['type'], amount:
   store.transactions.unshift(tx);
   saveStore();
   return tx;
+}
+
+function getWithdrawableBalance(userId: string, excludeRequestId?: string): number {
+  const approvedDeposits = store.transactions
+    .filter(tx => tx.userId === userId && tx.type === 'deposit' && /deposit/i.test(tx.description || '') && !/welcome bonus/i.test(tx.description || ''))
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const earnedFromWins = store.transactions
+    .filter(tx => tx.userId === userId && tx.type === 'win_payout')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const unlockedBonus = approvedDeposits >= BONUS_UNLOCK_DEPOSIT_TOTAL ? WELCOME_BONUS : 0;
+  const completedWithdrawals = store.transactions
+    .filter(tx => tx.userId === userId && tx.type === 'withdrawal')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const pendingWithdrawals = store.pendingManualTransactions
+    .filter(tx => tx.id !== excludeRequestId && tx.userId === userId && tx.transactionType === 'withdraw' && tx.status === 'pending')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  return Math.max(0, approvedDeposits + earnedFromWins + unlockedBonus - completedWithdrawals - pendingWithdrawals);
+}
+
+function hasCompletedPaidGame(userId: string): boolean {
+  return store.transactions.some(tx => tx.userId === userId && tx.type === 'bet_escrow_locked' && Number(tx.amount || 0) > 0)
+    && Object.values(store.rooms).some(room => room.status === 'completed' && room.betAmount > 0 && room.players.some(player => player.userId === userId));
+}
+
+function getWithdrawalQuote(userId: string, amount: number) {
+  const playedPaidGame = hasCompletedPaidGame(userId);
+  const feeRate = playedPaidGame ? NORMAL_WITHDRAWAL_FEE_RATE : NO_PLAY_WITHDRAWAL_FEE_RATE;
+  const fee = playedPaidGame
+    ? 0
+    : Math.min(amount, Math.max(MINIMUM_WITHDRAWAL_FEE, Number((amount * feeRate).toFixed(2))));
+  return { feeRate, fee, netAmount: Number((amount - fee).toFixed(2)), playedPaidGame };
+}
+
+function withdrawalEligibilityError(user: UserProfile, amount: number, excludeRequestId?: string): string | null {
+  if (amount < MINIMUM_WITHDRAWAL) return `Minimum withdrawal amount is $${MINIMUM_WITHDRAWAL}.`;
+  if (user.balance < amount) return 'Insufficient balance for this withdrawal.';
+  const withdrawable = getWithdrawableBalance(user.id, excludeRequestId);
+  if (withdrawable < amount) {
+    return withdrawable > 0
+      ? `Only $${withdrawable.toFixed(2)} is currently available to withdraw.`
+      : `Deposit funds first. The $${WELCOME_BONUS.toFixed(0)} welcome bonus unlocks after $${BONUS_UNLOCK_DEPOSIT_TOTAL} in approved deposits.`;
+  }
+  return null;
+}
+
+function recordWithdrawalFee(userId: string, amount: number, requestId?: string) {
+  if (amount <= 0) return;
+  store.houseRevenue += amount;
+  addTransaction('house', 'app_commission', amount, requestId, `Withdrawal fee from user ${userId}${requestId ? ` for request ${requestId}` : ''}.`);
 }
 
 // Add a log to the room
@@ -2177,7 +2213,6 @@ app.get('/api/users/online', async (req, res) => {
 
   cleanupMatchmakingQueues();
 
-  const activeIds = new Set(activeClients.map(c => c.userId));
   const now = Date.now();
 
   // Sync matchmaking queue from Firestore if db is available to support multi-instance
@@ -2187,12 +2222,13 @@ app.get('/api/users/online', async (req, res) => {
       qs.forEach(docSnap => {
         const data = docSnap.data();
         if (data && data.status === 'WAITING_FOR_MATCH') {
-          // Check if record is stale (> 3 minutes old) or user is not connected via SSE
+          // Firestore is the shared source across hosting processes. A user can
+          // be connected to a different instance, so local SSE presence must
+          // never hide or delete their active search.
           const isStale = (now - (data.timestamp || 0)) > 180000;
-          const isUserConnected = activeIds.has(data.userId);
 
-          if (isStale || !isUserConnected) {
-            // Delete stale/disconnected record from Firestore
+          if (isStale) {
+            // Delete only genuinely expired records from Firestore.
             db.collection('matchmaking').doc(data.userId).delete().catch(() => {});
             // Remove from memory queue if present
             for (const qKey of Object.keys(store.matchmakingQueues)) {
@@ -2353,16 +2389,12 @@ app.post('/api/wallet/withdraw', (req, res) => {
     return res.status(400).json({ error: 'Invalid withdrawal amount' });
   }
 
-  if (withAmt < 20) { // New condition for minimum withdrawal
-    return res.status(400).json({ error: 'Minimum withdrawal amount is $20' });
-  }
-
-  if (user.balance < withAmt) {
-    return res.status(400).json({ error: 'Insufficient funds' });
-  }
+  const eligibilityError = withdrawalEligibilityError(user, withAmt);
+  if (eligibilityError) return res.status(400).json({ error: eligibilityError });
 
   user.balance -= withAmt;
   addTransaction(userId, 'withdrawal', withAmt, undefined, `Withdrawn funds to bank account.`);
+  recordWithdrawalFee(userId, getWithdrawalQuote(userId, withAmt).fee);
   broadcastUserUpdate(userId);
 
   res.json({ success: true, balance: user.balance });
@@ -2386,9 +2418,10 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   }
 
   // ==> START PROMO CODE AGENT LOCK VALIDATION
-  // A linked agent always wins. For users without a promo-linked agent, preserve
-  // the agent selected in the wallet so production requests are routed correctly.
-  const assignedAgentId = user.linkedAgentId || (typeof agentId === 'string' && agentId.trim() ? agentId.trim() : undefined);
+  // Only a promo-linked account may route a request to an agent. Never accept a
+  // client-selected/default agent for an unlinked player; those requests belong
+  // exclusively to the admin queue.
+  const assignedAgentId = user.linkedAgentId || undefined;
   if (assignedAgentId && agentId && assignedAgentId !== agentId) {
     return res.status(400).json({ error: 'This account is locked to a specific agent. You can only transact with your assigned agent.' });
   }
@@ -2396,6 +2429,11 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   
   if (transactionType === 'withdraw' && !phone) {
     return res.status(400).json({ error: 'Phone number is required for withdrawal requests.' });
+  }
+
+  if (transactionType === 'withdraw') {
+    const eligibilityError = withdrawalEligibilityError(user, requestAmount);
+    if (eligibilityError) return res.status(400).json({ error: eligibilityError });
   }
 
   if (transactionType === 'deposit' && !senderPhone) {
@@ -2433,6 +2471,7 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
     agentUsername: assignedAgentUsername,
     managedBy: assignedAgentId ? 'agent' : 'admin',
     amount: requestAmount,
+    ...(transactionType === 'withdraw' ? getWithdrawalQuote(user.id, requestAmount) : {}),
     phone, // This will be the destination for withdrawals
     senderPhone, // This is the source number for deposits
     provider,
@@ -2456,13 +2495,26 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   res.json({ success: true, message: 'Your request has been submitted for review.' });
 });
 
+app.get('/api/wallet/withdrawal-quote/:userId', async (req, res) => {
+  const user = await refreshUserProfileById(req.params.userId);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const amount = Number(req.query.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid withdrawal amount.' });
+  const eligibilityError = withdrawalEligibilityError(user, amount);
+  if (eligibilityError) return res.status(400).json({ error: eligibilityError, withdrawableBalance: getWithdrawableBalance(user.id) });
+  res.json({ amount, withdrawableBalance: getWithdrawableBalance(user.id), ...getWithdrawalQuote(user.id, amount) });
+});
+
 app.get('/api/wallet/transactions/:userId', (req, res) => {
   const txs = store.transactions.filter(t => t.userId === req.params.userId);
   res.json(txs);
 });
 
 app.get('/api/payment/settings', (req, res) => {
-  res.json(store.paymentProviders);
+  res.json(Object.fromEntries(Object.entries(store.paymentProviders).map(([key, config]) => [key, {
+    enabled: config.enabled,
+    accountNumber: config.accountNumber || '',
+  }])));
 });
 
 app.post('/api/wallet/process-api-payment', async (req, res) => {
@@ -2491,11 +2543,11 @@ app.post('/api/wallet/process-api-payment', async (req, res) => {
     if (!phone) {
       return res.status(400).json({ error: 'Phone number is required for withdrawal requests.' });
     }
-    if (user.balance < parsedAmount) {
-      return res.status(400).json({ error: 'Insufficient funds.' });
-    }
+    const eligibilityError = withdrawalEligibilityError(user, parsedAmount);
+    if (eligibilityError) return res.status(400).json({ error: eligibilityError });
     user.balance -= parsedAmount;
     addTransaction(userId, 'withdrawal', parsedAmount, undefined, `API withdrawal via ${providerKey}.`);
+    recordWithdrawalFee(userId, getWithdrawalQuote(userId, parsedAmount).fee);
     broadcastUserUpdate(userId);
     await saveStoreAndWait();
     return res.json({ success: true, balance: user.balance, message: 'Withdrawal processed via API.' });
@@ -3174,8 +3226,9 @@ app.post('/api/request-to-agent', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Missing or invalid parameters. Requires agentId, amount, type, playerPhone, and provider.' });
     }
 
-    if (type === 'withdrawal' && player.balance < requestAmount) {
-        return res.status(400).json({ error: 'Insufficient balance for this withdrawal request.' });
+    if (type === 'withdrawal') {
+        const eligibilityError = withdrawalEligibilityError(player, requestAmount);
+        if (eligibilityError) return res.status(400).json({ error: eligibilityError });
     }
 
     try {
@@ -3299,7 +3352,7 @@ function startMatchedRoom(matchedUsers: Array<{ id: string; username: string; av
 }
 
 // Enter Matchmaking Queue (Search Live)
-app.post('/api/rooms/matchmaking/enter-queue', (req, res) => {
+app.post('/api/rooms/matchmaking/enter-queue', async (req, res) => {
   try {
     const { userId, betAmount, capacity, gameMode } = req.body;
     const user = store.users[userId];
@@ -3342,7 +3395,7 @@ app.post('/api/rooms/matchmaking/enter-queue', (req, res) => {
 
     // Write matchmaking record to Firestore
     if (db) {
-      db.collection('matchmaking').doc(userId).set({
+      await db.collection('matchmaking').doc(userId).set({
         userId: userId,
         username: user.username,
         avatar: user.avatar,
@@ -3351,8 +3404,6 @@ app.post('/api/rooms/matchmaking/enter-queue', (req, res) => {
         gameMode: mode,
         status: 'WAITING_FOR_MATCH',
         timestamp: Date.now()
-      }).catch(err => {
-        console.error('Failed to write matchmaking record to Firestore:', err);
       });
     }
 
@@ -4983,6 +5034,13 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', hasPermission(
         user.balance += tx.amount;
         addTransaction(user.id, 'deposit', tx.amount, undefined, `Manual deposit approved by admin. Request ID: ${tx.id}`);
     } else { // withdrawal
+        const eligibilityError = withdrawalEligibilityError(user, tx.amount, tx.id);
+        if (eligibilityError) {
+            tx.status = 'rejected';
+            await saveManualRequestToFirestore(tx);
+            await saveStoreAndWait();
+            return res.status(400).json({ error: eligibilityError });
+        }
         if (user.balance < tx.amount) {
             // Not enough balance, reject it instead
             tx.status = 'rejected';
@@ -4992,6 +5050,7 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', hasPermission(
         }
         user.balance -= tx.amount;
         addTransaction(user.id, 'withdrawal', tx.amount, undefined, `Manual withdrawal approved by admin. Request ID: ${tx.id}`);
+        recordWithdrawalFee(user.id, Number(tx.fee || 0), tx.id);
     }
 
     tx.status = 'approved';
@@ -5837,6 +5896,7 @@ app.post('/api/agent/deposit', isAgent, async (req, res) => {
             undefined,
             `Deposit received from agent ${agent.id}.`
         );
+        if (tx.transactionType === 'withdraw') recordWithdrawalFee(user.id, Number(tx.fee || 0), tx.id);
         await saveStoreAndWait(); // This saves the player's new balance.
 
         broadcastUserUpdate(player.id);
@@ -6005,6 +6065,8 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
                 newAgentFloat = currentFloat - tx.amount;
                 newUserBalance = persistedBalance + tx.amount;
             } else { // withdrawal
+                const eligibilityError = withdrawalEligibilityError(user, tx.amount, tx.id);
+                if (eligibilityError) throw new Error(eligibilityError);
                 // Agent receives money from player, agent float increases.
                 if (persistedBalance < tx.amount) {
                     // This transaction should just fail, not be rejected. Rejection is an explicit agent action.

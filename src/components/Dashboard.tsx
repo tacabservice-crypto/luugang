@@ -193,6 +193,9 @@ export default function Dashboard({
 
   useEffect(() => {
     fetchOnlinePlayers();
+    // SSE gives instant updates on the same server process; this 2-second sync
+    // also discovers searches created on other production processes/browsers.
+    const liveSearchInterval = window.setInterval(fetchOnlinePlayers, 2000);
     const handleRefresh = () => fetchOnlinePlayers();
     const handlePlayerLeft = (e: CustomEvent) => {
       const { userId } = e.detail;
@@ -214,6 +217,7 @@ export default function Dashboard({
     window.addEventListener('player_left_queue', handlePlayerLeft as EventListener);
 
     return () => {
+      window.clearInterval(liveSearchInterval);
       window.removeEventListener('refresh_online_players', handleRefresh);
       window.removeEventListener('player_left_queue', handlePlayerLeft as EventListener);
     };

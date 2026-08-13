@@ -28,6 +28,9 @@ export interface WalletTransaction {
   userId: string;
   type: 'deposit' | 'withdrawal' | 'bet_escrow_locked' | 'bet_escrow_refund' | 'win_payout' | 'app_commission' | 'refund';
   amount: number;
+  fee?: number;
+  netAmount?: number;
+  feeRate?: number;
   timestamp: number;
   matchId?: string;
   description: string;
@@ -44,6 +47,9 @@ export interface ManualTransactionRequest {
   resolvedBy?: string;
   resolverUsername?: string;
   amount: number;
+  fee?: number;
+  netAmount?: number;
+  feeRate?: number;
   phone: string; // For withdrawals, this is the destination phone number
   senderPhone?: string; // For deposits, this is the source phone number
   provider: string;

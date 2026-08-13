@@ -125,6 +125,11 @@ var DB_FILE = import_path.default.join(process.cwd(), "db_store.json");
 var WELCOME_BONUS = 1;
 var OTP_TTL_MS = 10 * 60 * 1e3;
 var OTP_RESEND_MS = 60 * 1e3;
+var MINIMUM_WITHDRAWAL = 2;
+var BONUS_UNLOCK_DEPOSIT_TOTAL = 5;
+var NORMAL_WITHDRAWAL_FEE_RATE = 0;
+var NO_PLAY_WITHDRAWAL_FEE_RATE = 0.1;
+var MINIMUM_WITHDRAWAL_FEE = 0.1;
 function hashEmailOtp(uid, otp) {
   return import_crypto.default.createHash("sha256").update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || "ludosom"}`).digest("hex");
 }
@@ -552,8 +557,8 @@ async function loadStoreFromFirestore() {
 }
 var persistedUserProfiles = /* @__PURE__ */ new Map();
 var userProfileSyncQueue = Promise.resolve();
-function serializeUserProfile(user) {
-  return JSON.stringify(user);
+function serializeUserProfile(user2) {
+  return JSON.stringify(user2);
 }
 async function loadUserProfilesFromFirestore() {
   if (!db) return;
@@ -568,21 +573,21 @@ async function loadUserProfilesFromFirestore() {
 }
 async function syncUserProfilesToFirestore() {
   if (!db) return;
-  const users = Object.values(store.users).filter((user) => {
-    if (user.id.startsWith("user_sim_") || user.id.startsWith("bot_")) return false;
-    const documentId = user.firebaseUid || user.id;
-    return persistedUserProfiles.get(documentId) !== serializeUserProfile(user);
+  const users = Object.values(store.users).filter((user2) => {
+    if (user2.id.startsWith("user_sim_") || user2.id.startsWith("bot_")) return false;
+    const documentId = user2.firebaseUid || user2.id;
+    return persistedUserProfiles.get(documentId) !== serializeUserProfile(user2);
   });
   for (let offset = 0; offset < users.length; offset += 500) {
     const batch = db.batch();
-    for (const user of users.slice(offset, offset + 500)) {
-      const documentId = user.firebaseUid || user.id;
-      const cleanProfile = JSON.parse(JSON.stringify(user));
+    for (const user2 of users.slice(offset, offset + 500)) {
+      const documentId = user2.firebaseUid || user2.id;
+      const cleanProfile = JSON.parse(JSON.stringify(user2));
       batch.set(db.collection("users").doc(documentId), cleanProfile, { merge: true });
     }
     await batch.commit();
-    for (const user of users.slice(offset, offset + 500)) {
-      persistedUserProfiles.set(user.firebaseUid || user.id, serializeUserProfile(user));
+    for (const user2 of users.slice(offset, offset + 500)) {
+      persistedUserProfiles.set(user2.firebaseUid || user2.id, serializeUserProfile(user2));
     }
   }
 }
@@ -590,12 +595,12 @@ function queueUserProfileSync() {
   userProfileSyncQueue = userProfileSyncQueue.then(() => syncUserProfilesToFirestore()).catch((error) => console.error("Failed to synchronize user profiles to Firestore:", error));
   return userProfileSyncQueue;
 }
-async function saveUserProfileToFirestore(user) {
+async function saveUserProfileToFirestore(user2) {
   if (!db) return;
-  const documentId = user.firebaseUid || user.id;
-  const cleanProfile = JSON.parse(JSON.stringify(user));
+  const documentId = user2.firebaseUid || user2.id;
+  const cleanProfile = JSON.parse(JSON.stringify(user2));
   await db.collection("users").doc(documentId).set(cleanProfile, { merge: true });
-  persistedUserProfiles.set(documentId, serializeUserProfile(user));
+  persistedUserProfiles.set(documentId, serializeUserProfile(user2));
 }
 async function saveManualRequestToFirestore(request) {
   if (!db) throw new Error("Database not initialized");
@@ -738,12 +743,12 @@ function broadcastToRoom(roomId, eventName, data) {
   if (eventName === "game_update" || eventName === "timer_tick") {
     const spectatorClients = activeClients.filter((c) => c.spectatingRoomId === roomId);
     const spectatorsInfo = spectatorClients.map((c) => {
-      const user = store.users[c.userId];
-      if (user) {
+      const user2 = store.users[c.userId];
+      if (user2) {
         return {
-          id: user.id,
-          username: user.username,
-          avatar: user.avatar
+          id: user2.id,
+          username: user2.username,
+          avatar: user2.avatar
         };
       }
       return null;
@@ -762,9 +767,9 @@ function broadcastToRoom(roomId, eventName, data) {
   });
 }
 function broadcastUserUpdate(userId) {
-  const user = store.users[userId];
-  if (user) {
-    sendEventToUser(userId, "user_update", user);
+  const user2 = store.users[userId];
+  if (user2) {
+    sendEventToUser(userId, "user_update", user2);
   }
 }
 function removeSSEClient(res) {
@@ -785,27 +790,12 @@ function removeSSEClient(res) {
           saveStore();
         }
       }
-      let changed = false;
-      for (const qKey of Object.keys(store.matchmakingQueues)) {
-        const lenBefore = store.matchmakingQueues[qKey].length;
-        store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== client.userId);
-        if (store.matchmakingQueues[qKey].length !== lenBefore) changed = true;
-      }
-      if (changed) {
-        saveStoreAndWait();
-      }
-      if (db) {
-        db.collection("matchmaking").doc(client.userId).delete().catch((err) => {
-          console.error("Failed to delete matchmaking record from Firestore on disconnect:", err);
-        });
-      }
     }
     broadcastToAll("online_players_updated", {});
   }
 }
 function cleanupMatchmakingQueues() {
   let changed = false;
-  const activeUserIds = new Set(activeClients.map((c) => c.userId));
   const now = Date.now();
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     const beforeLen = store.matchmakingQueues[qKey].length;
@@ -815,13 +805,6 @@ function cleanupMatchmakingQueues() {
         (r) => r.status === "playing" && r.players.some((p) => p.userId === userId && p.status !== "left")
       );
       if (inGame) return false;
-      if (!activeUserIds.has(userId)) {
-        if (db) {
-          db.collection("matchmaking").doc(userId).delete().catch(() => {
-          });
-        }
-        return false;
-      }
       const u = store.users[userId];
       const seekingJoinedAt = u?.seekingJoinedAt;
       if (seekingJoinedAt && now - seekingJoinedAt > 18e4) {
@@ -897,7 +880,7 @@ function advanceTurn(room) {
   }
 }
 function addTransaction(userId, type, amount, matchId, description = "") {
-  const tx = {
+  const tx2 = {
     id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     userId,
     type,
@@ -906,9 +889,40 @@ function addTransaction(userId, type, amount, matchId, description = "") {
     matchId,
     description
   };
-  store.transactions.unshift(tx);
+  store.transactions.unshift(tx2);
   saveStore();
-  return tx;
+  return tx2;
+}
+function getWithdrawableBalance(userId, excludeRequestId) {
+  const approvedDeposits = store.transactions.filter((tx2) => tx2.userId === userId && tx2.type === "deposit" && /deposit/i.test(tx2.description || "") && !/welcome bonus/i.test(tx2.description || "")).reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
+  const earnedFromWins = store.transactions.filter((tx2) => tx2.userId === userId && tx2.type === "win_payout").reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
+  const unlockedBonus = approvedDeposits >= BONUS_UNLOCK_DEPOSIT_TOTAL ? WELCOME_BONUS : 0;
+  const completedWithdrawals = store.transactions.filter((tx2) => tx2.userId === userId && tx2.type === "withdrawal").reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
+  const pendingWithdrawals = store.pendingManualTransactions.filter((tx2) => tx2.id !== excludeRequestId && tx2.userId === userId && tx2.transactionType === "withdraw" && tx2.status === "pending").reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
+  return Math.max(0, approvedDeposits + earnedFromWins + unlockedBonus - completedWithdrawals - pendingWithdrawals);
+}
+function hasCompletedPaidGame(userId) {
+  return store.transactions.some((tx2) => tx2.userId === userId && tx2.type === "bet_escrow_locked" && Number(tx2.amount || 0) > 0) && Object.values(store.rooms).some((room) => room.status === "completed" && room.betAmount > 0 && room.players.some((player) => player.userId === userId));
+}
+function getWithdrawalQuote(userId, amount) {
+  const playedPaidGame = hasCompletedPaidGame(userId);
+  const feeRate = playedPaidGame ? NORMAL_WITHDRAWAL_FEE_RATE : NO_PLAY_WITHDRAWAL_FEE_RATE;
+  const fee = playedPaidGame ? 0 : Math.min(amount, Math.max(MINIMUM_WITHDRAWAL_FEE, Number((amount * feeRate).toFixed(2))));
+  return { feeRate, fee, netAmount: Number((amount - fee).toFixed(2)), playedPaidGame };
+}
+function withdrawalEligibilityError(user2, amount, excludeRequestId) {
+  if (amount < MINIMUM_WITHDRAWAL) return `Minimum withdrawal amount is $${MINIMUM_WITHDRAWAL}.`;
+  if (user2.balance < amount) return "Insufficient balance for this withdrawal.";
+  const withdrawable = getWithdrawableBalance(user2.id, excludeRequestId);
+  if (withdrawable < amount) {
+    return withdrawable > 0 ? `Only $${withdrawable.toFixed(2)} is currently available to withdraw.` : `Deposit funds first. The $${WELCOME_BONUS.toFixed(0)} welcome bonus unlocks after $${BONUS_UNLOCK_DEPOSIT_TOTAL} in approved deposits.`;
+  }
+  return null;
+}
+function recordWithdrawalFee(userId, amount, requestId) {
+  if (amount <= 0) return;
+  store.houseRevenue += amount;
+  addTransaction("house", "app_commission", amount, requestId, `Withdrawal fee from user ${userId}${requestId ? ` for request ${requestId}` : ""}.`);
 }
 function addLog(room, text) {
   const log = {
@@ -1055,10 +1069,10 @@ function moveTokenLogic(room, tokenId, diceValue) {
         const share = gs.escrowBalance / 2;
         winningTeammates.forEach((p) => {
           if (!isBotPlayer(p.userId)) {
-            const user = store.users[p.userId];
-            if (user) {
-              user.balance += share;
-              user.winCount += 1;
+            const user2 = store.users[p.userId];
+            if (user2) {
+              user2.balance += share;
+              user2.winCount += 1;
               addTransaction(p.userId, "win_payout", share, room.id, `Team Win payout for match ${room.id}.`);
               broadcastUserUpdate(p.userId);
             }
@@ -1066,9 +1080,9 @@ function moveTokenLogic(room, tokenId, diceValue) {
         });
         room.players.forEach((p) => {
           if (!winningColors.includes(p.color) && !isBotPlayer(p.userId)) {
-            const user = store.users[p.userId];
-            if (user) {
-              user.lossCount += 1;
+            const user2 = store.users[p.userId];
+            if (user2) {
+              user2.lossCount += 1;
               broadcastUserUpdate(p.userId);
             }
           }
@@ -1110,9 +1124,9 @@ function moveTokenLogic(room, tokenId, diceValue) {
         }
         room.players.forEach((p) => {
           if (p.userId !== activePlayer.userId && !isBotPlayer(p.userId)) {
-            const user = store.users[p.userId];
-            if (user) {
-              user.lossCount += 1;
+            const user2 = store.users[p.userId];
+            if (user2) {
+              user2.lossCount += 1;
               broadcastUserUpdate(p.userId);
             }
           }
@@ -1300,11 +1314,11 @@ var authMiddleware = async (req, res, next) => {
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized: User ID is required." });
   }
-  const user = store.users[userId];
-  if (!user) {
+  const user2 = store.users[userId];
+  if (!user2) {
     return res.status(401).json({ error: "Unauthorized: User not found." });
   }
-  req.user = user;
+  req.user = user2;
   next();
 };
 var verifyFirebaseToken = async (req, res, next) => {
@@ -1329,10 +1343,10 @@ var checkVipStatus = (req, res, next) => {
   req.isVip = false;
   req.vipRakeDiscount = 0;
   if (req.user && req.user.uid) {
-    const user = Object.values(store.users).find((u) => u.firebaseUid === req.user.uid);
-    if (user && user.vip && user.vip.expires > Date.now()) {
+    const user2 = Object.values(store.users).find((u) => u.firebaseUid === req.user.uid);
+    if (user2 && user2.vip && user2.vip.expires > Date.now()) {
       req.isVip = true;
-      const vipTier = store.vipTiers[user.vip.tier];
+      const vipTier = store.vipTiers[user2.vip.tier];
       if (vipTier) {
         req.vipRakeDiscount = vipTier.rakeDiscount;
       }
@@ -1679,7 +1693,6 @@ app.get("/api/users/online", async (req, res) => {
     return res.status(400).json({ error: "Missing userId parameter" });
   }
   cleanupMatchmakingQueues();
-  const activeIds = new Set(activeClients.map((c) => c.userId));
   const now = Date.now();
   if (db) {
     try {
@@ -1688,8 +1701,7 @@ app.get("/api/users/online", async (req, res) => {
         const data = docSnap.data();
         if (data && data.status === "WAITING_FOR_MATCH") {
           const isStale = now - (data.timestamp || 0) > 18e4;
-          const isUserConnected = activeIds.has(data.userId);
-          if (isStale || !isUserConnected) {
+          if (isStale) {
             db.collection("matchmaking").doc(data.userId).delete().catch(() => {
             });
             for (const qKey of Object.keys(store.matchmakingQueues)) {
@@ -1770,67 +1782,64 @@ app.get("/api/users/online", async (req, res) => {
   res.json(onlineList);
 });
 app.get("/api/users/:userId", async (req, res) => {
-  const user = await refreshUserProfileById(req.params.userId);
-  if (!user) {
+  const user2 = await refreshUserProfileById(req.params.userId);
+  if (!user2) {
     return res.status(404).json({ error: "User not found" });
   }
-  res.json(user);
+  res.json(user2);
 });
 app.post("/api/users/:userId/update", async (req, res) => {
-  const user = store.users[req.params.userId];
-  if (!user) {
+  const user2 = store.users[req.params.userId];
+  if (!user2) {
     return res.status(404).json({ error: "User not found" });
   }
   const { username, avatar, isOfflinePreference } = req.body;
-  if (username) user.username = username.trim().substring(0, 20);
-  if (avatar) user.avatar = avatar;
-  if (typeof isOfflinePreference === "boolean") user.isOfflinePreference = isOfflinePreference;
+  if (username) user2.username = username.trim().substring(0, 20);
+  if (avatar) user2.avatar = avatar;
+  if (typeof isOfflinePreference === "boolean") user2.isOfflinePreference = isOfflinePreference;
   await saveStoreAndWait();
-  broadcastUserUpdate(user.id);
-  res.json(user);
+  broadcastUserUpdate(user2.id);
+  res.json(user2);
 });
 app.post("/api/users/:userId/status", (req, res) => {
-  const user = store.users[req.params.userId];
-  if (!user) {
+  const user2 = store.users[req.params.userId];
+  if (!user2) {
     return res.status(404).json({ error: "User not found" });
   }
   const { isOffline } = req.body;
-  user.isOfflinePreference = !!isOffline;
+  user2.isOfflinePreference = !!isOffline;
   saveStore();
-  broadcastUserUpdate(user.id);
-  res.json({ success: true, isOfflinePreference: user.isOfflinePreference, user });
+  broadcastUserUpdate(user2.id);
+  res.json({ success: true, isOfflinePreference: user2.isOfflinePreference, user: user2 });
 });
 app.post("/api/wallet/deposit", (req, res) => {
   const { userId, amount } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const depAmt = parseFloat(amount);
   if (isNaN(depAmt) || depAmt <= 0) {
     return res.status(400).json({ error: "Invalid deposit amount" });
   }
-  user.balance += depAmt;
+  user2.balance += depAmt;
   addTransaction(userId, "deposit", depAmt, void 0, `Deposited funds via Simulated Net Banking.`);
   broadcastUserUpdate(userId);
-  res.json({ success: true, balance: user.balance });
+  res.json({ success: true, balance: user2.balance });
 });
 app.post("/api/wallet/withdraw", (req, res) => {
   const { userId, amount } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const withAmt = parseFloat(amount);
   if (isNaN(withAmt) || withAmt <= 0) {
     return res.status(400).json({ error: "Invalid withdrawal amount" });
   }
-  if (withAmt < 20) {
-    return res.status(400).json({ error: "Minimum withdrawal amount is $20" });
-  }
-  if (user.balance < withAmt) {
-    return res.status(400).json({ error: "Insufficient funds" });
-  }
-  user.balance -= withAmt;
+  const eligibilityError = withdrawalEligibilityError(user2, withAmt);
+  if (eligibilityError) return res.status(400).json({ error: eligibilityError });
+  user2.balance -= withAmt;
   addTransaction(userId, "withdrawal", withAmt, void 0, `Withdrawn funds to bank account.`);
+  recordWithdrawalFee(userId, getWithdrawalQuote(userId, withAmt).fee);
   broadcastUserUpdate(userId);
-  res.json({ success: true, balance: user.balance });
+  res.json({ success: true, balance: user2.balance });
 });
 app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   const { userId, agentId, amount, phone, senderPhone, provider, transactionType } = req.body;
@@ -1841,16 +1850,20 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   if (transactionType !== "deposit" && transactionType !== "withdraw") {
     return res.status(400).json({ error: "Invalid transaction type." });
   }
-  const user = await refreshUserProfileById(userId);
-  if (!user) {
+  const user2 = await refreshUserProfileById(userId);
+  if (!user2) {
     return res.status(404).json({ error: "User not found." });
   }
-  const assignedAgentId = user.linkedAgentId || (typeof agentId === "string" && agentId.trim() ? agentId.trim() : void 0);
+  const assignedAgentId = user2.linkedAgentId || void 0;
   if (assignedAgentId && agentId && assignedAgentId !== agentId) {
     return res.status(400).json({ error: "This account is locked to a specific agent. You can only transact with your assigned agent." });
   }
   if (transactionType === "withdraw" && !phone) {
     return res.status(400).json({ error: "Phone number is required for withdrawal requests." });
+  }
+  if (transactionType === "withdraw") {
+    const eligibilityError = withdrawalEligibilityError(user2, requestAmount);
+    if (eligibilityError) return res.status(400).json({ error: eligibilityError });
   }
   if (transactionType === "deposit" && !senderPhone) {
     return res.status(400).json({ error: "Sender phone number is required for deposit requests." });
@@ -1878,11 +1891,12 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   const newRequest = {
     id: `req_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     userId,
-    username: user.username,
+    username: user2.username,
     agentId: assignedAgentId,
     agentUsername: assignedAgentUsername,
     managedBy: assignedAgentId ? "agent" : "admin",
     amount: requestAmount,
+    ...transactionType === "withdraw" ? getWithdrawalQuote(user2.id, requestAmount) : {},
     phone,
     // This will be the destination for withdrawals
     senderPhone,
@@ -1903,12 +1917,24 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   await saveStoreAndWait();
   res.json({ success: true, message: "Your request has been submitted for review." });
 });
+app.get("/api/wallet/withdrawal-quote/:userId", async (req, res) => {
+  const user2 = await refreshUserProfileById(req.params.userId);
+  if (!user2) return res.status(404).json({ error: "User not found." });
+  const amount = Number(req.query.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Enter a valid withdrawal amount." });
+  const eligibilityError = withdrawalEligibilityError(user2, amount);
+  if (eligibilityError) return res.status(400).json({ error: eligibilityError, withdrawableBalance: getWithdrawableBalance(user2.id) });
+  res.json({ amount, withdrawableBalance: getWithdrawableBalance(user2.id), ...getWithdrawalQuote(user2.id, amount) });
+});
 app.get("/api/wallet/transactions/:userId", (req, res) => {
   const txs = store.transactions.filter((t) => t.userId === req.params.userId);
   res.json(txs);
 });
 app.get("/api/payment/settings", (req, res) => {
-  res.json(store.paymentProviders);
+  res.json(Object.fromEntries(Object.entries(store.paymentProviders).map(([key, config]) => [key, {
+    enabled: config.enabled,
+    accountNumber: config.accountNumber || ""
+  }])));
 });
 app.post("/api/wallet/process-api-payment", async (req, res) => {
   const { userId, amount, phone, senderPhone, provider, transactionType } = req.body;
@@ -1920,8 +1946,8 @@ app.post("/api/wallet/process-api-payment", async (req, res) => {
   if (!config || !config.enabled || !config.apiKey) {
     return res.status(400).json({ error: "API is not configured for this provider." });
   }
-  const user = store.users[userId];
-  if (!user) {
+  const user2 = store.users[userId];
+  if (!user2) {
     return res.status(404).json({ error: "User not found." });
   }
   const parsedAmount = parseFloat(amount);
@@ -1932,24 +1958,24 @@ app.post("/api/wallet/process-api-payment", async (req, res) => {
     if (!phone) {
       return res.status(400).json({ error: "Phone number is required for withdrawal requests." });
     }
-    if (user.balance < parsedAmount) {
-      return res.status(400).json({ error: "Insufficient funds." });
-    }
-    user.balance -= parsedAmount;
+    const eligibilityError = withdrawalEligibilityError(user2, parsedAmount);
+    if (eligibilityError) return res.status(400).json({ error: eligibilityError });
+    user2.balance -= parsedAmount;
     addTransaction(userId, "withdrawal", parsedAmount, void 0, `API withdrawal via ${providerKey}.`);
+    recordWithdrawalFee(userId, getWithdrawalQuote(userId, parsedAmount).fee);
     broadcastUserUpdate(userId);
     await saveStoreAndWait();
-    return res.json({ success: true, balance: user.balance, message: "Withdrawal processed via API." });
+    return res.json({ success: true, balance: user2.balance, message: "Withdrawal processed via API." });
   }
   if (transactionType === "deposit") {
     if (!senderPhone) {
       return res.status(400).json({ error: "Sender phone number is required for deposit requests." });
     }
-    user.balance += parsedAmount;
+    user2.balance += parsedAmount;
     addTransaction(userId, "deposit", parsedAmount, void 0, `API deposit via ${providerKey}.`);
     broadcastUserUpdate(userId);
     await saveStoreAndWait();
-    return res.json({ success: true, balance: user.balance, message: "Deposit processed via API." });
+    return res.json({ success: true, balance: user2.balance, message: "Deposit processed via API." });
   }
   return res.status(400).json({ error: "Unsupported transaction type." });
 });
@@ -1981,32 +2007,32 @@ var saveVipTiersFromAdmin = async (req, res) => {
 app.post("/api/vip/subscribe", verifyFirebaseToken, async (req, res) => {
   const { tier } = req.body;
   const firebaseUid = req.user.uid;
-  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
-  if (!user) {
+  const user2 = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user2) {
     return res.status(404).json({ error: "User not found." });
   }
   const vipTier = store.vipTiers[tier];
   if (!vipTier) {
     return res.status(400).json({ error: "Invalid VIP tier specified." });
   }
-  if (user.balance < vipTier.price) {
+  if (user2.balance < vipTier.price) {
     return res.status(400).json({ error: "Insufficient funds to purchase this VIP subscription." });
   }
-  user.balance -= vipTier.price;
-  const currentVipIsSameTier = user.vip?.tier === tier && user.vip.expires > Date.now();
-  const startDate = currentVipIsSameTier ? user.vip.expires : Date.now();
+  user2.balance -= vipTier.price;
+  const currentVipIsSameTier = user2.vip?.tier === tier && user2.vip.expires > Date.now();
+  const startDate = currentVipIsSameTier ? user2.vip.expires : Date.now();
   const endDate = startDate + vipTier.durationMonths * 30 * 24 * 60 * 60 * 1e3;
-  user.vip = {
+  user2.vip = {
     tier,
     expires: endDate
   };
-  addTransaction(user.id, "app_commission", vipTier.price, void 0, `VIP Subscription (${vipTier.name}) purchase.`);
-  await saveUserProfileToFirestore(user);
+  addTransaction(user2.id, "app_commission", vipTier.price, void 0, `VIP Subscription (${vipTier.name}) purchase.`);
+  await saveUserProfileToFirestore(user2);
   await saveStoreAndWait();
-  broadcastUserUpdate(user.id);
+  broadcastUserUpdate(user2.id);
   res.json({
     success: true,
-    user,
+    user: user2,
     message: currentVipIsSameTier ? `${vipTier.name} renewed successfully.` : `Successfully subscribed to ${vipTier.name}!`
   });
 });
@@ -2031,8 +2057,8 @@ app.get("/api/tournaments/:id", (req, res) => {
 app.post("/api/tournaments/:id/register", verifyFirebaseToken, async (req, res) => {
   const { id } = req.params;
   const firebaseUid = req.user.uid;
-  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
-  if (!user) {
+  const user2 = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user2) {
     return res.status(404).json({ error: "User not found." });
   }
   const tournament = store.tournaments[id];
@@ -2042,32 +2068,32 @@ app.post("/api/tournaments/:id/register", verifyFirebaseToken, async (req, res) 
   if (tournament.status !== "registration_open") {
     return res.status(400).json({ error: "Tournament is not open for registration." });
   }
-  if (user.balance < tournament.entryFee) {
+  if (user2.balance < tournament.entryFee) {
     return res.status(400).json({ error: "Insufficient funds to register for this tournament." });
   }
   if (tournament.players.length >= tournament.maxPlayers) {
     return res.status(400).json({ error: "Tournament is already full." });
   }
-  if (tournament.players.some((p) => p.userId === user.id)) {
+  if (tournament.players.some((p) => p.userId === user2.id)) {
     return res.status(400).json({ error: "You are already registered for this tournament." });
   }
-  user.balance -= tournament.entryFee;
-  addTransaction(user.id, "bet_escrow_locked", tournament.entryFee, id, `Tournament entry fee for "${tournament.name}".`);
+  user2.balance -= tournament.entryFee;
+  addTransaction(user2.id, "bet_escrow_locked", tournament.entryFee, id, `Tournament entry fee for "${tournament.name}".`);
   tournament.players.push({
-    userId: user.id,
-    username: user.username,
-    avatar: user.avatar
+    userId: user2.id,
+    username: user2.username,
+    avatar: user2.avatar
   });
   await saveStoreAndWait();
-  broadcastUserUpdate(user.id);
+  broadcastUserUpdate(user2.id);
   broadcastToAll("tournament_update", tournament);
   res.json({ success: true, tournament, message: `Successfully registered for ${tournament.name}!` });
 });
 app.post("/api/tournaments/:id/unregister", verifyFirebaseToken, async (req, res) => {
   const { id } = req.params;
   const firebaseUid = req.user.uid;
-  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
-  if (!user) {
+  const user2 = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user2) {
     return res.status(404).json({ error: "User not found." });
   }
   const tournament = store.tournaments[id];
@@ -2077,17 +2103,17 @@ app.post("/api/tournaments/:id/unregister", verifyFirebaseToken, async (req, res
   if (tournament.status !== "registration_open") {
     return res.status(400).json({ error: "Cannot unregister after tournament has started or finished." });
   }
-  const playerIndex = tournament.players.findIndex((p) => p.userId === user.id);
+  const playerIndex = tournament.players.findIndex((p) => p.userId === user2.id);
   if (playerIndex === -1) {
     return res.status(400).json({ error: "You are not registered for this tournament." });
   }
   tournament.players.splice(playerIndex, 1);
   if (tournament.entryFee > 0) {
-    user.balance += tournament.entryFee;
-    addTransaction(user.id, "deposit", tournament.entryFee, id, `Refund for unregistering from tournament "${tournament.name}".`);
+    user2.balance += tournament.entryFee;
+    addTransaction(user2.id, "deposit", tournament.entryFee, id, `Refund for unregistering from tournament "${tournament.name}".`);
   }
   await saveStoreAndWait();
-  broadcastUserUpdate(user.id);
+  broadcastUserUpdate(user2.id);
   broadcastToAll("tournament_update", tournament);
   res.json({ success: true, tournament, message: `Unregistered from ${tournament.name}. Entry fee refunded.` });
 });
@@ -2298,27 +2324,27 @@ app.post("/api/rooms/:roomId/stop-spectating", (req, res) => {
 });
 app.post("/api/rooms/create", (req, res) => {
   const { userId, betAmount, capacity, gameMode } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const bet = parseFloat(betAmount);
-  if (user.balance < bet) {
+  if (user2.balance < bet) {
     return res.status(400).json({ error: "Insufficient wallet balance for this bet amount." });
   }
   const selectedMode = gameMode === "team" ? "team" : "solo";
   const selectedCapacity = selectedMode === "team" ? 4 : parseInt(capacity) || 2;
   const roomId = Math.random().toString(36).substring(2, 7).toUpperCase();
   const newPlayer = {
-    userId: user.id,
-    username: user.username,
-    avatar: user.avatar,
+    userId: user2.id,
+    username: user2.username,
+    avatar: user2.avatar,
     color: selectedCapacity === 2 && selectedMode === "solo" ? "green" : "red",
     // Host is Green for 2-player solo, Red for others
     isHost: true,
     isReady: true,
     status: "online",
-    winCount: user.winCount,
-    lossCount: user.lossCount,
-    balance: user.balance
+    winCount: user2.winCount,
+    lossCount: user2.lossCount,
+    balance: user2.balance
   };
   const newRoom = {
     id: roomId,
@@ -2336,7 +2362,7 @@ app.post("/api/rooms/create", (req, res) => {
       tokens: [],
       winnerId: null,
       escrowBalance: 0,
-      logs: [{ id: "1", timestamp: Date.now(), text: `Room created by ${user.username}. Code: ${roomId} (${selectedMode === "team" ? "Team 2v2" : "Solo " + selectedCapacity + "P"})` }],
+      logs: [{ id: "1", timestamp: Date.now(), text: `Room created by ${user2.username}. Code: ${roomId} (${selectedMode === "team" ? "Team 2v2" : "Solo " + selectedCapacity + "P"})` }],
       chat: [],
       lastActivity: Date.now()
     },
@@ -2348,8 +2374,8 @@ app.post("/api/rooms/create", (req, res) => {
 });
 app.post("/api/rooms/join", (req, res) => {
   const { userId, roomCode } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const code = (roomCode || "").trim().toUpperCase();
   const room = store.rooms[code];
   if (!room) {
@@ -2368,25 +2394,25 @@ app.post("/api/rooms/join", (req, res) => {
   if (room.players.length >= maxPlayers) {
     return res.status(400).json({ error: `Room is already full at ${maxPlayers} capacity.` });
   }
-  if (user.balance < room.betAmount) {
+  if (user2.balance < room.betAmount) {
     return res.status(400).json({ error: `You need at least $${room.betAmount} in your wallet to join this room.` });
   }
   const newPendingPlayer = {
-    userId: user.id,
-    username: user.username,
-    avatar: user.avatar,
+    userId: user2.id,
+    username: user2.username,
+    avatar: user2.avatar,
     color: "green",
     // Assign color on host approval
     isHost: false,
     isReady: false,
     status: "online",
-    winCount: user.winCount || 0,
-    lossCount: user.lossCount || 0,
-    balance: user.balance || 0
+    winCount: user2.winCount || 0,
+    lossCount: user2.lossCount || 0,
+    balance: user2.balance || 0
   };
   if (!room.pendingPlayers) room.pendingPlayers = [];
   room.pendingPlayers.push(newPendingPlayer);
-  addLog(room, `\u{1F514} Challenger ${user.username} is requesting to join the match. Waiting for host approval!`);
+  addLog(room, `\u{1F514} Challenger ${user2.username} is requesting to join the match. Waiting for host approval!`);
   saveStore();
   broadcastToRoom(room.id, "game_update", room);
   res.json(room);
@@ -2450,8 +2476,9 @@ app.post("/api/request-to-agent", authMiddleware, async (req, res) => {
   if (!agentId || !requestAmount || requestAmount <= 0 || !["deposit", "withdrawal"].includes(type) || !playerPhone || !provider) {
     return res.status(400).json({ error: "Missing or invalid parameters. Requires agentId, amount, type, playerPhone, and provider." });
   }
-  if (type === "withdrawal" && player.balance < requestAmount) {
-    return res.status(400).json({ error: "Insufficient balance for this withdrawal request." });
+  if (type === "withdrawal") {
+    const eligibilityError = withdrawalEligibilityError(player, requestAmount);
+    if (eligibilityError) return res.status(400).json({ error: eligibilityError });
   }
   try {
     const agentDoc = await db.collection("agents").doc(agentId).get();
@@ -2555,14 +2582,14 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
   broadcastToAll("online_players_updated", {});
   return newRoom;
 }
-app.post("/api/rooms/matchmaking/enter-queue", (req, res) => {
+app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
   try {
     const { userId, betAmount, capacity, gameMode } = req.body;
-    const user = store.users[userId];
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user2 = store.users[userId];
+    if (!user2) return res.status(404).json({ error: "User not found" });
     cleanupMatchmakingQueues();
     const bet = parseFloat(betAmount);
-    if (user.balance < bet) {
+    if (user2.balance < bet) {
       return res.status(400).json({ error: "Insufficient balance to match stake." });
     }
     const cap = parseInt(capacity) || 2;
@@ -2573,9 +2600,9 @@ app.post("/api/rooms/matchmaking/enter-queue", (req, res) => {
     }
     if (store.matchmakingQueues[queueKey].includes(userId)) {
       broadcastToAll("matchmaker_seeking", {
-        senderId: user.id,
-        username: user.username,
-        avatar: user.avatar,
+        senderId: user2.id,
+        username: user2.username,
+        avatar: user2.avatar,
         betAmount: bet,
         capacity: cap,
         gameMode: mode,
@@ -2583,26 +2610,24 @@ app.post("/api/rooms/matchmaking/enter-queue", (req, res) => {
       });
       return res.json({ status: "queued", message: "Already in queue" });
     }
-    user.seekingJoinedAt = Date.now();
+    user2.seekingJoinedAt = Date.now();
     store.matchmakingQueues[queueKey].push(userId);
     if (db) {
-      db.collection("matchmaking").doc(userId).set({
+      await db.collection("matchmaking").doc(userId).set({
         userId,
-        username: user.username,
-        avatar: user.avatar,
+        username: user2.username,
+        avatar: user2.avatar,
         betAmount: bet,
         capacity: cap,
         gameMode: mode,
         status: "WAITING_FOR_MATCH",
         timestamp: Date.now()
-      }).catch((err) => {
-        console.error("Failed to write matchmaking record to Firestore:", err);
       });
     }
     broadcastToAll("matchmaker_seeking", {
-      senderId: user.id,
-      username: user.username,
-      avatar: user.avatar,
+      senderId: user2.id,
+      username: user2.username,
+      avatar: user2.avatar,
       betAmount: bet,
       capacity: cap,
       gameMode: mode,
@@ -2621,13 +2646,13 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
   if (!opponentId) {
     return res.status(400).json({ error: "This endpoint is for direct challenges only. opponentId is required." });
   }
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const oppUser = store.users[opponentId];
   if (!oppUser) return res.status(404).json({ error: "Opponent not found" });
   cleanupMatchmakingQueues();
   const bet = parseFloat(betAmount);
-  if (user.balance < bet) {
+  if (user2.balance < bet) {
     return res.status(400).json({ error: "Insufficient balance to match stake." });
   }
   const cap = parseInt(capacity) || 2;
@@ -2641,7 +2666,7 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
     db.collection("matchmaking").doc(userId).delete().catch((err) => console.error("Failed to delete matchmaking record from Firestore for user:", err));
     db.collection("matchmaking").doc(opponentId).delete().catch((err) => console.error("Failed to delete matchmaking record from Firestore for opponent:", err));
   }
-  const matchedList = [user, oppUser];
+  const matchedList = [user2, oppUser];
   const finalCapacity = 2;
   const finalMode = "solo";
   const room = startMatchedRoom(matchedList, bet, finalCapacity, finalMode);
@@ -2657,15 +2682,15 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
 });
 app.post("/api/rooms/create-bot-room", (req, res) => {
   const { userId, betAmount, capacity, gameMode } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const bet = parseFloat(betAmount) || 0;
-  if (user.balance < bet) {
+  if (user2.balance < bet) {
     return res.status(400).json({ error: "Insufficient wallet balance for this stake." });
   }
   const cap = parseInt(capacity) || 2;
   const mode = gameMode === "team" ? "team" : "solo";
-  const matchedList = [user];
+  const matchedList = [user2];
   const botAvatars = ["\u{1F916}", "\u{1F98A}", "\u26A1", "\u{1F451}"];
   const botNames = ["LudoMaster AI", "SpeedyBot", "ProLudo AI", "ZenBot"];
   while (matchedList.length < cap) {
@@ -2818,33 +2843,33 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
 });
 app.post("/api/rooms/challenge/accept", (req, res) => {
   const { userId, roomId } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: "Challenge lobby no longer exists." });
   if (room.players.length >= (room.capacity || 2)) {
     return res.status(400).json({ error: "Room is already full." });
   }
-  if (user.balance < room.betAmount) {
+  if (user2.balance < room.betAmount) {
     return res.status(400).json({ error: `Insufficient wallet balance to accept this $${room.betAmount} match.` });
   }
   const colors = ["red", "green", "yellow", "blue"];
   const occupiedColors = room.players.map((p) => p.color);
   const assignedColor = colors.find((c) => !occupiedColors.includes(c)) || "green";
   const newPlayer = {
-    userId: user.id,
-    username: user.username,
-    avatar: user.avatar,
+    userId: user2.id,
+    username: user2.username,
+    avatar: user2.avatar,
     color: assignedColor,
     isHost: false,
     isReady: true,
     status: "online",
-    winCount: user.winCount,
-    lossCount: user.lossCount,
-    balance: user.balance
+    winCount: user2.winCount,
+    lossCount: user2.lossCount,
+    balance: user2.balance
   };
   room.players.push(newPlayer);
-  addLog(room, `\u2694\uFE0F ${user.username} accepted the challenge and joined the room.`);
+  addLog(room, `\u2694\uFE0F ${user2.username} accepted the challenge and joined the room.`);
   saveStore();
   const hostId = room.players.find((p) => p.isHost)?.userId;
   if (hostId) {
@@ -2854,13 +2879,13 @@ app.post("/api/rooms/challenge/accept", (req, res) => {
 });
 app.post("/api/rooms/challenge/decline", (req, res) => {
   const { userId, roomId } = req.body;
-  const user = store.users[userId];
-  if (!user) return res.status(404).json({ error: "User not found" });
+  const user2 = store.users[userId];
+  if (!user2) return res.status(404).json({ error: "User not found" });
   const room = store.rooms[roomId];
   if (room) {
     const hostId = room.players.find((p) => p.isHost)?.userId;
     if (hostId) {
-      sendEventToUser(hostId, "game_invite_declined", { receiverName: user.username });
+      sendEventToUser(hostId, "game_invite_declined", { receiverName: user2.username });
     }
     delete store.rooms[roomId];
     saveStore();
@@ -2942,8 +2967,8 @@ app.post("/api/rooms/start", (req, res) => {
   let success = true;
   room.players.forEach((pl) => {
     if (!isBotPlayer(pl.userId)) {
-      const user = store.users[pl.userId];
-      if (!user || user.balance < bet) {
+      const user2 = store.users[pl.userId];
+      if (!user2 || user2.balance < bet) {
         success = false;
       }
     }
@@ -2954,8 +2979,8 @@ app.post("/api/rooms/start", (req, res) => {
   let totalEscrow = 0;
   room.players.forEach((pl) => {
     if (!isBotPlayer(pl.userId)) {
-      const user = store.users[pl.userId];
-      user.balance -= bet;
+      const user2 = store.users[pl.userId];
+      user2.balance -= bet;
       addTransaction(pl.userId, "bet_escrow_locked", bet, room.id, `Escrow lock for Match ${room.id}`);
       broadcastUserUpdate(pl.userId);
     }
@@ -3392,11 +3417,11 @@ app.post("/api/admin/tournaments/:id/cancel", hasPermission("tournaments"), asyn
     return res.status(400).json({ error: "Tournament is already finished or cancelled." });
   }
   tournament.players.forEach((p) => {
-    const user = store.users[p.userId];
-    if (user && tournament.entryFee > 0) {
-      user.balance += tournament.entryFee;
-      addTransaction(user.id, "deposit", tournament.entryFee, tournamentId, `Refund for cancelled tournament "${tournament.name}".`);
-      broadcastUserUpdate(user.id);
+    const user2 = store.users[p.userId];
+    if (user2 && tournament.entryFee > 0) {
+      user2.balance += tournament.entryFee;
+      addTransaction(user2.id, "deposit", tournament.entryFee, tournamentId, `Refund for cancelled tournament "${tournament.name}".`);
+      broadcastUserUpdate(user2.id);
     }
   });
   tournament.status = "cancelled";
@@ -3676,7 +3701,7 @@ app.delete("/api/admin/roles/:roleId/delete", hasPermission("all"), async (req, 
   }
 });
 app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
-  const users = Object.values(store.users).filter((user) => !user.id.startsWith("bot_") && !user.id.startsWith("user_sim_"));
+  const users = Object.values(store.users).filter((user2) => !user2.id.startsWith("bot_") && !user2.id.startsWith("user_sim_"));
   const rooms = Object.values(store.rooms);
   const tournaments = Object.values(store.tournaments);
   const manualTransactions = store.pendingManualTransactions || [];
@@ -3687,13 +3712,13 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     const key = `${date.getFullYear()}-${date.getMonth()}`;
     monthBuckets.set(key, { month: date.toLocaleString("en", { month: "short" }), deposits: 0, withdrawals: 0, transactions: 0 });
   }
-  store.transactions.forEach((tx) => {
-    const date = new Date(tx.timestamp);
+  store.transactions.forEach((tx2) => {
+    const date = new Date(tx2.timestamp);
     const bucket = monthBuckets.get(`${date.getFullYear()}-${date.getMonth()}`);
     if (!bucket) return;
     bucket.transactions += 1;
-    if (tx.type === "deposit" || tx.type === "win_payout" || tx.type === "refund") bucket.deposits += Number(tx.amount || 0);
-    if (tx.type === "withdrawal") bucket.withdrawals += Number(tx.amount || 0);
+    if (tx2.type === "deposit" || tx2.type === "win_payout" || tx2.type === "refund") bucket.deposits += Number(tx2.amount || 0);
+    if (tx2.type === "withdrawal") bucket.withdrawals += Number(tx2.amount || 0);
   });
   let totalAgents = 0;
   let activeAgents = 0;
@@ -3712,8 +3737,8 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     }
   }
   const recentActivity = [
-    ...store.transactions.slice(-8).map((tx) => ({ id: tx.id, kind: "transaction", title: tx.description, amount: tx.amount, status: tx.status || "completed", timestamp: tx.timestamp })),
-    ...manualTransactions.slice(0, 8).map((tx) => ({ id: tx.id, kind: "manual", title: `${tx.username} requested a ${tx.transactionType}`, amount: tx.amount, status: tx.status, timestamp: tx.createdAt }))
+    ...store.transactions.slice(-8).map((tx2) => ({ id: tx2.id, kind: "transaction", title: tx2.description, amount: tx2.amount, status: tx2.status || "completed", timestamp: tx2.timestamp })),
+    ...manualTransactions.slice(0, 8).map((tx2) => ({ id: tx2.id, kind: "manual", title: `${tx2.username} requested a ${tx2.transactionType}`, amount: tx2.amount, status: tx2.status, timestamp: tx2.createdAt }))
   ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
   res.json({
     totalUsers: users.length,
@@ -3724,8 +3749,8 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     houseRevenue: store.houseRevenue || 0,
     onlineClients: activeClients.length,
     totalTransactions: store.transactions.length,
-    pendingAdminTransactions: manualTransactions.filter((tx) => tx.status === "pending" && tx.managedBy !== "agent").length,
-    pendingAgentTransactions: manualTransactions.filter((tx) => tx.status === "pending" && tx.managedBy === "agent").length,
+    pendingAdminTransactions: manualTransactions.filter((tx2) => tx2.status === "pending" && tx2.managedBy !== "agent").length,
+    pendingAgentTransactions: manualTransactions.filter((tx2) => tx2.status === "pending" && tx2.managedBy === "agent").length,
     totalAgents,
     activeAgents,
     pendingAgentRequests,
@@ -3749,7 +3774,7 @@ app.get("/api/admin/manual-transactions", hasPermission("transactions"), async (
   const agentNames = /* @__PURE__ */ new Map();
   if (db) {
     const linkedAgentIds = [...new Set(
-      Object.values(store.users).map((user) => user.linkedAgentId).filter((id) => Boolean(id))
+      Object.values(store.users).map((user2) => user2.linkedAgentId).filter((id) => Boolean(id))
     )];
     await Promise.all(linkedAgentIds.map(async (agentId) => {
       try {
@@ -3762,14 +3787,14 @@ app.get("/api/admin/manual-transactions", hasPermission("transactions"), async (
       }
     }));
   }
-  const transactions = (store.pendingManualTransactions || []).map((tx) => {
-    const user = store.users[tx.userId];
-    const linkedAgentId = user?.linkedAgentId;
+  const transactions = (store.pendingManualTransactions || []).map((tx2) => {
+    const user2 = store.users[tx2.userId];
+    const linkedAgentId = user2?.linkedAgentId;
     return {
-      ...tx,
-      agentId: linkedAgentId || tx.agentId,
-      agentUsername: tx.agentUsername || (linkedAgentId ? agentNames.get(linkedAgentId) : void 0),
-      managedBy: tx.managedBy || (linkedAgentId ? "agent" : "admin")
+      ...tx2,
+      agentId: linkedAgentId || tx2.agentId,
+      agentUsername: tx2.agentUsername || (linkedAgentId ? agentNames.get(linkedAgentId) : void 0),
+      managedBy: tx2.managedBy || (linkedAgentId ? "agent" : "admin")
     };
   });
   res.json(transactions);
@@ -3797,76 +3822,84 @@ app.post("/api/admin/payment-settings", hasPermission("settings"), async (req, r
 });
 app.post("/api/admin/manual-transactions/:transactionId/approve", hasPermission("transactions"), async (req, res) => {
   const { transactionId } = req.params;
-  const tx = store.pendingManualTransactions.find((t) => t.id === transactionId);
-  if (!tx || tx.status !== "pending") {
+  const tx2 = store.pendingManualTransactions.find((t) => t.id === transactionId);
+  if (!tx2 || tx2.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  const user = store.users[tx.userId];
-  if (!user) {
+  const user2 = store.users[tx2.userId];
+  if (!user2) {
     return res.status(404).json({ error: "User associated with transaction not found." });
   }
-  if (tx.managedBy === "agent" || user.linkedAgentId) {
+  if (tx2.managedBy === "agent" || user2.linkedAgentId) {
     return res.status(403).json({ error: "This transaction is assigned to an agent and is read-only for administrators." });
   }
-  if (tx.transactionType === "deposit") {
-    user.balance += tx.amount;
-    addTransaction(user.id, "deposit", tx.amount, void 0, `Manual deposit approved by admin. Request ID: ${tx.id}`);
+  if (tx2.transactionType === "deposit") {
+    user2.balance += tx2.amount;
+    addTransaction(user2.id, "deposit", tx2.amount, void 0, `Manual deposit approved by admin. Request ID: ${tx2.id}`);
   } else {
-    if (user.balance < tx.amount) {
-      tx.status = "rejected";
+    const eligibilityError = withdrawalEligibilityError(user2, tx2.amount, tx2.id);
+    if (eligibilityError) {
+      tx2.status = "rejected";
+      await saveManualRequestToFirestore(tx2);
+      await saveStoreAndWait();
+      return res.status(400).json({ error: eligibilityError });
+    }
+    if (user2.balance < tx2.amount) {
+      tx2.status = "rejected";
       await saveStoreAndWait();
       return res.status(400).json({ error: "Insufficient balance to approve this withdrawal request. Transaction has been rejected." });
     }
-    user.balance -= tx.amount;
-    addTransaction(user.id, "withdrawal", tx.amount, void 0, `Manual withdrawal approved by admin. Request ID: ${tx.id}`);
+    user2.balance -= tx2.amount;
+    addTransaction(user2.id, "withdrawal", tx2.amount, void 0, `Manual withdrawal approved by admin. Request ID: ${tx2.id}`);
+    recordWithdrawalFee(user2.id, Number(tx2.fee || 0), tx2.id);
   }
-  tx.status = "approved";
-  tx.managedBy = "admin";
-  tx.resolvedBy = String(req.query.userId || "admin");
-  tx.resolverUsername = "Admin";
+  tx2.status = "approved";
+  tx2.managedBy = "admin";
+  tx2.resolvedBy = String(req.query.userId || "admin");
+  tx2.resolverUsername = "Admin";
   await saveStoreAndWait();
-  broadcastUserUpdate(user.id);
-  res.json({ success: true, transaction: tx });
+  broadcastUserUpdate(user2.id);
+  res.json({ success: true, transaction: tx2 });
 });
 app.post("/api/admin/manual-transactions/:transactionId/reject", hasPermission("transactions"), async (req, res) => {
   const { transactionId } = req.params;
-  const tx = store.pendingManualTransactions.find((t) => t.id === transactionId);
-  if (!tx || tx.status !== "pending") {
+  const tx2 = store.pendingManualTransactions.find((t) => t.id === transactionId);
+  if (!tx2 || tx2.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  const user = store.users[tx.userId];
-  if (tx.managedBy === "agent" || user?.linkedAgentId) {
+  const user2 = store.users[tx2.userId];
+  if (tx2.managedBy === "agent" || user2?.linkedAgentId) {
     return res.status(403).json({ error: "This transaction is assigned to an agent and is read-only for administrators." });
   }
-  if (!user) {
-    tx.status = "rejected";
+  if (!user2) {
+    tx2.status = "rejected";
     await saveStoreAndWait();
     return res.status(404).json({ error: "User associated with transaction not found. Transaction rejected." });
   }
-  tx.status = "rejected";
-  tx.managedBy = "admin";
-  tx.resolvedBy = String(req.query.userId || "admin");
-  tx.resolverUsername = "Admin";
+  tx2.status = "rejected";
+  tx2.managedBy = "admin";
+  tx2.resolvedBy = String(req.query.userId || "admin");
+  tx2.resolverUsername = "Admin";
   await saveStoreAndWait();
-  sendEventToUser(user.id, "user_notification", {
+  sendEventToUser(user2.id, "user_notification", {
     type: "info",
-    message: `Your ${tx.transactionType} request for $${tx.amount} was rejected.`
+    message: `Your ${tx2.transactionType} request for $${tx2.amount} was rejected.`
   });
-  res.json({ success: true, transaction: tx });
+  res.json({ success: true, transaction: tx2 });
 });
 app.post("/api/admin/impersonate", hasPermission("users"), (req, res) => {
   const { userId, targetUserId } = req.body;
   const targetId = targetUserId || userId;
-  const user = store.users[targetId];
-  if (!user) {
+  const user2 = store.users[targetId];
+  if (!user2) {
     return res.status(404).json({ error: "User not found" });
   }
-  const uName = String(user.username || "").toLowerCase();
-  const uRole = String(user.role || "").toLowerCase();
+  const uName = String(user2.username || "").toLowerCase();
+  const uRole = String(user2.role || "").toLowerCase();
   if (uName === "admin" || uName === "superadmin" || uRole.includes("admin") || uRole.includes("super")) {
     return res.status(400).json({ error: "Full Admin accounts are protected and cannot be impersonated." });
   }
-  res.json({ success: true, user });
+  res.json({ success: true, user: user2 });
 });
 app.post("/api/admin/users/:userId/update", hasPermission("users"), async (req, res) => {
   const userId = req.params.userId;
@@ -4043,7 +4076,7 @@ app.delete("/api/admin/agents/:agentId/delete", hasPermission("agents"), async (
     if (isFullAdminAgent) {
       return res.status(400).json({ error: "Full Admin agents are protected and cannot be deleted." });
     }
-    const linkedPlayers = Object.values(store.users).filter((user) => user.linkedAgentId === agentId);
+    const linkedPlayers = Object.values(store.users).filter((user2) => user2.linkedAgentId === agentId);
     if (linkedPlayers.length > 0) {
       return res.status(409).json({
         error: `This agent has ${linkedPlayers.length} linked player(s). Reassign or unlink them before deleting the agent.`
@@ -4218,9 +4251,9 @@ app.post("/api/admin/rooms/:roomId/cancel", hasPermission("rooms"), (req, res) =
   if (room.betAmount > 0) {
     room.players.forEach((p) => {
       if (!isBotPlayer(p.userId)) {
-        const user = store.users[p.userId];
-        if (user) {
-          user.balance += room.betAmount;
+        const user2 = store.users[p.userId];
+        if (user2) {
+          user2.balance += room.betAmount;
           addTransaction(p.userId, "refund", room.betAmount, room.id, `Refund for canceled match ${room.id}.`);
           broadcastUserUpdate(p.userId);
         }
@@ -4235,23 +4268,23 @@ app.post("/api/admin/rooms/:roomId/cancel", hasPermission("rooms"), (req, res) =
 });
 app.post("/api/admin/users/:userId/toggle-admin", hasPermission("users"), (req, res) => {
   const userId = req.params.userId;
-  const user = store.users[userId];
-  if (!user) {
+  const user2 = store.users[userId];
+  if (!user2) {
     return res.status(404).json({ error: "User not found" });
   }
-  const uName = String(user.username || "").toLowerCase();
-  const uRole = String(user.role || "").toLowerCase();
+  const uName = String(user2.username || "").toLowerCase();
+  const uRole = String(user2.role || "").toLowerCase();
   if (uName === "admin" || uName === "superadmin" || uRole.includes("admin") || uRole.includes("super")) {
     return res.status(400).json({ error: "Full Admin users are protected and cannot be modified." });
   }
-  if (user.role === "admin") {
-    user.role = "player";
+  if (user2.role === "admin") {
+    user2.role = "player";
   } else {
-    user.role = "admin";
+    user2.role = "admin";
   }
   saveStore();
-  broadcastUserUpdate(user.id);
-  res.json({ success: true, user });
+  broadcastUserUpdate(user2.id);
+  res.json({ success: true, user: user2 });
 });
 app.get("/api/admin/users/:userId/games", hasPermission("users"), (req, res) => {
   const { userId } = req.params;
@@ -4456,6 +4489,7 @@ app.post("/api/agent/deposit", isAgent, async (req, res) => {
       void 0,
       `Deposit received from agent ${agent.id}.`
     );
+    if (tx.transactionType === "withdraw") recordWithdrawalFee(user.id, Number(tx.fee || 0), tx.id);
     await saveStoreAndWait();
     broadcastUserUpdate(player.id);
     const updatedAgentDoc = await agentRef.get();
@@ -4524,28 +4558,28 @@ app.get("/api/agent/player-requests", isAgent, async (req, res) => {
       return res.status(500).json({ error: "Failed to retrieve player requests." });
     }
   }
-  const agentSpecificTxs = store.pendingManualTransactions.filter((tx) => {
-    const user = store.users[tx.userId];
-    return tx.agentId === agent.id && (tx.managedBy === "agent" || user?.linkedAgentId === agent.id);
+  const agentSpecificTxs = store.pendingManualTransactions.filter((tx2) => {
+    const user2 = store.users[tx2.userId];
+    return tx2.agentId === agent.id && (tx2.managedBy === "agent" || user2?.linkedAgentId === agent.id);
   });
-  const responsePayload = agentSpecificTxs.map((tx) => {
-    const user = store.users[tx.userId];
+  const responsePayload = agentSpecificTxs.map((tx2) => {
+    const user2 = store.users[tx2.userId];
     return {
-      id: tx.id,
-      playerId: tx.userId,
-      playerUsername: user ? user.username : "Unknown Player",
-      playerAvatar: user ? user.avatar : "\u2753",
+      id: tx2.id,
+      playerId: tx2.userId,
+      playerUsername: user2 ? user2.username : "Unknown Player",
+      playerAvatar: user2 ? user2.avatar : "\u2753",
       agentId: agent.id,
       // Agent ID is from the authenticated agent
-      playerPhone: tx.phone,
+      playerPhone: tx2.phone,
       // For withdrawals
-      senderPhone: tx.senderPhone,
+      senderPhone: tx2.senderPhone,
       // For deposits
-      provider: tx.provider,
-      type: tx.transactionType,
-      amount: tx.amount,
-      status: tx.status,
-      createdAt: tx.createdAt
+      provider: tx2.provider,
+      type: tx2.transactionType,
+      amount: tx2.amount,
+      status: tx2.status,
+      createdAt: tx2.createdAt
     };
   });
   responsePayload.sort((a, b) => b.createdAt - a.createdAt);
@@ -4554,28 +4588,28 @@ app.get("/api/agent/player-requests", isAgent, async (req, res) => {
 app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, res) => {
   const { requestId } = req.params;
   const agent = req.agent;
-  const tx = await findManualRequest(requestId);
-  if (!tx || tx.status !== "pending") {
+  const tx2 = await findManualRequest(requestId);
+  if (!tx2 || tx2.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  if (tx.agentId !== agent.id) {
+  if (tx2.agentId !== agent.id) {
     return res.status(403).json({ error: "This transaction request belongs to a different agent." });
   }
-  const user = store.users[tx.userId];
-  if (!user) {
+  const user2 = store.users[tx2.userId];
+  if (!user2) {
     return res.status(404).json({ error: "User associated with transaction not found." });
   }
-  if (user.linkedAgentId && user.linkedAgentId !== agent.id) {
+  if (user2.linkedAgentId && user2.linkedAgentId !== agent.id) {
     return res.status(400).json({ error: "This player is locked to a different agent via promo code." });
   }
   try {
     if (!db) {
       throw new Error("Database not initialized");
     }
-    let approvedUserBalance = user.balance;
+    let approvedUserBalance = user2.balance;
     await db.runTransaction(async (t) => {
       const agentRef = db.collection("agents").doc(agent.id);
-      const userRef = db.collection("users").doc(user.firebaseUid || user.id);
+      const userRef = db.collection("users").doc(user2.firebaseUid || user2.id);
       const agentDoc = await t.get(agentRef);
       const userDoc = await t.get(userRef);
       if (!agentDoc.exists) {
@@ -4583,54 +4617,56 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
       }
       const agentData = agentDoc.data();
       const currentFloat = agentData.floatBalance || 0;
-      const persistedBalance = Number(userDoc.data()?.balance ?? user.balance);
+      const persistedBalance = Number(userDoc.data()?.balance ?? user2.balance);
       let newAgentFloat;
       let newUserBalance;
-      if (tx.transactionType === "deposit") {
-        if (currentFloat < tx.amount) {
+      if (tx2.transactionType === "deposit") {
+        if (currentFloat < tx2.amount) {
           throw new Error("Insufficient float balance to approve this deposit.");
         }
-        newAgentFloat = currentFloat - tx.amount;
-        newUserBalance = persistedBalance + tx.amount;
+        newAgentFloat = currentFloat - tx2.amount;
+        newUserBalance = persistedBalance + tx2.amount;
       } else {
-        if (persistedBalance < tx.amount) {
+        const eligibilityError = withdrawalEligibilityError(user2, tx2.amount, tx2.id);
+        if (eligibilityError) throw new Error(eligibilityError);
+        if (persistedBalance < tx2.amount) {
           throw new Error("Player has insufficient balance for this withdrawal.");
         }
-        newAgentFloat = currentFloat + tx.amount;
-        newUserBalance = persistedBalance - tx.amount;
+        newAgentFloat = currentFloat + tx2.amount;
+        newUserBalance = persistedBalance - tx2.amount;
       }
       const agentTxRef = db.collection("agentTransactions").doc();
       const agentTx = {
         id: agentTxRef.id,
         agentId: agent.id,
-        type: tx.transactionType === "deposit" ? "PlayerDeposit" : "PlayerWithdrawal",
-        amount: tx.amount,
-        playerId: user.id,
-        playerName: user.username,
+        type: tx2.transactionType === "deposit" ? "PlayerDeposit" : "PlayerWithdrawal",
+        amount: tx2.amount,
+        playerId: user2.id,
+        playerName: user2.username,
         timestamp: Date.now(),
-        description: `Approved ${tx.transactionType} of $${tx.amount} for player ${user.username}.`
+        description: `Approved ${tx2.transactionType} of $${tx2.amount} for player ${user2.username}.`
       };
       t.set(agentTxRef, agentTx);
       t.update(agentRef, { floatBalance: newAgentFloat });
-      t.set(userRef, { balance: newUserBalance, id: user.id, firebaseUid: user.firebaseUid || null }, { merge: true });
+      t.set(userRef, { balance: newUserBalance, id: user2.id, firebaseUid: user2.firebaseUid || null }, { merge: true });
       approvedUserBalance = newUserBalance;
     });
-    user.balance = approvedUserBalance;
+    user2.balance = approvedUserBalance;
     addTransaction(
-      user.id,
-      tx.transactionType === "deposit" ? "deposit" : "withdrawal",
-      tx.amount,
+      user2.id,
+      tx2.transactionType === "deposit" ? "deposit" : "withdrawal",
+      tx2.amount,
       void 0,
-      `Manual ${tx.transactionType} approved by agent ${agent.username}. Request ID: ${tx.id}`
+      `Manual ${tx2.transactionType} approved by agent ${agent.username}. Request ID: ${tx2.id}`
     );
-    tx.status = "approved";
-    tx.resolvedBy = agent.id;
-    tx.resolverUsername = agent.username;
-    await saveManualRequestToFirestore(tx);
-    await saveUserProfileToFirestore(user);
+    tx2.status = "approved";
+    tx2.resolvedBy = agent.id;
+    tx2.resolverUsername = agent.username;
+    await saveManualRequestToFirestore(tx2);
+    await saveUserProfileToFirestore(user2);
     await saveStoreAndWait();
-    broadcastUserUpdate(user.id);
-    res.json({ success: true, transaction: tx });
+    broadcastUserUpdate(user2.id);
+    res.json({ success: true, transaction: tx2 });
   } catch (error) {
     console.error("Error processing agent transaction approval:", error);
     const message = error instanceof Error ? error.message : "An unknown error occurred.";
@@ -4643,30 +4679,30 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
 app.post("/api/agent/player-requests/:requestId/reject", isAgent, async (req, res) => {
   const { requestId } = req.params;
   const agent = req.agent;
-  const tx = await findManualRequest(requestId);
-  if (!tx || tx.status !== "pending") {
+  const tx2 = await findManualRequest(requestId);
+  if (!tx2 || tx2.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  if (tx.agentId !== agent.id) {
+  if (tx2.agentId !== agent.id) {
     return res.status(403).json({ error: "This transaction request belongs to a different agent." });
   }
-  const user = store.users[tx.userId];
-  if (!user) {
-    tx.status = "rejected";
-    await saveManualRequestToFirestore(tx);
+  const user2 = store.users[tx2.userId];
+  if (!user2) {
+    tx2.status = "rejected";
+    await saveManualRequestToFirestore(tx2);
     await saveStoreAndWait();
     return res.status(404).json({ error: "User associated with transaction not found. Transaction rejected." });
   }
-  tx.status = "rejected";
-  tx.resolvedBy = agent.id;
-  tx.resolverUsername = agent.username;
-  await saveManualRequestToFirestore(tx);
+  tx2.status = "rejected";
+  tx2.resolvedBy = agent.id;
+  tx2.resolverUsername = agent.username;
+  await saveManualRequestToFirestore(tx2);
   await saveStoreAndWait();
-  sendEventToUser(user.id, "user_notification", {
+  sendEventToUser(user2.id, "user_notification", {
     type: "info",
-    message: `Your ${tx.transactionType} request for $${tx.amount} was rejected by agent ${agent.username}.`
+    message: `Your ${tx2.transactionType} request for $${tx2.amount} was rejected by agent ${agent.username}.`
   });
-  res.json({ success: true, transaction: tx });
+  res.json({ success: true, transaction: tx2 });
 });
 app.get("/api/agent/payment-instructions", isAgent, (req, res) => {
   const instructions = store.agentFloatInstructions || "";
@@ -4674,7 +4710,7 @@ app.get("/api/agent/payment-instructions", isAgent, (req, res) => {
 });
 app.get("/api/agent/my-players", isAgent, (req, res) => {
   const agent = req.agent;
-  const linkedPlayers = Object.values(store.users).filter((user) => user.linkedAgentId === agent.id);
+  const linkedPlayers = Object.values(store.users).filter((user2) => user2.linkedAgentId === agent.id);
   const sanitizedPlayers = linkedPlayers.map((p) => {
     const { password, ...playerData } = p;
     return playerData;

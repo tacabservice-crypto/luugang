@@ -45,6 +45,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   const [confirmationRequested, setConfirmationRequested] = useState(false);
   const [confirmationLoading, setConfirmationLoading] = useState(false);
   const [withdrawPreviewVisible, setWithdrawPreviewVisible] = useState(false);
+  const [withdrawQuote, setWithdrawQuote] = useState<{ fee: number; netAmount: number; feeRate: number; playedPaidGame: boolean } | null>(null);
   const [depositAwaitingConfirmation, setDepositAwaitingConfirmation] = useState(false);
   const providerDetails = {
     evc: { label: 'EVC Plus', placeholder: 'e.g. 061XXXXXXX', hint: 'Hormuud • 061' },
@@ -69,6 +70,12 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
       } finally {
         setProfileLoading(false);
       }
+      try {
+        const settingsRes = await fetch('/api/payment/settings');
+        if (settingsRes.ok) setPaymentSettings(await settingsRes.json());
+      } catch (err) {
+        console.error('Failed to load admin payment settings', err);
+      }
       // Fetch agents for deposit and withdraw tabs
       if (activeTab === 'deposit' || activeTab === 'withdraw') {
         try {
@@ -87,10 +94,8 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
               }
               setSelectedAgentId(currentLinkedAgentId);
             } else {
-              setAgents(data);
-              if (data.length > 0 && !selectedAgentId) {
-                setSelectedAgentId(data[0].id);
-              }
+              setAgents([]);
+              setSelectedAgentId('');
             }
           }
         } catch (err) {
@@ -125,9 +130,11 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 userId: user.id,
                 // Send the agent actually selected in the wallet. The server still
                 // gives a promo-linked agent priority and rejects mismatches.
-                agentId: selectedAgentId || linkedAgentId || undefined,
+                agentId: linkedAgentId || undefined,
                 amount: parseFloat(amount),
-                phone: activeTab === 'withdraw' ? phone : (agents.find(a => a.id === selectedAgentId)?.phone || DEPOSIT_PHONE_NUMBER),
+                phone: activeTab === 'withdraw' ? phone : (linkedAgentId
+                  ? agents.find(a => a.id === selectedAgentId)?.phone
+                  : paymentSettings[provider]?.accountNumber || DEPOSIT_PHONE_NUMBER),
                 senderPhone: activeTab === 'deposit' ? senderPhone : undefined,
                 provider: provider,
                 transactionType: activeTab,
@@ -152,7 +159,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     }
   };
 
-  const handleGenerateUssd = (e: React.FormEvent) => {
+  const handleGenerateUssd = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setUssdString('');
@@ -183,17 +190,32 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
         setError('Insufficient balance for this withdrawal.');
         return;
       }
+      if (amtFloat < 2) {
+        setError('Minimum withdrawal amount is $2.');
+        return;
+      }
       if (!phone.trim()) {
         setError('Please enter the phone number for the withdrawal.');
         return;
       }
-      setWithdrawPreviewVisible(true);
+      try {
+        const quoteResponse = await fetch(`/api/wallet/withdrawal-quote/${user.id}?amount=${encodeURIComponent(amtFloat)}`);
+        const quote = await quoteResponse.json();
+        if (!quoteResponse.ok) {
+          setError(userErrorMessage(quote.error, 'Withdrawal is not available for this amount.'));
+          return;
+        }
+        setWithdrawQuote(quote);
+        setWithdrawPreviewVisible(true);
+      } catch (error) {
+        setError(userErrorMessage(error, 'Withdrawal details could not be calculated.'));
+      }
       return;
     }
       
     const selectedAgent = agents.find(a => a.id === selectedAgentId);
     let targetPhone = activeTab === 'deposit'
-      ? (linkedAgentId ? selectedAgent?.phone : DEPOSIT_PHONE_NUMBER)
+      ? (linkedAgentId ? selectedAgent?.phone : paymentSettings[provider]?.accountNumber || DEPOSIT_PHONE_NUMBER)
       : phone;
 
     if (activeTab === 'deposit' && !targetPhone) {
@@ -317,6 +339,8 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                        <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
                          <div className="bg-black/40 border border-white/10 rounded-xl p-4 text-left text-sm text-white space-y-2">
                            <div className="flex justify-between"><span>Amount:</span><span>${parseFloat(amount).toFixed(2)}</span></div>
+                           <div className={`flex justify-between ${withdrawQuote?.playedPaidGame ? 'text-emerald-300' : 'text-amber-300'}`}><span>{withdrawQuote?.playedPaidGame ? 'Player withdrawal fee (0%):' : 'No-play fee (10%):'}</span><span>-${Number(withdrawQuote?.fee || 0).toFixed(2)}</span></div>
+                           <div className="flex justify-between border-t border-white/10 pt-2 font-black text-emerald-300"><span>You receive:</span><span>${Number(withdrawQuote?.netAmount || 0).toFixed(2)}</span></div>
                            <div className="flex justify-between"><span>Phone:</span><span>{phone}</span></div>
                            <div className="flex justify-between"><span>Provider:</span><span className="uppercase">{provider}</span></div>
                          </div>
@@ -425,8 +449,9 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Amount ($)</label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                    <input type="number" step="0.01" min="0.01" required placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl pl-8 pr-4 py-2.5 text-lg font-black text-white" />
+                    <input type="number" step="0.01" min={activeTab === 'withdraw' ? 2 : 0.01} required placeholder={activeTab === 'withdraw' ? 'Minimum $2' : 'Enter amount'} value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl pl-8 pr-4 py-2.5 text-lg font-black text-white" />
                   </div>
+                  {activeTab === 'withdraw' && <p className="text-[11px] text-amber-300">Minimum withdrawal is $2. Deposits are withdrawable; the $1 welcome bonus unlocks after $5 in approved deposits. A 10% fee applies only until you complete a paid game; regular players pay no withdrawal fee.</p>}
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
