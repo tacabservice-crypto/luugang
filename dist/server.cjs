@@ -825,6 +825,15 @@ function cleanupMatchmakingQueues() {
     saveStore();
   }
 }
+function syncMatchmakingRecordWithRetry(userId, record, attempt = 1) {
+  if (!db) return;
+  db.collection("matchmaking").doc(userId).set(record).catch((error) => {
+    console.error(`Failed to sync matchmaking record (attempt ${attempt}):`, error);
+    if (attempt < 3) {
+      setTimeout(() => syncMatchmakingRecordWithRetry(userId, record, attempt + 1), attempt * 1e3);
+    }
+  });
+}
 var START_OFFSETS = {
   green: 0,
   yellow: 13,
@@ -2613,7 +2622,7 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
     user2.seekingJoinedAt = Date.now();
     store.matchmakingQueues[queueKey].push(userId);
     if (db) {
-      await db.collection("matchmaking").doc(userId).set({
+      syncMatchmakingRecordWithRetry(userId, {
         userId,
         username: user2.username,
         avatar: user2.avatar,

@@ -1070,6 +1070,16 @@ function cleanupMatchmakingQueues() {
   }
 }
 
+function syncMatchmakingRecordWithRetry(userId: string, record: Record<string, unknown>, attempt = 1) {
+  if (!db) return;
+  db.collection('matchmaking').doc(userId).set(record).catch(error => {
+    console.error(`Failed to sync matchmaking record (attempt ${attempt}):`, error);
+    if (attempt < 3) {
+      setTimeout(() => syncMatchmakingRecordWithRetry(userId, record, attempt + 1), attempt * 1000);
+    }
+  });
+}
+
 // ==========================================
 // 3. LUDO GAME PATH & RECONCILIATION HELPERS
 // ==========================================
@@ -3393,9 +3403,11 @@ app.post('/api/rooms/matchmaking/enter-queue', async (req, res) => {
     (user as any).seekingJoinedAt = Date.now();
     store.matchmakingQueues[queueKey].push(userId);
 
-    // Write matchmaking record to Firestore
+    // Queue admission must not fail when Firestore is briefly slow. The local
+    // queue and SSE update happen immediately; shared Firestore sync retries in
+    // the background for users connected through another hosting process.
     if (db) {
-      await db.collection('matchmaking').doc(userId).set({
+      syncMatchmakingRecordWithRetry(userId, {
         userId: userId,
         username: user.username,
         avatar: user.avatar,

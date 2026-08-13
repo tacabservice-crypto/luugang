@@ -122,27 +122,56 @@ export default function App() {
             return;
           }
           const token = await firebaseUser.getIdToken();
-          // Fetch user profile from your backend
-          const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({ email: firebaseUser.email, username: undefined, avatar: undefined }),
-          });
-
-          if (!response.ok) {
-            throw new Error('Failed to fetch user profile from backend.');
+          let response: Response | null = null;
+          let profileData: UserProfile | null = null;
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            try {
+              response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ email: firebaseUser.email, username: undefined, avatar: undefined }),
+              });
+              if (response.ok) {
+                profileData = await response.json();
+                break;
+              }
+              if (response.status === 401) {
+                await signOut(auth);
+                throw new Error('Your session has expired. Please sign in again.');
+              }
+              if (response.status === 428 || response.status === 403) {
+                const details = await response.json().catch(() => ({}));
+                await signOut(auth);
+                throw new Error(details.error || 'Email verification is required. Please sign in again to verify your account.');
+              }
+            } catch (requestError) {
+              if (/session has expired|verification is required|OTP verification/i.test(String((requestError as Error)?.message || ''))) throw requestError;
+              if (attempt === 11) throw requestError;
+            }
+            await new Promise(resolve => window.setTimeout(resolve, 2500));
           }
-
-          const profileData: UserProfile = await response.json();
+          if (!profileData) throw new Error(`The server is still restarting (${response?.status || 'offline'}).`);
           setUser(profileData);
+          localStorage.setItem('ludosom_cached_profile', JSON.stringify(profileData));
           // Initiate rejoin check without awaiting to not block authLoading
           void checkAndPromptRejoin(profileData.id);
         } catch (err) {
           console.error("Auth session restore error:", err);
-          setUser(null); // Ensure user is logged out on error
+          // A deployment restart must not throw an authenticated player out of
+          // the app. Keep the last verified profile visible while the backend
+          // reconnects; Firebase remains the source of authentication truth.
+          try {
+            const cached = JSON.parse(localStorage.getItem('ludosom_cached_profile') || 'null') as UserProfile | null;
+            if (auth.currentUser && cached?.id) {
+              setUser(cached);
+              setErrorToast('Server is reconnecting after an update. Your session is still active.');
+            } else {
+              setError((err as Error).message || 'Your account needs verification. Please sign in again.');
+              setUser(null);
+            }
+          } catch {
+            setUser(null);
+          }
         }
       } else {
         setUser(null);
@@ -447,6 +476,7 @@ export default function App() {
 
   const handleLoginSuccess = (profile: UserProfile) => {
     setUser(profile);
+    localStorage.setItem('ludosom_cached_profile', JSON.stringify(profile));
     // No need to set localStorage here, onAuthStateChanged is the source of truth
     checkAndPromptRejoin(profile.id);
   };
@@ -457,6 +487,7 @@ export default function App() {
     setActiveRoom(null);
     setMatchmakingState({ isQueued: false, betAmount: 0 });
     localStorage.removeItem('ludo_active_room_id');
+    localStorage.removeItem('ludosom_cached_profile');
   };
 
   const handleRefreshBalance = async () => {
