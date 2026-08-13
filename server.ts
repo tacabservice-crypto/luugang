@@ -197,6 +197,11 @@ function normalizePromoCode(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
 
+function normalizeAppAvatar(value: unknown): string {
+  const avatar = typeof value === 'string' ? value.trim() : '';
+  return /^https?:\/\//i.test(avatar) || !avatar ? '🎮' : avatar;
+}
+
 async function findAgentDocsByPromoCode(agentsRef: FirebaseFirestore.CollectionReference, promoCode: string) {
   const exactSnapshot = await agentsRef.where('promoCode', '==', promoCode).get();
   if (!exactSnapshot.empty) return exactSnapshot.docs;
@@ -2006,6 +2011,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   let foundUser = Object.values(store.users).find(u => u.firebaseUid === firebaseUid);
 
   if (foundUser) {
+    foundUser.avatar = normalizeAppAvatar(foundUser.avatar);
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
@@ -2021,6 +2027,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   if (persistedUser?.id) {
     persistedUser.firebaseUid = firebaseUid;
     persistedUser.email = persistedUser.email || email || undefined;
+    persistedUser.avatar = normalizeAppAvatar(persistedUser.avatar);
     if (!persistedUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
@@ -2087,7 +2094,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     firebaseUid: firebaseUid,
     username: cleanUsername,
     email: email?.trim().toLowerCase() || undefined,
-    avatar: avatar || '🌸',
+    avatar: normalizeAppAvatar(avatar),
     balance: WELCOME_BONUS,
     winCount: 0,
     lossCount: 0,

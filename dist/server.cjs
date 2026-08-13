@@ -151,6 +151,10 @@ async function sendOtpEmail(email, otp) {
 function normalizePromoCode(value) {
   return typeof value === "string" ? value.trim().toUpperCase() : "";
 }
+function normalizeAppAvatar(value) {
+  const avatar = typeof value === "string" ? value.trim() : "";
+  return /^https?:\/\//i.test(avatar) || !avatar ? "\u{1F3AE}" : avatar;
+}
 async function findAgentDocsByPromoCode(agentsRef, promoCode) {
   const exactSnapshot = await agentsRef.where("promoCode", "==", promoCode).get();
   if (!exactSnapshot.empty) return exactSnapshot.docs;
@@ -1542,6 +1546,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   }
   let foundUser = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
   if (foundUser) {
+    foundUser.avatar = normalizeAppAvatar(foundUser.avatar);
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
@@ -1554,6 +1559,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   if (persistedUser?.id) {
     persistedUser.firebaseUid = firebaseUid;
     persistedUser.email = persistedUser.email || email || void 0;
+    persistedUser.avatar = normalizeAppAvatar(persistedUser.avatar);
     if (!persistedUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
@@ -1608,7 +1614,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     firebaseUid,
     username: cleanUsername,
     email: email?.trim().toLowerCase() || void 0,
-    avatar: avatar || "\u{1F338}",
+    avatar: normalizeAppAvatar(avatar),
     balance: WELCOME_BONUS,
     winCount: 0,
     lossCount: 0,
