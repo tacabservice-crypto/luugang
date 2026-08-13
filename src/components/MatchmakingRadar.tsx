@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 import { UserProfile } from '../types/game';
 import { CircleDollarSign, Users } from 'lucide-react';
+import AvatarDisplay from './AvatarDisplay';
 
 interface Player {
     id: string;
@@ -117,9 +118,7 @@ const MatchmakingRadar: React.FC<MatchmakingRadarProps> = ({
                   <div key={`${player.id}-${index}`} className="px-2 py-1.5 flex items-center justify-between text-[11px] transition-colors hover:bg-purple-900/30">
                     <div className="flex items-center gap-2">
                       <div className="relative">
-                        <span className="text-xl bg-black/30 border border-white/5 w-8 h-8 flex items-center justify-center shadow-inner">
-                          {player.avatar}
-                        </span>
+                        <AvatarDisplay avatar={player.avatar} username={player.username} className="h-8 w-8 object-cover bg-black/30 border border-white/5 flex items-center justify-center shadow-inner overflow-hidden" textClassName="text-xl" />
                         <span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border-2 border-[#120738] ${isSeeking ? 'bg-purple-400 animate-ping' : 'bg-green-400'}`} />
                       </div>
                       <div className="space-y-0">

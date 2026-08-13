@@ -34,6 +34,7 @@ import AboutUs from './AboutUs';
 import Help from './Help';
 import ActiveGamesList from './ActiveGamesList';
 import UserEditModal from './UserEditModal';
+import AvatarDisplay from './AvatarDisplay';
 
 interface DashboardProps {
   user: UserProfile;
@@ -486,6 +487,7 @@ export default function Dashboard({
 
         {/* Top Header */}
         <div className="text-center z-10 space-y-1 mb-4">
+          <img src="/ludosom-logo.png" alt="LudoSom Landhu" className="mx-auto mb-2 h-14 w-14 rounded-xl object-cover shadow-lg shadow-purple-500/20 ring-1 ring-yellow-400/40" />
           <h1 className="text-3xl font-black tracking-widest bg-gradient-to-r from-yellow-400 via-white to-purple-400 bg-clip-text text-transparent">
             Ludo$om
           </h1>
@@ -526,7 +528,7 @@ export default function Dashboard({
 
           {/* Center User Profile */}
           <div className="relative bg-gradient-to-tr from-purple-600 to-indigo-600 p-4 rounded-full border-4 border-yellow-400 shadow-2xl shadow-purple-500/50 z-20">
-            <span className="text-4xl">{user.avatar}</span>
+            <AvatarDisplay avatar={user.avatar} username={user.username} className="h-16 w-16 rounded-full object-cover flex items-center justify-center overflow-hidden" textClassName="text-4xl" />
             <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-yellow-400 text-black text-[9px] font-black px-2 py-0.5 rounded-full uppercase shadow">
               {t('you')}
             </div>
@@ -591,9 +593,7 @@ export default function Dashboard({
                       <div key={player.id} className="p-2.5 flex items-center justify-between text-xs transition-colors bg-purple-900/20 border-l-2 border-purple-400 hover:bg-purple-900/30">
                         <div className="flex items-center gap-2">
                           <div className="relative">
-                            <span className="text-xl bg-black/30 border border-white/5 w-8 h-8 rounded-lg flex items-center justify-center shadow-inner">
-                              {player.avatar}
-                            </span>
+                            <AvatarDisplay avatar={player.avatar} username={player.username} className="h-8 w-8 rounded-lg object-cover bg-black/30 border border-white/5 flex items-center justify-center shadow-inner overflow-hidden" textClassName="text-xl" />
                             <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full border border-[#120738] bg-purple-400 animate-ping" />
                           </div>
                           <div className="space-y-0.5">
@@ -677,9 +677,7 @@ export default function Dashboard({
       {/* 1. STICKY TOP HEADER */}
       <header className="sticky top-0 z-30 bg-white/5 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex items-center justify-between relative z-10">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 bg-gradient-to-tr from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center shadow-md shadow-purple-500/15">
-            <Trophy className="w-5 h-5 text-white animate-pulse" />
-          </div>
+          <img src="/ludosom-logo.png" alt="LudoSom Landhu" className="h-10 w-10 rounded-lg object-cover shadow-md shadow-purple-500/15 ring-1 ring-yellow-400/40" />
           <div>
             <span className="font-black text-sm tracking-widest block text-yellow-400">Ludo<span className="text-white">$om</span></span>
             <span className="text-[8px] font-black text-purple-400 uppercase tracking-widest block">Ludo Arena Soomaaliyeed</span>
@@ -703,7 +701,7 @@ export default function Dashboard({
               className="flex items-center gap-2 cursor-pointer"
               onClick={() => setIsSettingsDropdownOpen(prev => !prev)}
             >
-              <span className="text-2xl bg-black/20 p-1 rounded-full">{user.avatar}</span>
+              <AvatarDisplay avatar={user.avatar} username={user.username} className="h-9 w-9 rounded-full object-cover bg-black/20 flex items-center justify-center overflow-hidden" textClassName="text-2xl" />
               <MoreVertical className="w-4 h-4 text-slate-400" />
             </div>
 
@@ -789,9 +787,7 @@ export default function Dashboard({
         <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-3 sm:p-4 shadow-xl backdrop-blur-xl flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
             <div className="relative shrink-0">
-              <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-xl border border-purple-500/30 bg-purple-950/40 text-xl sm:text-2xl shadow-inner">
-                {user.avatar}
-              </div>
+              <AvatarDisplay avatar={user.avatar} username={user.username} className="flex h-10 w-10 sm:h-12 sm:w-12 object-cover items-center justify-center rounded-xl border border-purple-500/30 bg-purple-950/40 shadow-inner overflow-hidden" textClassName="text-xl sm:text-2xl" />
               <span 
                 className={`absolute -bottom-1 -right-1 h-3 w-3 sm:h-3.5 sm:w-3.5 rounded-full border-2 border-slate-900 ${
                   user.isOfflinePreference ? 'bg-slate-500' : 'bg-emerald-400 animate-pulse'
@@ -1117,7 +1113,7 @@ export default function Dashboard({
                   <span className={`w-5 font-black ${player.rank === 1 ? 'text-yellow-400' : 'text-slate-500'}`}>
                     #{player.rank}
                   </span>
-                  <span className="text-sm">{player.avatar}</span>
+                  <AvatarDisplay avatar={player.avatar} username={player.name} className="h-6 w-6 rounded-full object-cover flex items-center justify-center overflow-hidden" textClassName="text-sm" />
                   <span className="font-bold text-slate-200">{player.name}</span>
                 </div>
                 <div className="text-right space-y-0.5">

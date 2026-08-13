@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GameRoom } from '../types/game';
 import { Eye, Loader2, Gamepad2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import AvatarDisplay from './AvatarDisplay';
 
 interface ActiveGamesListProps {
   games: GameRoom[];
@@ -35,9 +36,7 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
             <div className="flex items-center gap-3">
               <div className="flex -space-x-3 items-center shrink-0">
                 {game.players.slice(0, 2).map(player => (
-                  <div key={player.userId} title={player.username} className="w-7 h-7 rounded-full bg-black/40 flex items-center justify-center text-sm border-2 border-slate-700">
-                    {player.avatar}
-                  </div>
+                  <AvatarDisplay key={player.userId} avatar={player.avatar} username={player.username} className="w-7 h-7 rounded-full object-cover bg-black/40 flex items-center justify-center border-2 border-slate-700 overflow-hidden" textClassName="text-sm" />
                 ))}
                 {game.players.length > 2 && (
                   <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold border-2 border-slate-600">

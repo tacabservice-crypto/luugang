@@ -15,6 +15,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import AvatarDisplay from './AvatarDisplay';
 
 interface GameHeaderProps {
   room: GameRoom;
@@ -71,7 +72,7 @@ export default function GameHeader({
       <div className="flex items-center gap-3 text-xs font-bold">
         {sortedPlayers.map(p => (
           <div key={p.userId} className="flex items-center gap-1.5">
-            <span className="text-lg">{p.avatar}</span>
+            <AvatarDisplay avatar={p.avatar} username={p.username} className="h-7 w-7 rounded-full object-cover flex items-center justify-center overflow-hidden" textClassName="text-lg" />
             <span className="hidden sm:inline">{p.userId === userId ? t('you') : p.username.split(' ')[0]}</span>
             <MicOff className="w-3.5 h-3.5 text-red-400/70" />
           </div>
