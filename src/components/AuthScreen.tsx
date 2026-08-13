@@ -13,6 +13,7 @@ import { userErrorMessage } from '../utils/userError';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -184,6 +185,26 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       } else {
         setError(userErrorMessage(err));
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const resetEmail = email.trim();
+    setError('');
+    setSuccessMessage('');
+    if (!resetEmail) {
+      setError('Enter your email address first.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      setSuccessMessage('If an account uses this email, a password reset link has been sent. Check your Inbox and Spam/Junk folder.');
+    } catch (err: any) {
+      setError(userErrorMessage(err, 'Password reset email could not be sent. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -382,6 +403,18 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-black/30 border border-white/10 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all"
               />
+              {isLogin && (
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={loading}
+                    className="text-xs font-bold text-blue-400 transition hover:text-blue-300 hover:underline disabled:opacity-50"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
             </div>
 
           {!isLogin && (
