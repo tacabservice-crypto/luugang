@@ -8,6 +8,7 @@ import { X, ArrowUpRight, ArrowDownLeft, Wallet, ShieldAlert, CheckCircle, Refre
 import { UserProfile, WalletTransaction, Agent, PlayerAgentRequest } from '../types/game';
 import { useLanguage } from '../context/LanguageContext';
 import { formatCurrency } from '../utils/number';
+import { userErrorMessage } from '../utils/userError';
 
 interface WalletModalProps {
   user: UserProfile;
@@ -142,7 +143,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
               onClose();
             }, 2000);
         } else {
-            setError(data.error || 'Failed to submit confirmation request.');
+            setError(userErrorMessage(data.error, 'The request could not be submitted.'));
         }
     } catch (err) {
         setError('An unexpected error occurred. Please try again.');

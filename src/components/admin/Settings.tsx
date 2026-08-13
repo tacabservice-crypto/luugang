@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff, ShieldCheck, Crown, Plus } from 'lucide-react';
 import ChangePasswordForm from '../ChangePasswordForm';
 import { isFullAdmin } from '../../utils/admin';
+import { userErrorMessage } from '../../utils/userError';
 
 const Settings = ({ 
     adminSettings, 
@@ -91,7 +92,7 @@ const Settings = ({
           <div>
             <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div><h3 className="flex items-center gap-2 text-xl font-bold"><Crown className="text-amber-500" /> VIP Plans</h3><p className="mt-1 text-sm text-gray-500">Changes saved here are shown to players and applied to game payouts.</p></div>
-              <button onClick={async () => { try { await onSaveVipTiers(editableVipTiers); showNotification('success', 'VIP plans saved and synced with players.'); } catch (error:any) { showNotification('error', error.message); } }} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white hover:bg-purple-700">Save VIP Plans</button>
+              <button onClick={async () => { try { await onSaveVipTiers(editableVipTiers); showNotification('success', 'VIP plans saved and synced with players.'); } catch (error:any) { showNotification('error', userErrorMessage(error, 'VIP plans could not be saved.')); } }} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white hover:bg-purple-700">Save VIP Plans</button>
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {Object.entries(editableVipTiers).map(([key, tier]: [string, any]) => (

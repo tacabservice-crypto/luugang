@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Tournament } from '../../types/game';
 import { Trophy, Plus, Trash2, Ban, Users, Calendar, DollarSign, X, Play, Eye, Edit3, UserMinus } from 'lucide-react';
 import AvatarDisplay from '../AvatarDisplay';
+import { userErrorMessage } from '../../utils/userError';
 
 interface TournamentsTableProps {
   tournaments: Tournament[];
@@ -64,7 +65,7 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
       setIsModalOpen(false);
       setName('');
     } catch (err: any) {
-      setError(err.message || 'Failed to create tournament');
+      setError(userErrorMessage(err, 'Tournament could not be created.'));
     } finally {
       setLoading(false);
     }
@@ -85,7 +86,7 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
       });
       setEditingTournament(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to edit tournament');
+      setError(userErrorMessage(err, 'Tournament could not be updated.'));
     } finally {
       setLoading(false);
     }
@@ -498,7 +499,7 @@ export const TournamentsTable: React.FC<TournamentsTableProps> = ({
                                   players: prev.players.filter(pl => pl.userId !== p.userId)
                                 } : null);
                               } catch (err: any) {
-                                alert(err.message || 'Failed to remove player');
+                                alert(userErrorMessage(err, 'Player could not be removed.'));
                               } finally {
                                 setActionUserId(null);
                               }

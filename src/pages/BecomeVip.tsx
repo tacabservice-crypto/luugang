@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, Crown, ShieldCheck, Sparkles, Trophy, Wallet } from 'lucide-react';
 import { useAuth } from '../firebase-client';
+import { userErrorMessage } from '../utils/userError';
 
 interface VipTier {
   name: string;
@@ -60,7 +61,7 @@ const BecomeVip: React.FC = () => {
       if (!response.ok) throw new Error(data.error || 'VIP purchase failed.');
       setMessage(data.message || 'VIP activated successfully.');
     } catch (err: any) {
-      setError(err.message || 'VIP purchase failed.');
+      setError(userErrorMessage(err, 'VIP purchase failed.'));
     } finally {
       setProcessingTier(null);
     }

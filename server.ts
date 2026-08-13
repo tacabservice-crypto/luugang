@@ -1817,7 +1817,7 @@ app.post('/api/auth/otp/verify', verifyFirebaseToken, async (req: any, res) => {
 
 app.get('/api/auth/profile-status', verifyFirebaseToken, async (req: any, res) => {
   const profile = await findUserProfileInFirestore(req.user.uid, req.user.email);
-  res.json({ exists: Boolean(profile?.id) });
+  res.json({ exists: Boolean(profile?.id), otpVerified: Boolean(profile?.emailOtpVerifiedAt), linkedToAgent: Boolean(profile?.linkedAgentId) });
 });
 
 app.get("/api/health", (req, res) => {
@@ -2011,6 +2011,12 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   let foundUser = Object.values(store.users).find(u => u.firebaseUid === firebaseUid);
 
   if (foundUser) {
+    if (!foundUser.emailOtpVerifiedAt) {
+      const otpVerification = db ? await db.collection('emailOtps').doc(firebaseUid).get() : null;
+      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: 'Email OTP verification is required.' });
+      foundUser.emailOtpVerifiedAt = verifiedAt;
+    }
     foundUser.avatar = normalizeAppAvatar(foundUser.avatar);
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
@@ -2025,6 +2031,12 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   // has already been persisted in Firestore.
   const persistedUser = await findUserProfileInFirestore(firebaseUid, email);
   if (persistedUser?.id) {
+    if (!persistedUser.emailOtpVerifiedAt) {
+      const otpVerification = db ? await db.collection('emailOtps').doc(firebaseUid).get() : null;
+      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: 'Email OTP verification is required.' });
+      persistedUser.emailOtpVerifiedAt = verifiedAt;
+    }
     persistedUser.firebaseUid = firebaseUid;
     persistedUser.email = persistedUser.email || email || undefined;
     persistedUser.avatar = normalizeAppAvatar(persistedUser.avatar);
@@ -2046,8 +2058,17 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
       u => u.email?.trim().toLowerCase() === normalizedEmail && !u.firebaseUid
     );
     if (userByEmail) {
+      const otpVerification = db ? await db.collection('emailOtps').doc(firebaseUid).get() : null;
+      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: 'Email OTP verification is required.' });
       userByEmail.firebaseUid = firebaseUid; // Link account
       userByEmail.email = normalizedEmail;
+      userByEmail.emailOtpVerifiedAt = verifiedAt;
+      if (!userByEmail.linkedAgentId && normalizePromoCode(promoCode)) {
+        const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
+        if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
+        userByEmail.linkedAgentId = linkedAgent.id;
+      }
       await saveUserProfileToFirestore(userByEmail);
       await saveStoreAndWait();
       return res.json(userByEmail);
@@ -2099,6 +2120,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     winCount: 0,
     lossCount: 0,
     linkedAgentId: linkedAgentId, // Add the linked agent ID
+    emailOtpVerifiedAt: Date.now(),
   };
 
   store.users[userId] = newUser;

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { userErrorMessage } from '../utils/userError';
 
 interface ChangePasswordFormProps {
     adminId: string;
@@ -41,7 +42,7 @@ const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ adminId, onErro
             setNewPassword('');
             setConfirmNewPassword('');
         } catch (err: any) {
-            onError(err.message);
+            onError(userErrorMessage(err, 'Password could not be changed.'));
         } finally {
             setIsSubmitting(false);
         }

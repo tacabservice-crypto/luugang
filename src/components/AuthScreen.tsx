@@ -9,6 +9,7 @@ import { useLanguage } from '../context/LanguageContext';
 import LanguageToggle from './LanguageToggle';
 import { UserProfile } from '../types/game';
 import { auth } from '../firebase-client'; // Import client-side auth
+import { userErrorMessage } from '../utils/userError';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
@@ -49,6 +50,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [otpUser, setOtpUser] = useState<User | null>(null);
   const [googleOnboarding, setGoogleOnboarding] = useState(false);
   const [promoStep, setPromoStep] = useState(false);
+  const [existingAgentLink, setExistingAgentLink] = useState(false);
 
   const readApiJson = async (response: Response) => {
     const contentType = response.headers.get('content-type') || '';
@@ -94,7 +96,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       onLoginSuccess(profileData, token);
 
     } catch (err: any) {
-      setError(`Login to backend failed: ${err.message}`);
+      setError(userErrorMessage(err, 'Sign-in could not be completed.'));
       // If backend login fails, we should probably sign the user out of Firebase Auth too
       // to avoid a disjointed state.
       await auth.signOut();
@@ -122,17 +124,29 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         // Handle Login
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         await userCredential.user.reload();
-        if (!userCredential.user.emailVerified) {
-          const token = await userCredential.user.getIdToken();
+        const token = await userCredential.user.getIdToken();
+        const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
+        const profileStatus = await readApiJson(statusResponse);
+        if (!statusResponse.ok) throw new Error(profileStatus.error || 'Account status could not be checked.');
+        setExistingAgentLink(Boolean(profileStatus.linkedToAgent));
+        if (!profileStatus.otpVerified) {
           const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
           const otpData = await readApiJson(otpResponse);
           if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
           setOtpUser(userCredential.user);
+          setGoogleOnboarding(true);
           setVerificationPending(true);
           setSuccessMessage(otpResponse.ok ? '6-digit OTP ayaa loo diray email-kaaga.' : otpData.error);
           return;
         }
-        await handleBackendLogin(userCredential.user);
+        if (profileStatus.linkedToAgent) {
+          await handleBackendLogin(userCredential.user, true);
+        } else {
+          setOtpUser(userCredential.user);
+          setGoogleOnboarding(true);
+          setPromoStep(true);
+          setSuccessMessage('You may add a promo code, or skip this step.');
+        }
 
       } else {
         // Handle Registration
@@ -164,11 +178,11 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
             setError('Password is too weak. Must be at least 6 characters.');
             break;
           default:
-            setError(`Authentication failed: ${err.message}`);
+            setError(userErrorMessage(err, 'Sign-in failed. Please try again.'));
             break;
         }
       } else {
-        setError(err.message);
+        setError(userErrorMessage(err));
       }
     } finally {
       setLoading(false);
@@ -188,12 +202,16 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       await otpUser.getIdToken(true);
       if (googleOnboarding) {
         setVerificationPending(false);
-        setPromoStep(true);
-        setSuccessMessage('Email-ka waa la xaqiijiyay. Hadda geli promo code ama Skip dooro.');
+        if (existingAgentLink) {
+          await handleBackendLogin(otpUser, true);
+        } else {
+          setPromoStep(true);
+          setSuccessMessage('Email verified. You may add a promo code, or skip this step.');
+        }
       } else {
         await handleBackendLogin(otpUser);
       }
-    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
+    } catch (err: any) { setError(userErrorMessage(err, 'The code could not be verified.')); } finally { setLoading(false); }
   };
 
   const handleResendOtp = async () => {
@@ -205,7 +223,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       const data = await readApiJson(response);
       if (!response.ok) throw new Error(data.error || 'OTP could not be resent.');
       setSuccessMessage('OTP cusub ayaa loo diray email-kaaga.');
-    } catch (err:any) { setError(err.message); } finally { setLoading(false); }
+    } catch (err:any) { setError(userErrorMessage(err, 'A new code could not be sent.')); } finally { setLoading(false); }
   };
 
   const handleGoogleSignIn = async () => {
@@ -219,9 +237,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
       const status = await readApiJson(statusResponse);
       if (!statusResponse.ok) throw new Error(status.error || 'Could not check account status.');
-      if (status.exists) {
-        await handleBackendLogin(credential.user);
-      } else {
+      setExistingAgentLink(Boolean(status.linkedToAgent));
+      if (!status.otpVerified) {
         const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
         const otpData = await readApiJson(otpResponse);
         if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
@@ -229,9 +246,16 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setGoogleOnboarding(true);
         setVerificationPending(true);
         setSuccessMessage(otpResponse.ok ? '6-digit OTP ayaa loo diray Gmail-kaaga.' : otpData.error);
+      } else if (status.linkedToAgent) {
+        await handleBackendLogin(credential.user, true);
+      } else {
+        setOtpUser(credential.user);
+        setGoogleOnboarding(true);
+        setPromoStep(true);
+        setSuccessMessage('You may add a promo code, or skip this step.');
       }
     } catch (err: any) {
-      if (err?.code !== 'auth/popup-closed-by-user') setError(err?.message || 'Google sign-in failed.');
+      if (err?.code !== 'auth/popup-closed-by-user') setError(userErrorMessage(err, 'Google sign-in failed.'));
     } finally {
       setLoading(false);
     }
@@ -242,7 +266,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     setLoading(true); setError('');
     try {
       await handleBackendLogin(otpUser, true);
-    } catch (err:any) { setError(err.message); } finally { setLoading(false); }
+    } catch (err:any) { setError(userErrorMessage(err, 'Account setup could not be completed.')); } finally { setLoading(false); }
   };
 
   return (

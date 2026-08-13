@@ -19,6 +19,7 @@ import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
 import { isFullAdmin } from '../utils/admin';
 import ChangePasswordForm from '../components/ChangePasswordForm';
+import { userErrorMessage } from '../utils/userError';
 
 const VIEW_PERMISSIONS: Record<string, string> = {
     stats: 'stats', users: 'users', rooms: 'rooms', transactions: 'transactions',
@@ -126,7 +127,7 @@ const AdminDashboard: React.FC = () => {
             const data = await response.json();
             setAgentRequests(data);
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     }, [adminUser]);
 
@@ -147,7 +148,7 @@ const AdminDashboard: React.FC = () => {
                 fetchData('stats');
             }
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         } finally {
             setProcessingRequestId(null);
         }
@@ -164,7 +165,7 @@ const AdminDashboard: React.FC = () => {
             if (!response.ok) throw new Error(data.error || 'Failed to reject request');
             await fetchAgentRequests();
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         } finally {
             setProcessingRequestId(null);
         }
@@ -201,7 +202,7 @@ const AdminDashboard: React.FC = () => {
                 case 'settings': setAdminSettings(data); break;
             }
         } catch (err: any) {
-            if(showerror) setError(err.message);
+            if(showerror) setError(userErrorMessage(err));
         }
     }, [adminUser]);
 
@@ -232,7 +233,7 @@ const AdminDashboard: React.FC = () => {
                 throw new Error(data.error || 'Login failed');
             }
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -314,7 +315,7 @@ const AdminDashboard: React.FC = () => {
             fetchData('users'); // Refresh user list
         } catch (err: any) {
             console.error(err);
-            setError(err.message);
+            setError(userErrorMessage(err));
             throw err;
         }
     };
@@ -337,7 +338,7 @@ const AdminDashboard: React.FC = () => {
             }
             fetchData('users'); // Refresh user list
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -364,7 +365,7 @@ const AdminDashboard: React.FC = () => {
                 throw new Error(data.error || 'Impersonation failed');
             }
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
     
@@ -381,7 +382,7 @@ const AdminDashboard: React.FC = () => {
             }
             fetchData('rooms'); // Refresh rooms list
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -408,7 +409,7 @@ const AdminDashboard: React.FC = () => {
             }
             fetchData('agents');
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -446,7 +447,7 @@ const AdminDashboard: React.FC = () => {
             setEditingAgent(null)
         } catch (err: any) {
             console.error(err);
-            setError(err.message);
+            setError(userErrorMessage(err));
             throw err;
         }
     };
@@ -468,7 +469,7 @@ const AdminDashboard: React.FC = () => {
             setCreateAgentModalOpen(false);
         } catch (err: any) {
             console.error(err);
-            setError(err.message);
+            setError(userErrorMessage(err));
             throw err;
         }
     };
@@ -490,7 +491,7 @@ const AdminDashboard: React.FC = () => {
             setCreditingAgent(null);
         } catch (err: any) {
             console.error(err);
-            setError(err.message);
+            setError(userErrorMessage(err));
             throw err;
         }
     };
@@ -511,7 +512,7 @@ const AdminDashboard: React.FC = () => {
             await fetchData('settings');
             setCreateRoleModalOpen(false)
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
             throw err
         }
     };
@@ -534,7 +535,7 @@ const AdminDashboard: React.FC = () => {
             }
             fetchData('settings');
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -561,7 +562,7 @@ const AdminDashboard: React.FC = () => {
             setEditingRole(null);
         } catch (err: any) {
             console.error(err);
-            setError(err.message);
+            setError(userErrorMessage(err));
             throw err;
         }
     };
@@ -593,7 +594,7 @@ const AdminDashboard: React.FC = () => {
             setPaymentSettings(data.paymentSettings);
             alert('Payment settings saved.');
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -622,7 +623,7 @@ const AdminDashboard: React.FC = () => {
             }
             fetchData('manual-transactions'); // Refresh the list
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 
@@ -639,7 +640,7 @@ const AdminDashboard: React.FC = () => {
             }
             fetchData('manual-transactions'); // Refresh the list
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         }
     };
 

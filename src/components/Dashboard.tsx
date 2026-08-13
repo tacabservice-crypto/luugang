@@ -28,6 +28,7 @@ import { UserProfile, GameRoom } from '../types/game';
 import { useLanguage } from '../context/LanguageContext';
 import LanguageToggle from './LanguageToggle';
 import { formatCurrency } from '../utils/number';
+import { userErrorMessage } from '../utils/userError';
 import MatchmakingRadar from './MatchmakingRadar';
 import AboutUs from './AboutUs';
 import Help from './Help';
@@ -283,7 +284,7 @@ export default function Dashboard({
       if (res.ok && data.roomId) {
         onJoinPrivateRoom(data.roomId);
       } else if (data.error) {
-        alert(data.error);
+        alert(userErrorMessage(data.error));
       }
     } catch (err) {
       console.error('Failed to create bot match', err);

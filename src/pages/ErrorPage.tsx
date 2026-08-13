@@ -1,4 +1,5 @@
 import { useRouteError } from "react-router-dom";
+import { userErrorMessage } from "../utils/userError";
 
 export default function ErrorPage() {
   const error: any = useRouteError();
@@ -10,7 +11,7 @@ export default function ErrorPage() {
         <h1 className="text-4xl font-bold">Oops!</h1>
         <p className="mt-4">Sorry, an unexpected error has occurred.</p>
         <p className="mt-2">
-          <i>{error.statusText || error.message}</i>
+          <i>{userErrorMessage(error, 'This page could not be opened.')}</i>
         </p>
       </div>
     </div>

@@ -8,6 +8,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import { Agent, AgentTransaction, AgentRequest, PlayerAgentRequest, UserProfile } from './types/game';
 import toast, { Toaster } from 'react-hot-toast';
+import { userErrorMessage } from './utils/userError';
 import {
     Wallet,
     TrendingUp,
@@ -305,7 +306,7 @@ const AgentDashboard = () => {
                 toast.success('Dashboard refreshed');
             }
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err));
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -328,7 +329,7 @@ const AgentDashboard = () => {
             await fetchPlayerRequests(agentId);
             await fetchProfile(agentId);
         } catch (err: any) {
-            toast.error(err.message || 'Failed to approve request');
+            toast.error(userErrorMessage(err, 'Request could not be approved.'));
         } finally {
             setActionLoadingId(null);
         }
@@ -348,7 +349,7 @@ const AgentDashboard = () => {
             toast.success('Request rejected');
             await fetchPlayerRequests(agentId);
         } catch (err: any) {
-            toast.error(err.message || 'Failed to reject request');
+            toast.error(userErrorMessage(err, 'Request could not be rejected.'));
         } finally {
             setActionLoadingId(null);
         }
@@ -377,7 +378,7 @@ const AgentDashboard = () => {
             setRequestAmount('');
             setActiveTab('floatHistory');
         } catch (err: any) {
-            toast.error(err.message || 'Failed to request float');
+            toast.error(userErrorMessage(err, 'Float request could not be sent.'));
         } finally {
             setLoading(false);
         }
@@ -403,8 +404,8 @@ const AgentDashboard = () => {
             toast.success(`Welcome back, ${data.agent.username}!`);
             await fetchProfile(data.agent.id);
         } catch (err: any) {
-            setError(err.message);
-            toast.error(err.message);
+            setError(userErrorMessage(err, 'Sign-in failed.'));
+            toast.error(userErrorMessage(err, 'Sign-in failed.'));
         } finally {
             setLoading(false);
         }
@@ -448,7 +449,7 @@ const AgentDashboard = () => {
             setProfileForm(current => ({ ...current, username: data.agent.username || '', phone: data.agent.phone || '', location: data.agent.location || '', currentPassword: '', newPassword: '', confirmPassword: '' }));
             toast.success(data.message || 'Profile updated successfully.');
         } catch (err: any) {
-            toast.error(err.message || 'Failed to update profile.');
+            toast.error(userErrorMessage(err, 'Profile could not be updated.'));
         } finally {
             setSavingProfile(false);
         }
@@ -479,7 +480,7 @@ const AgentDashboard = () => {
                     setProfileForm(current => ({ ...current, location: data.agent.location || '' }));
                     toast.success(`Location updated: ${data.agent.location}`);
                 } catch (err: any) {
-                    toast.error(err.message || 'Unable to save detected location.');
+                    toast.error(userErrorMessage(err, 'Location could not be saved.'));
                 } finally {
                     setDetectingLocation(false);
                 }

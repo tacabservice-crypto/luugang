@@ -6,6 +6,7 @@ import TournamentBracket from '../components/TournamentBracket';
 import WalletModal from '../components/WalletModal';
 import LanguageToggle from '../components/LanguageToggle';
 import AvatarDisplay from '../components/AvatarDisplay';
+import { userErrorMessage } from '../utils/userError';
 import {
   Trophy,
   ArrowLeft,
@@ -54,7 +55,7 @@ const Tournaments: React.FC = () => {
       const data = await response.json();
       setTournaments(data);
     } catch (err: any) {
-      setError(err.message || 'An error occurred while fetching tournaments.');
+      setError(userErrorMessage(err, 'Tournaments could not be loaded.'));
     } finally {
       setLoading(false);
     }
@@ -127,7 +128,7 @@ const Tournaments: React.FC = () => {
       await fetchTournaments();
     } catch (err: any) {
       console.error('Tournament registration error:', err);
-      setError(err.message || 'An error occurred during registration.');
+      setError(userErrorMessage(err, 'Tournament registration failed.'));
     } finally {
       setActionLoadingId(null);
     }
@@ -161,7 +162,7 @@ const Tournaments: React.FC = () => {
       await fetchTournaments();
     } catch (err: any) {
       console.error('Unregister error:', err);
-      setError(err.message || 'An error occurred while unregistering.');
+      setError(userErrorMessage(err, 'Tournament withdrawal failed.'));
     } finally {
       setActionLoadingId(null);
     }

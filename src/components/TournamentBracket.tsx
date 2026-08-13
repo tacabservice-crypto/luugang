@@ -3,6 +3,7 @@ import { Tournament, TournamentMatch } from '../types/game';
 import { Trophy, ArrowLeft, Swords, Crown, Play, Users, DollarSign, Calendar, ShieldCheck, Sparkles, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import AvatarDisplay from './AvatarDisplay';
+import { userErrorMessage } from '../utils/userError';
 
 interface TournamentBracketProps {
   tournamentId: string;
@@ -27,7 +28,7 @@ const TournamentBracket: React.FC<TournamentBracketProps> = ({ tournamentId, onB
         const data = await response.json();
         setTournament(data);
       } catch (err: any) {
-        setError(err.message || 'An error occurred while fetching tournament details.');
+        setError(userErrorMessage(err, 'Tournament details could not be loaded.'));
       } finally {
         setLoading(false);
       }

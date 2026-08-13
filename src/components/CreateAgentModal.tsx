@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { userErrorMessage } from '../utils/userError';
 import LocationPicker from './LocationPicker';
 
 interface CreateAgentModalProps {
@@ -30,7 +31,7 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
             await onCreateAgent({ username, password, commissionRate, location, phone, promoCode });
             onClose();
         } catch (err: any) {
-            setError(err.message);
+            setError(userErrorMessage(err, 'Agent could not be created.'));
         } finally {
             setIsSubmitting(false);
         }

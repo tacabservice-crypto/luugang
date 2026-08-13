@@ -16,6 +16,7 @@ import { VoiceChatProvider } from './context/VoiceChatContext';
 import { useLanguage } from './context/LanguageContext';
 import { auth } from './firebase-client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { userErrorMessage } from './utils/userError';
 
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -490,7 +491,7 @@ export default function App() {
     const roomData = await response.json();
       setActiveRoom(roomData);
     } catch (err: any) {
-      setErrorToast(err.message || 'Cilad baa ka dhacday abuurista qolka.');
+      setErrorToast(userErrorMessage(err, 'The room could not be created.'));
     }
   };
 
@@ -508,7 +509,7 @@ export default function App() {
       const roomData = await response.json();
       setActiveRoom(roomData);
     } catch (err: any) {
-      setErrorToast(err.message || 'Could not spectate room.');
+      setErrorToast(userErrorMessage(err, 'The room could not be watched.'));
     }
   };
 
@@ -534,7 +535,7 @@ export default function App() {
       console.log('handleJoinPrivateRoom roomData:', roomData);
       setActiveRoom(roomData);
     } catch (err: any) {
-      setErrorToast(err.message || 'Lobby ku biirista waa ay fashilantay.');
+      setErrorToast(userErrorMessage(err, 'Could not join the lobby.'));
     }
   };
 
@@ -590,7 +591,7 @@ export default function App() {
       if (err.message === 'Failed to fetch') {
         setErrorToast('Lama xidhiidhi karo server-ka. Fadlan isku day mar kale hadhow. (Could not connect to the server. Please try again later.)');
       } else {
-        setErrorToast(err.message || 'Cilad matchmaking.');
+        setErrorToast(userErrorMessage(err, 'Matchmaking failed.'));
       }
       setMatchmakingState({ isQueued: false, betAmount: 0 });
     }
@@ -665,7 +666,7 @@ export default function App() {
       const data = await response.json();
       setActiveRoom(data);
     } catch (err: any) {
-      setErrorToast(err.message || 'Cilad baa ka dhacday bilaabista ciyaarta.');
+      setErrorToast(userErrorMessage(err, 'The game could not be started.'));
     }
   };
 
