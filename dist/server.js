@@ -294,6 +294,7 @@ async function migrateFirestoreToMySql(options = {}) {
 import { getAuth } from "firebase-admin/auth";
 dotenv.config();
 dotenv.config({ path: path2.join(process.cwd(), ".env.production") });
+var firebaseMySqlMigrationMode = String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || "").trim().toLowerCase() === "true";
 var appDir = typeof __dirname !== "undefined" ? __dirname : import.meta && import.meta.url ? path2.dirname(fileURLToPath(import.meta.url)) : process.cwd();
 function getDistDirectory() {
   const cwdDist = path2.join(process.cwd(), "dist");
@@ -377,6 +378,11 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
+app.use("/api", (_req, res, next) => {
+  if (!firebaseMySqlMigrationMode) return next();
+  res.setHeader("Retry-After", "900");
+  return res.status(503).json({ error: "Maintenance in progress. Please try again shortly." });
+});
 var rawPort = process.env.PORT || 3002;
 var PORT = typeof rawPort === "string" && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
 var DB_FILE = path2.join(process.cwd(), "db_store.json");
@@ -5612,7 +5618,7 @@ async function startServer() {
   }) : app.listen(PORT, () => {
     console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
   });
-  const migrationMode = String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || "").trim().toLowerCase() === "true";
+  const migrationMode = firebaseMySqlMigrationMode;
   if (migrationMode) {
     console.log("MySQL connection check is delegated to the one-time migration.");
   } else if (isMySqlConfigured()) {

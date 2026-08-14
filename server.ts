@@ -15,6 +15,7 @@ import { createServer as createViteServer, ViteDevServer } from 'vite'; // Keep 
 // Load environment variables from .env files
 dotenv.config();
 dotenv.config({ path: path.join(process.cwd(), '.env.production') });
+const firebaseMySqlMigrationMode = String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || '').trim().toLowerCase() === 'true';
 
 const appDir = typeof __dirname !== 'undefined'
   ? __dirname
@@ -174,6 +175,14 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
+
+// During the one-time copy, prevent public API traffic from spending the
+// restored Firestore quota before the migration can capture a verified snapshot.
+app.use('/api', (_req, res, next) => {
+  if (!firebaseMySqlMigrationMode) return next();
+  res.setHeader('Retry-After', '900');
+  return res.status(503).json({ error: 'Maintenance in progress. Please try again shortly.' });
+});
 
 const rawPort = process.env.PORT || 3002;
 const PORT = typeof rawPort === 'string' && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
@@ -6910,7 +6919,7 @@ async function startServer() {
         console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
       });
 
-  const migrationMode = String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || '').trim().toLowerCase() === 'true';
+  const migrationMode = firebaseMySqlMigrationMode;
 
   // Verify Hostinger MySQL independently of Firestore. This is read-only and
   // makes credential problems visible even while the Firebase quota is closed.
