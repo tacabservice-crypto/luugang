@@ -6910,9 +6910,13 @@ async function startServer() {
         console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
       });
 
+  const migrationMode = String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || '').trim().toLowerCase() === 'true';
+
   // Verify Hostinger MySQL independently of Firestore. This is read-only and
   // makes credential problems visible even while the Firebase quota is closed.
-  if (isMySqlConfigured()) {
+  if (migrationMode) {
+    console.log('MySQL connection check is delegated to the one-time migration.');
+  } else if (isMySqlConfigured()) {
     void testMySqlConnection()
       .then(() => console.log('MySQL connection verified successfully.'))
       .catch(error => {
@@ -6931,13 +6935,17 @@ async function startServer() {
   try {
     await loadStoreFromFirestore();
     purgeSimulatedUsers();
-    await startFirestoreLiveCaches();
-    console.log('Application state initialization completed.');
+    if (!migrationMode) {
+      await startFirestoreLiveCaches();
+      console.log('Application state initialization completed.');
+    } else {
+      console.log('Migration mode active: Firestore live caches are paused to preserve quota.');
+    }
   } catch (error) {
     console.error('Application state initialization failed; continuing with local fallback:', error);
   }
 
-  if (String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || '').trim().toLowerCase() === 'true') {
+  if (migrationMode) {
     console.log('One-time Firebase to MySQL migration requested; starting in the background.');
     void migrateFirestoreToMySql({ requireExecuteFlag: false }).catch(error => {
       console.error('One-time Firebase to MySQL migration failed:', error instanceof Error ? error.message : error);
