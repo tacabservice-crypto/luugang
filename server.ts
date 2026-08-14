@@ -41,6 +41,7 @@ function getDistDirectory(): string {
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
+import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -6908,6 +6909,22 @@ async function startServer() {
     : app.listen(PORT, () => {
         console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
       });
+
+  // Verify Hostinger MySQL independently of Firestore. This is read-only and
+  // makes credential problems visible even while the Firebase quota is closed.
+  if (isMySqlConfigured()) {
+    void testMySqlConnection()
+      .then(() => console.log('MySQL connection verified successfully.'))
+      .catch(error => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/access denied/i.test(message)) console.error('MySQL connection failed: check MYSQL_USER and MYSQL_PASSWORD.');
+        else if (/unknown database/i.test(message)) console.error('MySQL connection failed: check MYSQL_DATABASE.');
+        else if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(message)) console.error('MySQL connection failed: check MYSQL_HOST, MYSQL_PORT and network access.');
+        else console.error('MySQL connection failed.');
+      });
+  } else {
+    console.warn('MySQL connection check skipped: configuration is incomplete.');
+  }
 
   // Hostinger requires listen() within three seconds. Load persistent state only
   // after binding the port; loadStoreFromFirestore already falls back to disk.

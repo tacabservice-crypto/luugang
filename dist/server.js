@@ -50,6 +50,15 @@ function getMySqlPool() {
   if (!pool) pool = mysql.createPool(mysqlConfig());
   return pool;
 }
+async function testMySqlConnection() {
+  const connection = await getMySqlPool().getConnection();
+  try {
+    const [rows] = await connection.query("SELECT DATABASE() AS databaseName, UTC_TIMESTAMP() AS serverTime");
+    return rows;
+  } finally {
+    connection.release();
+  }
+}
 async function closeMySqlPool() {
   if (!pool) return;
   const activePool = pool;
@@ -5603,6 +5612,17 @@ async function startServer() {
   }) : app.listen(PORT, () => {
     console.log(`Betting Ludo Game Full-Stack App listening on socket ${PORT}`);
   });
+  if (isMySqlConfigured()) {
+    void testMySqlConnection().then(() => console.log("MySQL connection verified successfully.")).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/access denied/i.test(message)) console.error("MySQL connection failed: check MYSQL_USER and MYSQL_PASSWORD.");
+      else if (/unknown database/i.test(message)) console.error("MySQL connection failed: check MYSQL_DATABASE.");
+      else if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(message)) console.error("MySQL connection failed: check MYSQL_HOST, MYSQL_PORT and network access.");
+      else console.error("MySQL connection failed.");
+    });
+  } else {
+    console.warn("MySQL connection check skipped: configuration is incomplete.");
+  }
   try {
     await loadStoreFromFirestore();
     purgeSimulatedUsers();
