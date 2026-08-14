@@ -11,6 +11,7 @@ interface EditRoleModalProps {
         permissions: string[];
         status: 'active' | 'suspended';
         location?: string;
+        cashierLocations?: string[];
         cashierMonthlySalary?: number;
         cashierMonthlyTarget?: number;
         cashierTargetBonus?: number;
@@ -28,6 +29,7 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
         password: '',
         permissions: [],
         location: '',
+        cashierLocations: [] as string[],
         cashierMonthlySalary: '',
         cashierMonthlyTarget: '',
         cashierTargetBonus: '',
@@ -42,13 +44,14 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
                 username: role.username,
                 password: '', // Password is not edited here for security, can be a separate feature
                 permissions: [...role.permissions],
-                location: role.location || '',
+                location: role.cashierLocations?.[0] || role.location || '',
+                cashierLocations: role.cashierLocations?.length ? [...role.cashierLocations].slice(0, 2) : (role.location ? [role.location] : []),
                 cashierMonthlySalary: String(role.cashierMonthlySalary || ''),
                 cashierMonthlyTarget: String(role.cashierMonthlyTarget || ''),
                 cashierTargetBonus: String(role.cashierTargetBonus || ''),
             });
         } else {
-            setFormData({ name: '', username: '', password: '', permissions: [], location: '', cashierMonthlySalary: '', cashierMonthlyTarget: '', cashierTargetBonus: '' });
+            setFormData({ name: '', username: '', password: '', permissions: [], location: '', cashierLocations: [], cashierMonthlySalary: '', cashierMonthlyTarget: '', cashierTargetBonus: '' });
         }
     }, [role, isOpen]);
 
@@ -84,7 +87,7 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
             setError('Select at least one permission.');
             return;
         }
-        if (formData.permissions.includes('cashier') && !formData.location.trim()) {
+        if (formData.permissions.includes('cashier') && !formData.cashierLocations.some(city => city.trim())) {
             setError('Cashier city/location is required.');
             return;
         }
@@ -166,9 +169,12 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
                     </div>
                     {formData.permissions.includes('cashier') && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-400">Cashier City / Location</label>
-                            <p className="mt-1 text-xs text-gray-500">Only unlinked player requests from this city will be assigned to this cashier.</p>
-                            <LocationPicker value={formData.location} onChange={(location) => setFormData(prev => ({ ...prev, location }))} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-2" />
+                            <label className="block text-sm font-medium text-gray-400">Cashier Cities / Locations</label>
+                            <p className="mt-1 text-xs text-gray-500">Choose one required city and an optional second city. The cashier receives unlinked requests from either city.</p>
+                            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <div><span className="text-xs text-gray-400">Primary city</span><LocationPicker clearOnInput={false} value={formData.cashierLocations[0] || ''} onChange={(location) => setFormData(prev => ({ ...prev, location, cashierLocations: [location, prev.cashierLocations[1] || ''].filter(Boolean) }))} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1" /></div>
+                                <div><span className="flex items-center justify-between text-xs text-gray-400">Second city (optional){formData.cashierLocations[1] && <button type="button" onClick={() => setFormData(prev => ({ ...prev, cashierLocations: [prev.cashierLocations[0]].filter(Boolean) }))} className="text-red-400 hover:text-red-300">Clear</button>}</span><LocationPicker clearOnInput={false} value={formData.cashierLocations[1] || ''} onChange={(location) => setFormData(prev => ({ ...prev, cashierLocations: [prev.cashierLocations[0] || '', location].filter(Boolean) }))} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1" /></div>
+                            </div>
                             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                                 <label className="text-xs text-gray-400">Monthly Salary ($)<input type="number" min="0" step="0.01" value={formData.cashierMonthlySalary} onChange={(e) => setFormData(prev => ({ ...prev, cashierMonthlySalary: e.target.value }))} className="mt-1 w-full rounded bg-gray-700 px-3 py-2 text-white" /></label>
                                 <label className="text-xs text-gray-400">Approved Target<input type="number" min="0" step="1" value={formData.cashierMonthlyTarget} onChange={(e) => setFormData(prev => ({ ...prev, cashierMonthlyTarget: e.target.value }))} className="mt-1 w-full rounded bg-gray-700 px-3 py-2 text-white" /></label>

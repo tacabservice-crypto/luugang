@@ -835,6 +835,12 @@ function normalizedCity(location: unknown): string {
   return aliases[city] || city;
 }
 
+function cashierCities(admin: { location?: string; cashierLocations?: string[] }): string[] {
+  return [...new Set([...(Array.isArray(admin.cashierLocations) ? admin.cashierLocations : []), admin.location]
+    .map(normalizedCity)
+    .filter(Boolean))].slice(0, 2);
+}
+
 async function assignCashierToRequest(request: ManualTransactionRequest, now = Date.now()): Promise<boolean> {
   if (!db || request.managedBy === 'agent' || request.status !== 'pending') return false;
   const user = store.users[request.userId];
@@ -850,7 +856,7 @@ async function assignCashierToRequest(request: ManualTransactionRequest, now = D
     .map(doc => ({ id: doc.id, ...doc.data() } as any))
     .filter(admin => admin.status !== 'suspended'
       && normalizeAdminPermissions(admin.permissions).includes('cashier')
-      && normalizedCity(admin.location) === city
+      && cashierCities(admin).includes(city)
       && Number(admin.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS);
 
   if (eligible.length === 0) {
@@ -4502,6 +4508,7 @@ interface AdminUser {
     name?: string;
     status?: 'active' | 'suspended';
     location?: string;
+    cashierLocations?: string[];
     cashierOnlineAt?: number;
     cashierMonthlySalary?: number;
     cashierMonthlyTarget?: number;
@@ -4609,11 +4616,11 @@ app.post('/api/admin/cashier/heartbeat', hasPermission('cashier'), async (req, r
   const ref = db.collection('adminUsers').doc(adminId);
   const snapshot = await ref.get();
   const admin = snapshot.data() as AdminUser;
-  if (!normalizedCity(admin?.location)) return res.status(400).json({ error: 'Cashier city is not configured.' });
+  if (cashierCities(admin || {}).length === 0) return res.status(400).json({ error: 'Cashier city is not configured.' });
   const cashierOnlineAt = Date.now();
   await ref.update({ cashierOnlineAt });
   await reassignExpiredCashierRequests(cashierOnlineAt);
-  res.json({ success: true, cashierOnlineAt, location: admin.location });
+  res.json({ success: true, cashierOnlineAt, locations: cashierCities(admin) });
 });
 
 // Endpoint to create a new admin user. Only accessible by a root admin with 'all' permission.
@@ -4961,7 +4968,7 @@ app.post('/api/admin/settings', isAdmin, async (req, res) => {
 
 app.post('/api/admin/roles/create', hasPermission('all'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
-    const { username, password, permissions, name, location, cashierMonthlySalary, cashierMonthlyTarget, cashierTargetBonus } = req.body;
+    const { username, password, permissions, name, location, cashierLocations, cashierMonthlySalary, cashierMonthlyTarget, cashierTargetBonus } = req.body;
 
     const normalizedPermissions = normalizeAdminPermissions(permissions);
     if (!username || !password || !Array.isArray(permissions) || !name) {
@@ -4973,7 +4980,8 @@ app.post('/api/admin/roles/create', hasPermission('all'), async (req, res) => {
     if (normalizedPermissions.length === 0) {
         return res.status(400).json({ error: 'Select at least one valid permission.' });
     }
-    if (normalizedPermissions.includes('cashier') && !normalizedCity(location)) {
+    const submittedCashierLocations = [...new Set([...(Array.isArray(cashierLocations) ? cashierLocations : []), location].map((item: unknown) => String(item || '').trim()).filter(Boolean))].slice(0, 2);
+    if (normalizedPermissions.includes('cashier') && submittedCashierLocations.length === 0) {
         return res.status(400).json({ error: 'Cashier location/city is required.' });
     }
 
@@ -4992,7 +5000,8 @@ app.post('/api/admin/roles/create', hasPermission('all'), async (req, res) => {
             permissions: normalizedPermissions,
             name: String(name).trim(),
             status: 'active',
-            location: normalizedPermissions.includes('cashier') ? String(location).trim() : '',
+            location: normalizedPermissions.includes('cashier') ? submittedCashierLocations[0] : '',
+            cashierLocations: normalizedPermissions.includes('cashier') ? submittedCashierLocations : [],
             cashierMonthlySalary: normalizedPermissions.includes('cashier') ? Math.max(0, Number(cashierMonthlySalary || 0)) : 0,
             cashierMonthlyTarget: normalizedPermissions.includes('cashier') ? Math.max(0, Math.floor(Number(cashierMonthlyTarget || 0))) : 0,
             cashierTargetBonus: normalizedPermissions.includes('cashier') ? Math.max(0, Number(cashierTargetBonus || 0)) : 0,
@@ -5050,10 +5059,12 @@ app.post('/api/admin/roles/:roleId/update', hasPermission('all'), async (req, re
             updatedData.permissions = normalizedPermissions;
         }
         const effectivePermissions = updatedData.permissions || normalizeAdminPermissions(adminData.permissions);
-        if (effectivePermissions.includes('cashier') && !normalizedCity(updatedData.location ?? adminData.location)) {
+        const effectiveCashierLocations = [...new Set([...(Array.isArray(updatedData.cashierLocations) ? updatedData.cashierLocations : (adminData.cashierLocations || [])), updatedData.location ?? adminData.location].map((item: unknown) => String(item || '').trim()).filter(Boolean))].slice(0, 2);
+        if (effectivePermissions.includes('cashier') && effectiveCashierLocations.length === 0) {
             return res.status(400).json({ error: 'Cashier location/city is required.' });
         }
-        updatedData.location = effectivePermissions.includes('cashier') ? String(updatedData.location ?? adminData.location).trim() : '';
+        updatedData.location = effectivePermissions.includes('cashier') ? effectiveCashierLocations[0] : '';
+        updatedData.cashierLocations = effectivePermissions.includes('cashier') ? effectiveCashierLocations : [];
         for (const field of ['cashierMonthlySalary', 'cashierTargetBonus']) {
             if (updatedData[field] !== undefined) updatedData[field] = Math.max(0, Number(updatedData[field]) || 0);
         }
@@ -5351,6 +5362,7 @@ app.get('/api/admin/cashiers', hasPermission('settings'), async (_req, res) => {
         username: cashier.username,
         name: cashier.name,
         location: cashier.location,
+        locations: cashierCities(cashier),
         status: cashier.status || 'active',
         online: cashier.status !== 'suspended' && Number(cashier.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS,
         lastSeenAt: Number(cashier.cashierOnlineAt || 0),
@@ -5438,8 +5450,8 @@ app.post('/api/admin/ad-settings', hasPermission('settings'), async (req, res) =
   const value = req.body || {};
   const formats = ['banner', 'ticker', 'popup', 'adsense'];
   const placements = ['all', 'dashboard', 'game'];
-  const durationSeconds = Number(value.durationSeconds) === 2 ? 2 : 3;
-  const intervalSeconds = Math.max(10, Math.min(3600, Number(value.intervalSeconds) || 60));
+  const durationSeconds = Math.max(1, Math.min(180, Math.round(Number(value.durationSeconds) || 3)));
+  const intervalSeconds = Math.max(10, durationSeconds, Math.min(3600, Math.round(Number(value.intervalSeconds) || 60)));
   if (!formats.includes(value.format) || !placements.includes(value.placement)) return res.status(400).json({ error: 'Invalid ad format or placement.' });
   if (value.enabled && value.format !== 'adsense' && !String(value.title || value.message || value.imageUrl || '').trim()) return res.status(400).json({ error: 'Add ad text or an image before enabling the campaign.' });
   store.adSettings = { ...DEFAULT_AD_SETTINGS, ...value, durationSeconds, intervalSeconds, updatedAt: Date.now() };

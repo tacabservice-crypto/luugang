@@ -94,7 +94,7 @@ const Settings = ({
       <div className="mt-6">
         {settingsView === 'ads' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Ads & Live Notices</h3><p className="text-sm text-gray-500">Show a short top campaign to players for 2–3 seconds.</p></div><button onClick={async()=>{try{await onSaveAdSettings(editableAdSettings);showNotification('success','Ad settings saved.');}catch(error:any){showNotification('error',userErrorMessage(error,'Ad settings could not be saved.'));}}} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white">Save Campaign</button></div>
+            <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Ads & Live Notices</h3><p className="text-sm text-gray-500">Choose any display time from 1 second up to 3 minutes.</p></div><button onClick={async()=>{try{await onSaveAdSettings(editableAdSettings);showNotification('success','Ad settings saved.');}catch(error:any){showNotification('error',userErrorMessage(error,'Ad settings could not be saved.'));}}} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white">Save Campaign</button></div>
             <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={!!editableAdSettings.enabled} onChange={e=>setEditableAdSettings({...editableAdSettings,enabled:e.target.checked})}/> Campaign enabled</label>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-sm">Format<select value={editableAdSettings.format} onChange={e=>setEditableAdSettings({...editableAdSettings,format:e.target.value})} className="mt-1 w-full rounded border p-2"><option value="banner">Banner</option><option value="ticker">Ticker</option><option value="popup">Popup</option><option value="adsense">AdSense</option></select></label>
@@ -104,8 +104,8 @@ const Settings = ({
               <label className="text-sm sm:col-span-2">Message<textarea value={editableAdSettings.message||''} onChange={e=>setEditableAdSettings({...editableAdSettings,message:e.target.value})} className="mt-1 w-full rounded border p-2" rows={3}/></label>
               <label className="text-sm">Image URL<input value={editableAdSettings.imageUrl||''} onChange={e=>setEditableAdSettings({...editableAdSettings,imageUrl:e.target.value})} className="mt-1 w-full rounded border p-2"/></label>
               <label className="text-sm">Click URL<input value={editableAdSettings.linkUrl||''} onChange={e=>setEditableAdSettings({...editableAdSettings,linkUrl:e.target.value})} className="mt-1 w-full rounded border p-2"/></label>
-              <label className="text-sm">Display seconds<select value={editableAdSettings.durationSeconds} onChange={e=>setEditableAdSettings({...editableAdSettings,durationSeconds:Number(e.target.value)})} className="mt-1 w-full rounded border p-2"><option value={2}>2 seconds</option><option value={3}>3 seconds</option></select></label>
-              <label className="text-sm">Repeat every seconds<input type="number" min="10" value={editableAdSettings.intervalSeconds} onChange={e=>setEditableAdSettings({...editableAdSettings,intervalSeconds:Number(e.target.value)})} className="mt-1 w-full rounded border p-2"/></label>
+              <label className="text-sm">Display seconds (1–180)<input type="number" min="1" max="180" step="1" value={editableAdSettings.durationSeconds} onChange={e=>setEditableAdSettings({...editableAdSettings,durationSeconds:Number(e.target.value)})} className="mt-1 w-full rounded border p-2"/><span className="mt-1 block text-xs text-gray-500">Examples: 30 = 30 seconds, 60 = 1 minute, 180 = 3 minutes.</span></label>
+              <label className="text-sm">Repeat every seconds<input type="number" min="10" max="3600" value={editableAdSettings.intervalSeconds} onChange={e=>setEditableAdSettings({...editableAdSettings,intervalSeconds:Number(e.target.value)})} className="mt-1 w-full rounded border p-2"/><span className="mt-1 block text-xs text-gray-500">If shorter than display time, it is automatically raised to prevent overlap.</span></label>
               {editableAdSettings.format==='adsense'&&<><label className="text-sm">AdSense client<input value={editableAdSettings.adsenseClient||''} onChange={e=>setEditableAdSettings({...editableAdSettings,adsenseClient:e.target.value})} className="mt-1 w-full rounded border p-2"/></label><label className="text-sm">AdSense slot<input value={editableAdSettings.adsenseSlot||''} onChange={e=>setEditableAdSettings({...editableAdSettings,adsenseSlot:e.target.value})} className="mt-1 w-full rounded border p-2"/></label></>}
             </div>
           </div>
@@ -299,7 +299,7 @@ const Settings = ({
                           {role.permissions.map((p:string) => <span key={p} className="px-2 py-1 bg-gray-200 text-gray-800 rounded-full text-xs">{p}</span>)}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{role.permissions?.includes('cashier') ? (role.location || 'Not set') : '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{role.permissions?.includes('cashier') ? ((role.cashierLocations?.length ? role.cashierLocations : [role.location]).filter(Boolean).join(' / ') || 'Not set') : '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${role.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                           {role.status}

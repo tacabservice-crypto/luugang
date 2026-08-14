@@ -14,7 +14,8 @@ export default function LiveAdBanner({ placement }: { placement: 'dashboard' | '
   useEffect(() => {
     if (!ad?.enabled || (ad.placement !== 'all' && ad.placement !== placement)) return;
     let hideTimer: ReturnType<typeof setTimeout>;
-    const show = () => { setVisible(true); hideTimer = setTimeout(() => setVisible(false), (ad.durationSeconds || 3) * 1000); };
+    const durationSeconds = Math.max(1, Math.min(180, Number(ad.durationSeconds) || 3));
+    const show = () => { clearTimeout(hideTimer); setVisible(true); hideTimer = setTimeout(() => setVisible(false), durationSeconds * 1000); };
     show(); const interval = setInterval(show, Math.max(10, ad.intervalSeconds || 60) * 1000);
     return () => { clearInterval(interval); clearTimeout(hideTimer); };
   }, [ad, placement]);

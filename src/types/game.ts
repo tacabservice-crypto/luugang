@@ -240,7 +240,7 @@ export interface PlatformAdSettings {
   message: string;
   imageUrl?: string;
   linkUrl?: string;
-  durationSeconds: 2 | 3;
+  durationSeconds: number;
   intervalSeconds: number;
   adsenseClient?: string;
   adsenseSlot?: string;
