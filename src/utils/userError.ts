@@ -11,7 +11,7 @@ const ERROR_MESSAGES: Array<[RegExp, string]> = [
   [/auth\/account-exists-with-different-credential/i, 'This email uses a different sign-in method.'],
   [/operation-not-allowed/i, 'This sign-in method is currently unavailable.'],
   [/phone sign-in is currently disabled/i, 'Phone sign-in is currently unavailable.'],
-  [/auth\/invalid-phone-number|invalid phone/i, 'Enter a valid phone number with its international country code.'],
+  [/auth\/invalid-phone-number|invalid phone/i, 'Check the selected country and enter the complete phone number.'],
   [/auth\/invalid-verification-code|invalid.*sms.*code/i, 'The SMS verification code is incorrect.'],
   [/auth\/code-expired/i, 'The SMS code has expired. Request a new one.'],
   [/auth\/too-many-requests/i, 'Too many attempts. Please wait and try again later.'],

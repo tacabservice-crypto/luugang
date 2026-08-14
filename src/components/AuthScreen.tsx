@@ -33,23 +33,25 @@ const COUNTRY_CALLING_CODES: Record<string, string> = {
   IN: '+91', PK: '+92', BD: '+880', CN: '+86', JP: '+81', AU: '+61', NZ: '+64', ZA: '+27',
 };
 
-const SOMALI_MOBILE_PREFIXES = ['61', '62', '63', '65', '66', '67', '68', '69', '77', '90'];
+const COUNTRY_OPTIONS = [
+  ['SO', 'Somalia'], ['KE', 'Kenya'], ['ET', 'Ethiopia'], ['DJ', 'Djibouti'], ['UG', 'Uganda'],
+  ['TZ', 'Tanzania'], ['RW', 'Rwanda'], ['GB', 'United Kingdom'], ['US', 'United States'],
+  ['CA', 'Canada'], ['SE', 'Sweden'], ['NO', 'Norway'], ['DK', 'Denmark'], ['FI', 'Finland'],
+  ['DE', 'Germany'], ['NL', 'Netherlands'], ['BE', 'Belgium'], ['FR', 'France'], ['IT', 'Italy'],
+  ['ES', 'Spain'], ['CH', 'Switzerland'], ['AT', 'Austria'], ['IE', 'Ireland'], ['AE', 'UAE'],
+  ['SA', 'Saudi Arabia'], ['QA', 'Qatar'], ['OM', 'Oman'], ['KW', 'Kuwait'], ['BH', 'Bahrain'],
+  ['TR', 'Turkey'], ['IN', 'India'], ['PK', 'Pakistan'], ['BD', 'Bangladesh'], ['CN', 'China'],
+  ['JP', 'Japan'], ['AU', 'Australia'], ['NZ', 'New Zealand'], ['ZA', 'South Africa'],
+] as const;
 
-function browserCallingCode(): { region: string; code: string } {
-  try {
-    const region = new Intl.Locale(navigator.language).region?.toUpperCase() || 'SO';
-    return { region, code: COUNTRY_CALLING_CODES[region] || '+252' };
-  } catch {
-    return { region: 'SO', code: '+252' };
-  }
-}
+const SOMALI_MOBILE_PREFIXES = ['61', '62', '63', '65', '66', '67', '68', '69', '77', '90'];
 
 function normalizePhoneNumber(value: string, callingCode: string): string {
   const compact = value.trim().replace(/[\s()-]/g, '');
   if (compact.startsWith('+')) return `+${compact.slice(1).replace(/\D/g, '')}`;
   if (compact.startsWith('00')) return `+${compact.slice(2).replace(/\D/g, '')}`;
   const digits = compact.replace(/\D/g, '').replace(/^0+/, '');
-  if (SOMALI_MOBILE_PREFIXES.some(prefix => digits.startsWith(prefix))) return `+252${digits}`;
+  if (callingCode === '+252' && SOMALI_MOBILE_PREFIXES.some(prefix => digits.startsWith(prefix))) return `+252${digits}`;
   const countryDigits = callingCode.slice(1);
   if (digits.startsWith(countryDigits)) return `+${digits}`;
   return `${callingCode}${digits}`;
@@ -86,7 +88,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [promoStep, setPromoStep] = useState(false);
   const [existingAgentLink, setExistingAgentLink] = useState(false);
   const [phoneAuthEnabled, setPhoneAuthEnabled] = useState(true);
-  const [{ region: detectedRegion, code: detectedCallingCode }] = useState(browserCallingCode);
+  const [selectedCountry, setSelectedCountry] = useState('SO');
+  const selectedCallingCode = COUNTRY_CALLING_CODES[selectedCountry] || '+252';
   const [phone, setPhone] = useState('');
   const [smsCode, setSmsCode] = useState('');
   const [phoneVerificationPending, setPhoneVerificationPending] = useState(false);
@@ -170,9 +173,9 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setError('Phone sign-in is currently unavailable. Please use your email.');
         return;
       }
-      const normalizedPhone = normalizePhoneNumber(cleanIdentifier, detectedCallingCode);
+      const normalizedPhone = normalizePhoneNumber(cleanIdentifier, selectedCallingCode);
       if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
-        setError(`Enter a valid phone number. Local numbers automatically use ${detectedCallingCode}.`);
+        setError(`Enter a valid phone number. The selected country code is ${selectedCallingCode}.`);
         return;
       }
       if (!isLogin && !username.trim()) {
@@ -200,7 +203,9 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setSuccessMessage(`SMS code ayaa loo diray ${normalizedPhone}.`);
       } catch (err: any) {
         recaptchaRef.current?.clear(); recaptchaRef.current = null;
-        setError(userErrorMessage(err, 'SMS code could not be sent. Check the phone number and try again.'));
+        setError(/operation-not-allowed/i.test(String(err?.code || err?.message || ''))
+          ? 'Phone login has not been enabled in Firebase yet.'
+          : userErrorMessage(err, 'SMS code could not be sent. Check the phone number and try again.'));
       } finally { setLoading(false); }
       return;
     }
@@ -537,16 +542,30 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Mail className="w-3 h-3 text-slate-500" /><Phone className="w-3 h-3 text-slate-500" /> Email or Phone Number
               </label>
-              <input
-                type="text"
-                required
-                placeholder={phoneAuthEnabled ? 'you@example.com or 61XXXXXXX' : 'you@example.com'}
-                value={identifier}
-                onChange={(e) => { setIdentifier(e.target.value); setError(''); }}
-                autoComplete="username"
-                className="w-full bg-black/30 border border-white/10 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all"
-              />
-              {phoneAuthEnabled && !identifier.includes('@') && <p className="text-[10px] text-slate-500">Somalia: write 61XXXXXXX, 63XXXXXXX or 90XXXXXXX without +252. Other local numbers use {detectedCallingCode} ({detectedRegion}); international numbers may start with +.</p>}
+              <div className="flex overflow-hidden rounded-xl border border-white/10 bg-black/30 transition-all focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400">
+                {phoneAuthEnabled && (
+                  <select
+                    value={selectedCountry}
+                    onChange={e => { setSelectedCountry(e.target.value); setError(''); }}
+                    aria-label="Phone country"
+                    className="w-[108px] shrink-0 border-r border-white/10 bg-slate-950 px-2 text-xs font-bold text-white outline-none sm:w-[126px]"
+                  >
+                    {COUNTRY_OPTIONS.map(([region, name]) => <option key={region} value={region}>{name} {COUNTRY_CALLING_CODES[region]}</option>)}
+                  </select>
+                )}
+                <input
+                  type="text"
+                  required
+                  placeholder={phoneAuthEnabled ? 'Email or phone' : 'Email address'}
+                  value={identifier}
+                  onChange={(e) => { setIdentifier(e.target.value); setError(''); }}
+                  autoComplete="username"
+                  className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-white outline-none placeholder-slate-500"
+                />
+              </div>
+              {phoneAuthEnabled && identifier.trim() && !identifier.includes('@') && (
+                <p className="px-1 text-[11px] font-medium text-emerald-300">SMS → {normalizePhoneNumber(identifier, selectedCallingCode)}</p>
+              )}
           </div>
 
           {(identifier.length === 0 || identifier.includes('@')) && <div className="space-y-1">
