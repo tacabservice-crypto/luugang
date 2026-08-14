@@ -33,6 +33,8 @@ const COUNTRY_CALLING_CODES: Record<string, string> = {
   IN: '+91', PK: '+92', BD: '+880', CN: '+86', JP: '+81', AU: '+61', NZ: '+64', ZA: '+27',
 };
 
+const SOMALI_MOBILE_PREFIXES = ['61', '62', '63', '65', '66', '67', '68', '69', '77', '90'];
+
 function browserCallingCode(): { region: string; code: string } {
   try {
     const region = new Intl.Locale(navigator.language).region?.toUpperCase() || 'SO';
@@ -47,6 +49,7 @@ function normalizePhoneNumber(value: string, callingCode: string): string {
   if (compact.startsWith('+')) return `+${compact.slice(1).replace(/\D/g, '')}`;
   if (compact.startsWith('00')) return `+${compact.slice(2).replace(/\D/g, '')}`;
   const digits = compact.replace(/\D/g, '').replace(/^0+/, '');
+  if (SOMALI_MOBILE_PREFIXES.some(prefix => digits.startsWith(prefix))) return `+252${digits}`;
   const countryDigits = callingCode.slice(1);
   if (digits.startsWith(countryDigits)) return `+${digits}`;
   return `${callingCode}${digits}`;
@@ -186,7 +189,10 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           throw new Error('Phone sign-in is currently disabled.');
         }
         recaptchaRef.current?.clear();
-        recaptchaRef.current = new RecaptchaVerifier(auth, 'phone-recaptcha-container', { size: 'invisible' });
+        recaptchaRef.current = new RecaptchaVerifier(auth, 'phone-recaptcha-container', {
+          size: 'invisible',
+          badge: 'inline',
+        });
         const confirmation = await signInWithPhoneNumber(auth, normalizedPhone, recaptchaRef.current);
         setPhone(normalizedPhone);
         setPhoneConfirmation(confirmation);
@@ -434,7 +440,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-center p-4 selection:bg-purple-500 selection:text-white relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-center p-4 selection:bg-purple-500 selection:text-white relative overflow-x-hidden">
       <div className="absolute top-4 right-4 z-20">
         <LanguageToggle />
       </div>
@@ -540,7 +546,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                 autoComplete="username"
                 className="w-full bg-black/30 border border-white/10 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all"
               />
-              {phoneAuthEnabled && !identifier.includes('@') && <p className="text-[10px] text-slate-500">Local prefix: {detectedCallingCode} ({detectedRegion}). Write 61XXXXXXX, 63XXXXXXX or 90XXXXXXX; for another country, start with + and its country code.</p>}
+              {phoneAuthEnabled && !identifier.includes('@') && <p className="text-[10px] text-slate-500">Somalia: write 61XXXXXXX, 63XXXXXXX or 90XXXXXXX without +252. Other local numbers use {detectedCallingCode} ({detectedRegion}); international numbers may start with +.</p>}
           </div>
 
           {(identifier.length === 0 || identifier.includes('@')) && <div className="space-y-1">
@@ -600,7 +606,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </button>
         </form>}
 
-        <div id="phone-recaptcha-container" />
+        <div id="phone-recaptcha-container" className="flex items-center justify-center overflow-visible [&>div]:mx-auto" />
 
         <div className="flex items-center gap-3"><div className="h-px flex-1 bg-white/10" /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">or</span><div className="h-px flex-1 bg-white/10" /></div>
         <button type="button" onClick={handleGoogleSignIn} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white px-4 py-3 text-sm font-extrabold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50">
