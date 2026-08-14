@@ -9,6 +9,7 @@ const Settings = ({
     paymentSettings, 
     onSavePaymentSettings, 
     onSaveVipTiers,
+    onSaveAdSettings,
     onCreateRole,
     onDeleteRole,
     onUpdateRole,
@@ -20,6 +21,7 @@ const Settings = ({
   const [settingsView, setSettingsView] = useState('roles');
   const [editablePaymentSettings, setEditablePaymentSettings] = useState(paymentSettings);
   const [editableVipTiers, setEditableVipTiers] = useState(adminSettings?.vipTiers || {});
+  const [editableAdSettings, setEditableAdSettings] = useState(adminSettings?.adSettings || { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' });
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   useEffect(() => {
@@ -27,6 +29,7 @@ const Settings = ({
   }, [paymentSettings]);
 
   useEffect(() => setEditableVipTiers(adminSettings?.vipTiers || {}), [adminSettings?.vipTiers]);
+  useEffect(() => { if (adminSettings?.adSettings) setEditableAdSettings(adminSettings.adSettings); }, [adminSettings?.adSettings]);
 
   const updateVipTier = (key, field, value) => setEditableVipTiers(current => ({ ...current, [key]: { ...current[key], [field]: value } }));
 
@@ -75,6 +78,7 @@ const Settings = ({
           <button onClick={() => setSettingsView('vip')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'vip' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             VIP Plans
           </button>
+          <button onClick={() => setSettingsView('ads')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'ads' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Ads & Notices</button>
           <button onClick={() => setSettingsView('admin')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'admin' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             Admin Management
           </button>
@@ -88,6 +92,24 @@ const Settings = ({
         )}
 
       <div className="mt-6">
+        {settingsView === 'ads' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Ads & Live Notices</h3><p className="text-sm text-gray-500">Show a short top campaign to players for 2–3 seconds.</p></div><button onClick={async()=>{try{await onSaveAdSettings(editableAdSettings);showNotification('success','Ad settings saved.');}catch(error:any){showNotification('error',userErrorMessage(error,'Ad settings could not be saved.'));}}} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white">Save Campaign</button></div>
+            <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={!!editableAdSettings.enabled} onChange={e=>setEditableAdSettings({...editableAdSettings,enabled:e.target.checked})}/> Campaign enabled</label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="text-sm">Format<select value={editableAdSettings.format} onChange={e=>setEditableAdSettings({...editableAdSettings,format:e.target.value})} className="mt-1 w-full rounded border p-2"><option value="banner">Banner</option><option value="ticker">Ticker</option><option value="popup">Popup</option><option value="adsense">AdSense</option></select></label>
+              <label className="text-sm">Placement<select value={editableAdSettings.placement} onChange={e=>setEditableAdSettings({...editableAdSettings,placement:e.target.value})} className="mt-1 w-full rounded border p-2"><option value="all">Dashboard & games</option><option value="dashboard">Dashboard only</option><option value="game">Games only</option></select></label>
+              <label className="text-sm">Company<input value={editableAdSettings.companyName||''} onChange={e=>setEditableAdSettings({...editableAdSettings,companyName:e.target.value})} className="mt-1 w-full rounded border p-2"/></label>
+              <label className="text-sm">Title<input value={editableAdSettings.title||''} onChange={e=>setEditableAdSettings({...editableAdSettings,title:e.target.value})} className="mt-1 w-full rounded border p-2"/></label>
+              <label className="text-sm sm:col-span-2">Message<textarea value={editableAdSettings.message||''} onChange={e=>setEditableAdSettings({...editableAdSettings,message:e.target.value})} className="mt-1 w-full rounded border p-2" rows={3}/></label>
+              <label className="text-sm">Image URL<input value={editableAdSettings.imageUrl||''} onChange={e=>setEditableAdSettings({...editableAdSettings,imageUrl:e.target.value})} className="mt-1 w-full rounded border p-2"/></label>
+              <label className="text-sm">Click URL<input value={editableAdSettings.linkUrl||''} onChange={e=>setEditableAdSettings({...editableAdSettings,linkUrl:e.target.value})} className="mt-1 w-full rounded border p-2"/></label>
+              <label className="text-sm">Display seconds<select value={editableAdSettings.durationSeconds} onChange={e=>setEditableAdSettings({...editableAdSettings,durationSeconds:Number(e.target.value)})} className="mt-1 w-full rounded border p-2"><option value={2}>2 seconds</option><option value={3}>3 seconds</option></select></label>
+              <label className="text-sm">Repeat every seconds<input type="number" min="10" value={editableAdSettings.intervalSeconds} onChange={e=>setEditableAdSettings({...editableAdSettings,intervalSeconds:Number(e.target.value)})} className="mt-1 w-full rounded border p-2"/></label>
+              {editableAdSettings.format==='adsense'&&<><label className="text-sm">AdSense client<input value={editableAdSettings.adsenseClient||''} onChange={e=>setEditableAdSettings({...editableAdSettings,adsenseClient:e.target.value})} className="mt-1 w-full rounded border p-2"/></label><label className="text-sm">AdSense slot<input value={editableAdSettings.adsenseSlot||''} onChange={e=>setEditableAdSettings({...editableAdSettings,adsenseSlot:e.target.value})} className="mt-1 w-full rounded border p-2"/></label></>}
+            </div>
+          </div>
+        )}
         {settingsView === 'vip' && (
           <div>
             <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -252,6 +274,7 @@ const Settings = ({
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Permissions</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -276,6 +299,7 @@ const Settings = ({
                           {role.permissions.map((p:string) => <span key={p} className="px-2 py-1 bg-gray-200 text-gray-800 rounded-full text-xs">{p}</span>)}
                         </div>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{role.permissions?.includes('cashier') ? (role.location || 'Not set') : '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${role.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                           {role.status}

@@ -86,6 +86,7 @@ const Tournaments: React.FC = () => {
 
     eventSource.addEventListener('tournament_update', handleTournamentEvent);
     eventSource.addEventListener('tournament_started', handleTournamentEvent);
+    eventSource.addEventListener('tournament_check_in', handleTournamentEvent);
     eventSource.addEventListener('tournament_ended', handleTournamentEvent);
 
     return () => {
@@ -168,6 +169,16 @@ const Tournaments: React.FC = () => {
     }
   };
 
+  const handleCheckIn = async (tournamentId: string) => {
+    if (!user?.idToken) return;
+    setActionLoadingId(tournamentId);
+    try {
+      const response = await fetch(`/api/tournaments/${tournamentId}/check-in`, { method: 'POST', headers: { Authorization: `Bearer ${user.idToken}` } });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Check-in failed.');
+      setMessage(data.message); await fetchTournaments();
+    } catch (err:any) { setError(userErrorMessage(err, 'Tournament check-in failed.')); } finally { setActionLoadingId(null); }
+  };
+
   // Filter logic
   const filteredTournaments = useMemo(() => {
     return tournaments.filter((t) => {
@@ -177,7 +188,7 @@ const Tournaments: React.FC = () => {
       }
       // Tab filter
       if (filterTab === 'open') return t.status === 'registration_open';
-      if (filterTab === 'live') return t.status === 'in_progress';
+      if (filterTab === 'live') return t.status === 'in_progress' || t.status === 'check_in';
       if (filterTab === 'completed') return t.status === 'completed';
       if (filterTab === 'my') return user && t.players?.some((p) => p.userId === user.id);
       return true;
@@ -188,6 +199,7 @@ const Tournaments: React.FC = () => {
   const featuredTournament = useMemo(() => {
     return (
       tournaments.find((t) => t.status === 'registration_open') ||
+      tournaments.find((t) => t.status === 'check_in') ||
       tournaments.find((t) => t.status === 'in_progress') ||
       tournaments[0]
     );
@@ -579,7 +591,9 @@ const Tournaments: React.FC = () => {
 
                     {/* Action Button */}
                     <div className="pt-2">
-                      {tournament.status === 'registration_open' ? (
+                      {tournament.status === 'check_in' && isRegistered ? (
+                        tournament.players.find(p=>p.userId===user?.id)?.checkedInAt ? <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/20 py-3 text-center text-xs font-black text-emerald-300">CHECKED IN — READY</div> : <button onClick={(e)=>{e.stopPropagation();handleCheckIn(tournament.id);}} disabled={actionLoadingId===tournament.id} className="w-full rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 py-3 text-xs font-black text-slate-950">CHECK IN NOW</button>
+                      ) : tournament.status === 'registration_open' ? (
                         isRegistered ? (
                           <div className="flex items-center gap-2">
                             <button
@@ -596,7 +610,7 @@ const Tournaments: React.FC = () => {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (confirm(`Unregister from "${tournament.name}"? Entry fee will be refunded.`)) {
+                                if (confirm(`Unregister from "${tournament.name}"? A 10% cancellation fee will be deducted.`)) {
                                   handleUnregister(tournament.id);
                                 }
                               }}

@@ -17,6 +17,10 @@ const EditAgentModal: React.FC<EditAgentModalProps> = ({ agent, onClose, onSave 
     const [location, setLocation] = useState('');
     const [phone, setPhone] = useState('');
     const [promoCode, setPromoCode] = useState('');
+    const [businessModel, setBusinessModel] = useState<'independent' | 'monthly'>('independent');
+    const [monthlySalary, setMonthlySalary] = useState('');
+    const [monthlyTarget, setMonthlyTarget] = useState('');
+    const [dailyTransactionLimit, setDailyTransactionLimit] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -27,6 +31,10 @@ const EditAgentModal: React.FC<EditAgentModalProps> = ({ agent, onClose, onSave 
             setLocation(agent.location || '');
             setPhone(agent.phone || '');
             setPromoCode(agent.promoCode || '');
+            setBusinessModel(agent.businessModel || 'independent');
+            setMonthlySalary(String(agent.monthlySalary || ''));
+            setMonthlyTarget(String(agent.monthlyTarget || ''));
+            setDailyTransactionLimit(String(agent.dailyTransactionLimit || ''));
             setPassword(''); // Don't pre-fill password
         }
     }, [agent]);
@@ -59,6 +67,10 @@ const EditAgentModal: React.FC<EditAgentModalProps> = ({ agent, onClose, onSave 
                 location,
                 phone,
                 promoCode,
+                businessModel,
+                monthlySalary: businessModel === 'monthly' ? Number(monthlySalary || 0) : 0,
+                monthlyTarget: businessModel === 'monthly' ? Number(monthlyTarget || 0) : 0,
+                dailyTransactionLimit: businessModel === 'monthly' ? Number(dailyTransactionLimit || 0) : 0,
             };
             if (password) {
                 dataToSave.password = password;
@@ -99,8 +111,22 @@ const EditAgentModal: React.FC<EditAgentModalProps> = ({ agent, onClose, onSave 
                         <input type="text" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1" />
                     </div>
                     <div>
+                        <label className="block text-sm font-medium text-gray-400">Working Model</label>
+                        <select value={businessModel} onChange={(e) => setBusinessModel(e.target.value as 'independent' | 'monthly')} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1">
+                            <option value="independent">Independent — Float &amp; Commission</option>
+                            <option value="monthly">Monthly Salaried Agent</option>
+                        </select>
+                    </div>
+                    {businessModel === 'monthly' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <input type="number" min="0" value={monthlySalary} onChange={(e) => setMonthlySalary(e.target.value)} placeholder="Monthly salary" className="bg-gray-700 text-white px-3 py-2 rounded" />
+                            <input type="number" min="0" value={monthlyTarget} onChange={(e) => setMonthlyTarget(e.target.value)} placeholder="Monthly target" className="bg-gray-700 text-white px-3 py-2 rounded" />
+                            <input type="number" min="0" value={dailyTransactionLimit} onChange={(e) => setDailyTransactionLimit(e.target.value)} placeholder="Daily limit" className="bg-gray-700 text-white px-3 py-2 rounded" />
+                        </div>
+                    )}
+                    <div>
                         <label className="block text-sm font-medium text-gray-400">Commission Rate (e.g., 0.05 for 5%)</label>
-                        <input type="text" value={commissionRate} onChange={(e) => setCommissionRate(e.target.value)} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1" />
+                        <input type="text" value={commissionRate} onChange={(e) => setCommissionRate(e.target.value)} disabled={businessModel === 'monthly'} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-1 disabled:opacity-50" />
                     </div>
                      <div>
                         <label className="block text-sm font-medium text-gray-400">Location</label>

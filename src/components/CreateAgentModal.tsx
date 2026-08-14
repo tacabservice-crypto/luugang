@@ -5,7 +5,7 @@ import LocationPicker from './LocationPicker';
 interface CreateAgentModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onCreateAgent: (agentData: { username: string, password: string, commissionRate: string, location?: string, phone: string, promoCode?: string }) => Promise<void>;
+    onCreateAgent: (agentData: any) => Promise<void>;
 }
 
 const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, onCreateAgent }) => {
@@ -15,6 +15,10 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
     const [location, setLocation] = useState('');
     const [phone, setPhone] = useState('');
     const [promoCode, setPromoCode] = useState('');
+    const [businessModel, setBusinessModel] = useState<'independent'|'monthly'>('independent');
+    const [monthlySalary, setMonthlySalary] = useState('');
+    const [monthlyTarget, setMonthlyTarget] = useState('');
+    const [dailyTransactionLimit, setDailyTransactionLimit] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -28,7 +32,7 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
         }
         setIsSubmitting(true);
         try {
-            await onCreateAgent({ username, password, commissionRate, location, phone, promoCode });
+            await onCreateAgent({ username, password, commissionRate: businessModel === 'monthly' ? '0' : commissionRate, location, phone, promoCode, businessModel, monthlySalary, monthlyTarget, dailyTransactionLimit });
             onClose();
         } catch (err: any) {
             setError(userErrorMessage(err, 'Agent could not be created.'));
@@ -51,6 +55,8 @@ const CreateAgentModal: React.FC<CreateAgentModalProps> = ({ isOpen, onClose, on
                         className="bg-gray-700 text-white w-full px-4 py-2 rounded"
                         disabled={isSubmitting}
                     />
+                    <select value={businessModel} onChange={e=>setBusinessModel(e.target.value as any)} className="bg-gray-700 text-white w-full px-4 py-2 rounded"><option value="independent">Independent — Float & Commission</option><option value="monthly">Monthly Salaried Agent</option></select>
+                    {businessModel==='monthly' && <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><input type="number" min="0" value={monthlySalary} onChange={e=>setMonthlySalary(e.target.value)} placeholder="Monthly salary" className="bg-gray-700 text-white px-3 py-2 rounded"/><input type="number" min="0" value={monthlyTarget} onChange={e=>setMonthlyTarget(e.target.value)} placeholder="Monthly target" className="bg-gray-700 text-white px-3 py-2 rounded"/><input type="number" min="0" value={dailyTransactionLimit} onChange={e=>setDailyTransactionLimit(e.target.value)} placeholder="Daily limit" className="bg-gray-700 text-white px-3 py-2 rounded"/></div>}
                     <input
                         type="password"
                         value={password}

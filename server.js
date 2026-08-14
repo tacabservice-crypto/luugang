@@ -108,6 +108,9 @@ var BONUS_UNLOCK_DEPOSIT_TOTAL = 5;
 var NORMAL_WITHDRAWAL_FEE_RATE = 0;
 var NO_PLAY_WITHDRAWAL_FEE_RATE = 0.1;
 var MINIMUM_WITHDRAWAL_FEE = 0.1;
+var TOURNAMENT_UNREGISTER_FEE_RATE = 0.1;
+var TOURNAMENT_MAX_POSTPONEMENTS = 2;
+var TOURNAMENT_CHECK_IN_MS = 5 * 60 * 1e3;
 function hashEmailOtp(uid, otp) {
   return crypto.createHash("sha256").update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || "ludosom"}`).digest("hex");
 }
@@ -331,11 +334,12 @@ var DEFAULT_PAYMENT_PROVIDERS = {
   zaad: { enabled: false },
   premier: { enabled: false }
 };
+var DEFAULT_AD_SETTINGS = { enabled: false, format: "banner", placement: "all", companyName: "", title: "", message: "", imageUrl: "", linkUrl: "", durationSeconds: 3, intervalSeconds: 60, adsenseClient: "", adsenseSlot: "" };
 var DEFAULT_ADMIN_ROLES = [
   { id: "admin", name: "Administrator", permissions: ["all"] },
   { id: "editor", name: "Editor", permissions: ["stats", "users", "rooms"] }
 ];
-var ADMIN_PERMISSION_KEYS = ["stats", "users", "rooms", "transactions", "agents", "tournaments", "settings"];
+var ADMIN_PERMISSION_KEYS = ["stats", "users", "rooms", "transactions", "cashier", "agents", "tournaments", "settings"];
 function normalizeAdminPermissions(value) {
   if (!Array.isArray(value)) return [];
   if (value.includes("all")) return ["all"];
@@ -372,7 +376,8 @@ var store = {
   vipTiers: { ...VIP_TIERS },
   agents: {},
   agentTransactions: [],
-  tournaments: {}
+  tournaments: {},
+  adSettings: { ...DEFAULT_AD_SETTINGS }
 };
 function seedDefaultTournaments() {
   const now = Date.now();
@@ -386,7 +391,7 @@ function seedDefaultTournaments() {
       id: `tourney_weekly_${now}_1`,
       name: "Ludo$om Weekly Champion Cup \u{1F3C6}",
       entryFee: 5,
-      prizePool: 100,
+      prizePool: 72,
       status: "registration_open",
       players: [],
       maxPlayers: 16,
@@ -401,7 +406,7 @@ function seedDefaultTournaments() {
       id: `tourney_weekend_${now}_2`,
       name: "Weekend High Stakes Knockout \u26A1",
       entryFee: 10,
-      prizePool: 200,
+      prizePool: 72,
       status: "registration_open",
       players: [],
       maxPlayers: 8,
@@ -416,7 +421,7 @@ function seedDefaultTournaments() {
       id: `tourney_daily_${now}_3`,
       name: "Daily Quick Sprint Tournament \u{1F680}",
       entryFee: 2,
-      prizePool: 30,
+      prizePool: 7.2,
       status: "registration_open",
       players: [],
       maxPlayers: 4,
@@ -457,6 +462,7 @@ function loadStore() {
       store.agentFloatInstructions = parsed.agentFloatInstructions || "";
       store.vipTiers = { ...VIP_TIERS, ...parsed.vipTiers || {} };
       store.tournaments = parsed.tournaments || {};
+      store.adSettings = { ...DEFAULT_AD_SETTINGS, ...parsed.adSettings || {} };
       seedDefaultTournaments();
       const persistedRoles = Array.isArray(parsed.adminSettings?.roles) ? parsed.adminSettings.roles : [];
       store.adminSettings = {
@@ -515,6 +521,7 @@ async function loadStoreFromFirestore() {
         store.agents = parsed.agents || {};
         store.agentTransactions = parsed.agentTransactions || [];
         store.tournaments = parsed.tournaments || {};
+        store.adSettings = { ...DEFAULT_AD_SETTINGS, ...parsed.adSettings || {} };
         console.log("Database loaded successfully from Firebase Firestore.");
         fs.writeFileSync(DB_FILE, payload.data, "utf8");
         await loadUserProfilesFromFirestore();
@@ -535,8 +542,8 @@ async function loadStoreFromFirestore() {
 }
 var persistedUserProfiles = /* @__PURE__ */ new Map();
 var userProfileSyncQueue = Promise.resolve();
-function serializeUserProfile(user2) {
-  return JSON.stringify(user2);
+function serializeUserProfile(user) {
+  return JSON.stringify(user);
 }
 async function loadUserProfilesFromFirestore() {
   if (!db) return;
@@ -551,21 +558,21 @@ async function loadUserProfilesFromFirestore() {
 }
 async function syncUserProfilesToFirestore() {
   if (!db) return;
-  const users = Object.values(store.users).filter((user2) => {
-    if (user2.id.startsWith("user_sim_") || user2.id.startsWith("bot_")) return false;
-    const documentId = user2.firebaseUid || user2.id;
-    return persistedUserProfiles.get(documentId) !== serializeUserProfile(user2);
+  const users = Object.values(store.users).filter((user) => {
+    if (user.id.startsWith("user_sim_") || user.id.startsWith("bot_")) return false;
+    const documentId = user.firebaseUid || user.id;
+    return persistedUserProfiles.get(documentId) !== serializeUserProfile(user);
   });
   for (let offset = 0; offset < users.length; offset += 500) {
     const batch = db.batch();
-    for (const user2 of users.slice(offset, offset + 500)) {
-      const documentId = user2.firebaseUid || user2.id;
-      const cleanProfile = JSON.parse(JSON.stringify(user2));
+    for (const user of users.slice(offset, offset + 500)) {
+      const documentId = user.firebaseUid || user.id;
+      const cleanProfile = JSON.parse(JSON.stringify(user));
       batch.set(db.collection("users").doc(documentId), cleanProfile, { merge: true });
     }
     await batch.commit();
-    for (const user2 of users.slice(offset, offset + 500)) {
-      persistedUserProfiles.set(user2.firebaseUid || user2.id, serializeUserProfile(user2));
+    for (const user of users.slice(offset, offset + 500)) {
+      persistedUserProfiles.set(user.firebaseUid || user.id, serializeUserProfile(user));
     }
   }
 }
@@ -573,12 +580,12 @@ function queueUserProfileSync() {
   userProfileSyncQueue = userProfileSyncQueue.then(() => syncUserProfilesToFirestore()).catch((error) => console.error("Failed to synchronize user profiles to Firestore:", error));
   return userProfileSyncQueue;
 }
-async function saveUserProfileToFirestore(user2) {
+async function saveUserProfileToFirestore(user) {
   if (!db) return;
-  const documentId = user2.firebaseUid || user2.id;
-  const cleanProfile = JSON.parse(JSON.stringify(user2));
+  const documentId = user.firebaseUid || user.id;
+  const cleanProfile = JSON.parse(JSON.stringify(user));
   await db.collection("users").doc(documentId).set(cleanProfile, { merge: true });
-  persistedUserProfiles.set(documentId, serializeUserProfile(user2));
+  persistedUserProfiles.set(documentId, serializeUserProfile(user));
 }
 async function saveManualRequestToFirestore(request) {
   if (!db) throw new Error("Database not initialized");
@@ -601,6 +608,75 @@ async function findManualRequest(requestId) {
   store.pendingManualTransactions.unshift(request);
   return request;
 }
+var CASHIER_ONLINE_WINDOW_MS = 75 * 1e3;
+var CASHIER_ASSIGNMENT_MS = 5 * 60 * 1e3;
+function normalizedCity(location) {
+  const city = String(location || "").split(",")[0].trim().toLocaleLowerCase().replace(/[^a-z0-9\u00c0-\u024f\u0600-\u06ff]+/g, " ").replace(/\s+/g, " ");
+  const aliases = {
+    muqdisho: "mogadishu",
+    xamar: "mogadishu",
+    mogadishu: "mogadishu",
+    hargeysa: "hargeisa",
+    hargeisa: "hargeisa",
+    boosaaso: "bosaso",
+    bosaso: "bosaso",
+    kismaayo: "kismayo",
+    kismayo: "kismayo",
+    baydhabo: "baidoa",
+    baidoa: "baidoa"
+  };
+  return aliases[city] || city;
+}
+async function assignCashierToRequest(request, now = Date.now()) {
+  if (!db || request.managedBy === "agent" || request.status !== "pending") return false;
+  const user = store.users[request.userId];
+  const city = normalizedCity(request.cashierCity || user?.location);
+  request.cashierCity = city;
+  if (!city) return false;
+  if (request.assignedCashierId && Number(request.assignmentExpiresAt || 0) <= now) {
+    request.cashierTimedOutIds = [...request.cashierTimedOutIds || [], request.assignedCashierId];
+  }
+  const snapshot = await db.collection("adminUsers").get();
+  const eligible = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((admin) => admin.status !== "suspended" && normalizeAdminPermissions(admin.permissions).includes("cashier") && normalizedCity(admin.location) === city && Number(admin.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS);
+  if (eligible.length === 0) {
+    request.assignedCashierId = void 0;
+    request.assignedCashierName = void 0;
+    request.assignedCashierAt = void 0;
+    request.assignmentExpiresAt = void 0;
+    await saveManualRequestToFirestore(request);
+    return false;
+  }
+  const history = Array.isArray(request.cashierAssignmentHistory) ? request.cashierAssignmentHistory : [];
+  let candidates = eligible.filter((cashier) => cashier.id !== request.assignedCashierId && !history.includes(cashier.id));
+  let nextHistory = history;
+  if (candidates.length === 0) {
+    candidates = eligible.filter((cashier) => cashier.id !== request.assignedCashierId);
+    if (candidates.length === 0) candidates = eligible;
+    nextHistory = [];
+  }
+  const selected = candidates[crypto.randomInt(candidates.length)];
+  request.assignedCashierId = selected.id;
+  request.assignedCashierName = selected.name || selected.username;
+  request.assignedCashierAt = now;
+  request.assignmentExpiresAt = now + CASHIER_ASSIGNMENT_MS;
+  request.cashierAssignmentHistory = [.../* @__PURE__ */ new Set([...nextHistory, selected.id])];
+  await saveManualRequestToFirestore(request);
+  return true;
+}
+async function reassignExpiredCashierRequests(now = Date.now()) {
+  const requests = store.pendingManualTransactions.filter((request) => request.status === "pending" && request.managedBy !== "agent" && (!request.assignedCashierId || Number(request.assignmentExpiresAt || 0) <= now));
+  for (const request of requests) {
+    try {
+      await assignCashierToRequest(request, now);
+    } catch (error) {
+      console.error(`Cashier assignment failed for ${request.id}:`, error);
+    }
+  }
+}
+var cashierAssignmentTimer = setInterval(() => {
+  void reassignExpiredCashierRequests();
+}, 15 * 1e3);
+cashierAssignmentTimer.unref?.();
 async function findUserProfileInFirestore(firebaseUid, email) {
   if (!db) return null;
   const uidDoc = await db.collection("users").doc(firebaseUid).get();
@@ -721,12 +797,12 @@ function broadcastToRoom(roomId, eventName, data) {
   if (eventName === "game_update" || eventName === "timer_tick") {
     const spectatorClients = activeClients.filter((c) => c.spectatingRoomId === roomId);
     const spectatorsInfo = spectatorClients.map((c) => {
-      const user2 = store.users[c.userId];
-      if (user2) {
+      const user = store.users[c.userId];
+      if (user) {
         return {
-          id: user2.id,
-          username: user2.username,
-          avatar: user2.avatar
+          id: user.id,
+          username: user.username,
+          avatar: user.avatar
         };
       }
       return null;
@@ -745,9 +821,9 @@ function broadcastToRoom(roomId, eventName, data) {
   });
 }
 function broadcastUserUpdate(userId) {
-  const user2 = store.users[userId];
-  if (user2) {
-    sendEventToUser(userId, "user_update", user2);
+  const user = store.users[userId];
+  if (user) {
+    sendEventToUser(userId, "user_update", user);
   }
 }
 function removeSSEClient(res) {
@@ -867,7 +943,7 @@ function advanceTurn(room) {
   }
 }
 function addTransaction(userId, type, amount, matchId, description = "") {
-  const tx2 = {
+  const tx = {
     id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     userId,
     type,
@@ -876,20 +952,37 @@ function addTransaction(userId, type, amount, matchId, description = "") {
     matchId,
     description
   };
-  store.transactions.unshift(tx2);
+  store.transactions.unshift(tx);
   saveStore();
-  return tx2;
+  return tx;
+}
+function recordHouseRevenue(category, amount, referenceId, description = "") {
+  const normalizedAmount = Number(Number(amount || 0).toFixed(2));
+  if (!normalizedAmount) return;
+  store.houseRevenue = Number(((store.houseRevenue || 0) + normalizedAmount).toFixed(2));
+  const tx = addTransaction("house", "app_commission", normalizedAmount, referenceId, description);
+  tx.revenueCategory = category;
+  saveStore();
+}
+function effectiveRakeForUsers(userIds) {
+  const realUsers = userIds.map((id) => store.users[id]).filter(Boolean);
+  if (!realUsers.length) return RAKE_PERCENTAGE;
+  const totalDiscount = realUsers.reduce((sum, user) => {
+    if (!user.vip || user.vip.expires <= Date.now()) return sum;
+    return sum + Number(store.vipTiers[user.vip.tier]?.rakeDiscount || 0);
+  }, 0);
+  return Math.max(0, RAKE_PERCENTAGE - totalDiscount / realUsers.length);
 }
 function getWithdrawableBalance(userId, excludeRequestId) {
-  const approvedDeposits = store.transactions.filter((tx2) => tx2.userId === userId && tx2.type === "deposit" && /deposit/i.test(tx2.description || "") && !/welcome bonus/i.test(tx2.description || "")).reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
-  const earnedFromWins = store.transactions.filter((tx2) => tx2.userId === userId && tx2.type === "win_payout").reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
+  const approvedDeposits = store.transactions.filter((tx) => tx.userId === userId && tx.type === "deposit" && /deposit/i.test(tx.description || "") && !/welcome bonus/i.test(tx.description || "")).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const earnedFromWins = store.transactions.filter((tx) => tx.userId === userId && tx.type === "win_payout").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
   const unlockedBonus = approvedDeposits >= BONUS_UNLOCK_DEPOSIT_TOTAL ? WELCOME_BONUS : 0;
-  const completedWithdrawals = store.transactions.filter((tx2) => tx2.userId === userId && tx2.type === "withdrawal").reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
-  const pendingWithdrawals = store.pendingManualTransactions.filter((tx2) => tx2.id !== excludeRequestId && tx2.userId === userId && tx2.transactionType === "withdraw" && tx2.status === "pending").reduce((sum, tx2) => sum + Number(tx2.amount || 0), 0);
+  const completedWithdrawals = store.transactions.filter((tx) => tx.userId === userId && tx.type === "withdrawal").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const pendingWithdrawals = store.pendingManualTransactions.filter((tx) => tx.id !== excludeRequestId && tx.userId === userId && tx.transactionType === "withdraw" && tx.status === "pending").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
   return Math.max(0, approvedDeposits + earnedFromWins + unlockedBonus - completedWithdrawals - pendingWithdrawals);
 }
 function hasCompletedPaidGame(userId) {
-  return store.transactions.some((tx2) => tx2.userId === userId && tx2.type === "bet_escrow_locked" && Number(tx2.amount || 0) > 0) && Object.values(store.rooms).some((room) => room.status === "completed" && room.betAmount > 0 && room.players.some((player) => player.userId === userId));
+  return store.transactions.some((tx) => tx.userId === userId && tx.type === "bet_escrow_locked" && Number(tx.amount || 0) > 0) && Object.values(store.rooms).some((room) => room.status === "completed" && room.betAmount > 0 && room.players.some((player) => player.userId === userId));
 }
 function getWithdrawalQuote(userId, amount) {
   const playedPaidGame = hasCompletedPaidGame(userId);
@@ -897,10 +990,10 @@ function getWithdrawalQuote(userId, amount) {
   const fee = playedPaidGame ? 0 : Math.min(amount, Math.max(MINIMUM_WITHDRAWAL_FEE, Number((amount * feeRate).toFixed(2))));
   return { feeRate, fee, netAmount: Number((amount - fee).toFixed(2)), playedPaidGame };
 }
-function withdrawalEligibilityError(user2, amount, excludeRequestId) {
+function withdrawalEligibilityError(user, amount, excludeRequestId) {
   if (amount < MINIMUM_WITHDRAWAL) return `Minimum withdrawal amount is $${MINIMUM_WITHDRAWAL}.`;
-  if (user2.balance < amount) return "Insufficient balance for this withdrawal.";
-  const withdrawable = getWithdrawableBalance(user2.id, excludeRequestId);
+  if (user.balance < amount) return "Insufficient balance for this withdrawal.";
+  const withdrawable = getWithdrawableBalance(user.id, excludeRequestId);
   if (withdrawable < amount) {
     return withdrawable > 0 ? `Only $${withdrawable.toFixed(2)} is currently available to withdraw.` : `Deposit funds first. The $${WELCOME_BONUS.toFixed(0)} welcome bonus unlocks after $${BONUS_UNLOCK_DEPOSIT_TOTAL} in approved deposits.`;
   }
@@ -908,8 +1001,7 @@ function withdrawalEligibilityError(user2, amount, excludeRequestId) {
 }
 function recordWithdrawalFee(userId, amount, requestId) {
   if (amount <= 0) return;
-  store.houseRevenue += amount;
-  addTransaction("house", "app_commission", amount, requestId, `Withdrawal fee from user ${userId}${requestId ? ` for request ${requestId}` : ""}.`);
+  recordHouseRevenue("withdrawal_fee", amount, requestId, `Withdrawal fee from user ${userId}${requestId ? ` for request ${requestId}` : ""}.`);
 }
 function addLog(room, text) {
   const log = {
@@ -1053,23 +1145,31 @@ function moveTokenLogic(room, tokenId, diceValue) {
       const winningNames = winningTeammates.map((p) => p.username).join(" & ");
       addLog(room, `\u{1F3C6} CHAMPIONS! Team ${winningNames} has finished all tokens and WON the game!`);
       if (room.betAmount > 0) {
-        const share = gs.escrowBalance / 2;
-        winningTeammates.forEach((p) => {
-          if (!isBotPlayer(p.userId)) {
-            const user2 = store.users[p.userId];
-            if (user2) {
-              user2.balance += share;
-              user2.winCount += 1;
-              addTransaction(p.userId, "win_payout", share, room.id, `Team Win payout for match ${room.id}.`);
-              broadcastUserUpdate(p.userId);
-            }
-          }
-        });
+        const realWinners = winningTeammates.filter((p) => !isBotPlayer(p.userId) && store.users[p.userId]);
+        if (realWinners.length) {
+          const effectiveRakePercentage = effectiveRakeForUsers(realWinners.map((p) => p.userId));
+          const rakeAmount = Number((gs.escrowBalance * effectiveRakePercentage).toFixed(2));
+          const payoutPool = Number((gs.escrowBalance - rakeAmount).toFixed(2));
+          const baseShare = Math.floor(payoutPool * 100 / realWinners.length) / 100;
+          let distributed = 0;
+          realWinners.forEach((p, index) => {
+            const user = store.users[p.userId];
+            const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
+            distributed += share;
+            user.balance += share;
+            user.winCount += 1;
+            addTransaction(p.userId, "win_payout", share, room.id, `Team win payout for match ${room.id} (Rake: $${rakeAmount.toFixed(2)}).`);
+            broadcastUserUpdate(p.userId);
+          });
+          recordHouseRevenue("team_game_rake", rakeAmount, room.id, `Team-game rake from match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
+        } else if (gs.escrowBalance > 0) {
+          recordHouseRevenue("bot_result", gs.escrowBalance, room.id, `Real-player stakes retained after the bot team won match ${room.id}.`);
+        }
         room.players.forEach((p) => {
           if (!winningColors.includes(p.color) && !isBotPlayer(p.userId)) {
-            const user2 = store.users[p.userId];
-            if (user2) {
-              user2.lossCount += 1;
+            const user = store.users[p.userId];
+            if (user) {
+              user.lossCount += 1;
               broadcastUserUpdate(p.userId);
             }
           }
@@ -1080,13 +1180,7 @@ function moveTokenLogic(room, tokenId, diceValue) {
       if (room.betAmount > 0) {
         const winnerProfile = store.users[activePlayer.userId];
         if (winnerProfile) {
-          let effectiveRakePercentage = RAKE_PERCENTAGE;
-          if (winnerProfile.vip && winnerProfile.vip.expires > Date.now()) {
-            const vipTier = store.vipTiers[winnerProfile.vip.tier];
-            if (vipTier) {
-              effectiveRakePercentage = Math.max(0, RAKE_PERCENTAGE - vipTier.rakeDiscount);
-            }
-          }
+          const effectiveRakePercentage = effectiveRakeForUsers([winnerProfile.id]);
           const rakeAmount = gs.escrowBalance * effectiveRakePercentage;
           const payoutAmount = gs.escrowBalance - rakeAmount;
           winnerProfile.balance += payoutAmount;
@@ -1099,21 +1193,15 @@ function moveTokenLogic(room, tokenId, diceValue) {
             `Payout for winning match ${room.id} with $${room.betAmount} bet (Rake: $${rakeAmount.toFixed(2)}).`
           );
           broadcastUserUpdate(activePlayer.userId);
-          store.houseRevenue += rakeAmount;
-          addTransaction(
-            "house",
-            // A special ID for house transactions
-            "app_commission",
-            rakeAmount,
-            room.id,
-            `Rake from match ${room.id} (${(effectiveRakePercentage * 100).toFixed(0)}%).`
-          );
+          recordHouseRevenue("game_rake", rakeAmount, room.id, `Rake from match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
+        } else if (gs.escrowBalance > 0) {
+          recordHouseRevenue("bot_result", gs.escrowBalance, room.id, `Real-player stakes retained after a bot won match ${room.id}.`);
         }
         room.players.forEach((p) => {
           if (p.userId !== activePlayer.userId && !isBotPlayer(p.userId)) {
-            const user2 = store.users[p.userId];
-            if (user2) {
-              user2.lossCount += 1;
+            const user = store.users[p.userId];
+            if (user) {
+              user.lossCount += 1;
               broadcastUserUpdate(p.userId);
             }
           }
@@ -1152,28 +1240,16 @@ function handleInactivityForfeit(room, inactivePlayer) {
       if (room.betAmount > 0 && totalPayout > 0) {
         const winnerProfile = store.users[winner.userId];
         if (winnerProfile && !isBotPlayer(winnerProfile.id)) {
-          let effectiveRakePercentage = RAKE_PERCENTAGE;
-          if (winnerProfile.vip && winnerProfile.vip.expires > Date.now()) {
-            const vipTier = store.vipTiers[winnerProfile.vip.tier];
-            if (vipTier) {
-              effectiveRakePercentage = Math.max(0, RAKE_PERCENTAGE - vipTier.rakeDiscount);
-            }
-          }
+          const effectiveRakePercentage = effectiveRakeForUsers([winnerProfile.id]);
           const rakeAmount = totalPayout * effectiveRakePercentage;
           const payoutAmount = totalPayout - rakeAmount;
           winnerProfile.balance += payoutAmount;
           winnerProfile.winCount += 1;
           addTransaction(winner.userId, "win_payout", payoutAmount, room.id, `Win by opponent inactivity forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
           broadcastUserUpdate(winner.userId);
-          store.houseRevenue += rakeAmount;
-          addTransaction(
-            "house",
-            // A special ID for house transactions
-            "app_commission",
-            rakeAmount,
-            room.id,
-            `Rake from forfeit match ${room.id} (${(effectiveRakePercentage * 100).toFixed(0)}%).`
-          );
+          recordHouseRevenue("forfeit_rake", rakeAmount, room.id, `Rake from forfeit match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
+        } else if (totalPayout > 0) {
+          recordHouseRevenue("bot_result", totalPayout, room.id, `Real-player stakes retained after a bot won forfeit match ${room.id}.`);
         }
       }
       room.gameState.escrowBalance = 0;
@@ -1301,11 +1377,11 @@ var authMiddleware = async (req, res, next) => {
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized: User ID is required." });
   }
-  const user2 = store.users[userId];
-  if (!user2) {
+  const user = store.users[userId];
+  if (!user) {
     return res.status(401).json({ error: "Unauthorized: User not found." });
   }
-  req.user = user2;
+  req.user = user;
   next();
 };
 var verifyFirebaseToken = async (req, res, next) => {
@@ -1330,10 +1406,10 @@ var checkVipStatus = (req, res, next) => {
   req.isVip = false;
   req.vipRakeDiscount = 0;
   if (req.user && req.user.uid) {
-    const user2 = Object.values(store.users).find((u) => u.firebaseUid === req.user.uid);
-    if (user2 && user2.vip && user2.vip.expires > Date.now()) {
+    const user = Object.values(store.users).find((u) => u.firebaseUid === req.user.uid);
+    if (user && user.vip && user.vip.expires > Date.now()) {
       req.isVip = true;
-      const vipTier = store.vipTiers[user2.vip.tier];
+      const vipTier = store.vipTiers[user.vip.tier];
       if (vipTier) {
         req.vipRakeDiscount = vipTier.rakeDiscount;
       }
@@ -1765,64 +1841,64 @@ app.get("/api/users/online", async (req, res) => {
   res.json(onlineList);
 });
 app.get("/api/users/:userId", async (req, res) => {
-  const user2 = await refreshUserProfileById(req.params.userId);
-  if (!user2) {
+  const user = await refreshUserProfileById(req.params.userId);
+  if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
-  res.json(user2);
+  res.json(user);
 });
 app.post("/api/users/:userId/update", async (req, res) => {
-  const user2 = store.users[req.params.userId];
-  if (!user2) {
+  const user = store.users[req.params.userId];
+  if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
   const { username, avatar, isOfflinePreference } = req.body;
-  if (username) user2.username = username.trim().substring(0, 20);
-  if (avatar) user2.avatar = avatar;
-  if (typeof isOfflinePreference === "boolean") user2.isOfflinePreference = isOfflinePreference;
+  if (username) user.username = username.trim().substring(0, 20);
+  if (avatar) user.avatar = avatar;
+  if (typeof isOfflinePreference === "boolean") user.isOfflinePreference = isOfflinePreference;
   await saveStoreAndWait();
-  broadcastUserUpdate(user2.id);
-  res.json(user2);
+  broadcastUserUpdate(user.id);
+  res.json(user);
 });
 app.post("/api/users/:userId/status", (req, res) => {
-  const user2 = store.users[req.params.userId];
-  if (!user2) {
+  const user = store.users[req.params.userId];
+  if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
   const { isOffline } = req.body;
-  user2.isOfflinePreference = !!isOffline;
+  user.isOfflinePreference = !!isOffline;
   saveStore();
-  broadcastUserUpdate(user2.id);
-  res.json({ success: true, isOfflinePreference: user2.isOfflinePreference, user: user2 });
+  broadcastUserUpdate(user.id);
+  res.json({ success: true, isOfflinePreference: user.isOfflinePreference, user });
 });
 app.post("/api/wallet/deposit", (req, res) => {
   const { userId, amount } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const depAmt = parseFloat(amount);
   if (isNaN(depAmt) || depAmt <= 0) {
     return res.status(400).json({ error: "Invalid deposit amount" });
   }
-  user2.balance += depAmt;
+  user.balance += depAmt;
   addTransaction(userId, "deposit", depAmt, void 0, `Deposited funds via Simulated Net Banking.`);
   broadcastUserUpdate(userId);
-  res.json({ success: true, balance: user2.balance });
+  res.json({ success: true, balance: user.balance });
 });
 app.post("/api/wallet/withdraw", (req, res) => {
   const { userId, amount } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const withAmt = parseFloat(amount);
   if (isNaN(withAmt) || withAmt <= 0) {
     return res.status(400).json({ error: "Invalid withdrawal amount" });
   }
-  const eligibilityError = withdrawalEligibilityError(user2, withAmt);
+  const eligibilityError = withdrawalEligibilityError(user, withAmt);
   if (eligibilityError) return res.status(400).json({ error: eligibilityError });
-  user2.balance -= withAmt;
+  user.balance -= withAmt;
   addTransaction(userId, "withdrawal", withAmt, void 0, `Withdrawn funds to bank account.`);
   recordWithdrawalFee(userId, getWithdrawalQuote(userId, withAmt).fee);
   broadcastUserUpdate(userId);
-  res.json({ success: true, balance: user2.balance });
+  res.json({ success: true, balance: user.balance });
 });
 app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   const { userId, agentId, amount, phone, senderPhone, provider, transactionType } = req.body;
@@ -1833,11 +1909,11 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   if (transactionType !== "deposit" && transactionType !== "withdraw") {
     return res.status(400).json({ error: "Invalid transaction type." });
   }
-  const user2 = await refreshUserProfileById(userId);
-  if (!user2) {
+  const user = await refreshUserProfileById(userId);
+  if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
-  const assignedAgentId = user2.linkedAgentId || void 0;
+  const assignedAgentId = user.linkedAgentId || void 0;
   if (assignedAgentId && agentId && assignedAgentId !== agentId) {
     return res.status(400).json({ error: "This account is locked to a specific agent. You can only transact with your assigned agent." });
   }
@@ -1845,7 +1921,7 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
     return res.status(400).json({ error: "Phone number is required for withdrawal requests." });
   }
   if (transactionType === "withdraw") {
-    const eligibilityError = withdrawalEligibilityError(user2, requestAmount);
+    const eligibilityError = withdrawalEligibilityError(user, requestAmount);
     if (eligibilityError) return res.status(400).json({ error: eligibilityError });
   }
   if (transactionType === "deposit" && !senderPhone) {
@@ -1874,12 +1950,12 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   const newRequest = {
     id: `req_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     userId,
-    username: user2.username,
+    username: user.username,
     agentId: assignedAgentId,
     agentUsername: assignedAgentUsername,
     managedBy: assignedAgentId ? "agent" : "admin",
     amount: requestAmount,
-    ...transactionType === "withdraw" ? getWithdrawalQuote(user2.id, requestAmount) : {},
+    ...transactionType === "withdraw" ? getWithdrawalQuote(user.id, requestAmount) : {},
     phone,
     // This will be the destination for withdrawals
     senderPhone,
@@ -1897,17 +1973,24 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
     console.error("Failed to persist manual transaction request:", error);
     return res.status(503).json({ error: "Your request could not be saved. Please try again." });
   }
+  if (!assignedAgentId) {
+    try {
+      await assignCashierToRequest(newRequest);
+    } catch (error) {
+      console.error(`Initial cashier assignment failed for ${newRequest.id}:`, error);
+    }
+  }
   await saveStoreAndWait();
   res.json({ success: true, message: "Your request has been submitted for review." });
 });
 app.get("/api/wallet/withdrawal-quote/:userId", async (req, res) => {
-  const user2 = await refreshUserProfileById(req.params.userId);
-  if (!user2) return res.status(404).json({ error: "User not found." });
+  const user = await refreshUserProfileById(req.params.userId);
+  if (!user) return res.status(404).json({ error: "User not found." });
   const amount = Number(req.query.amount);
   if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Enter a valid withdrawal amount." });
-  const eligibilityError = withdrawalEligibilityError(user2, amount);
-  if (eligibilityError) return res.status(400).json({ error: eligibilityError, withdrawableBalance: getWithdrawableBalance(user2.id) });
-  res.json({ amount, withdrawableBalance: getWithdrawableBalance(user2.id), ...getWithdrawalQuote(user2.id, amount) });
+  const eligibilityError = withdrawalEligibilityError(user, amount);
+  if (eligibilityError) return res.status(400).json({ error: eligibilityError, withdrawableBalance: getWithdrawableBalance(user.id) });
+  res.json({ amount, withdrawableBalance: getWithdrawableBalance(user.id), ...getWithdrawalQuote(user.id, amount) });
 });
 app.get("/api/wallet/transactions/:userId", (req, res) => {
   const txs = store.transactions.filter((t) => t.userId === req.params.userId);
@@ -1929,8 +2012,8 @@ app.post("/api/wallet/process-api-payment", async (req, res) => {
   if (!config || !config.enabled || !config.apiKey) {
     return res.status(400).json({ error: "API is not configured for this provider." });
   }
-  const user2 = store.users[userId];
-  if (!user2) {
+  const user = store.users[userId];
+  if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
   const parsedAmount = parseFloat(amount);
@@ -1941,24 +2024,24 @@ app.post("/api/wallet/process-api-payment", async (req, res) => {
     if (!phone) {
       return res.status(400).json({ error: "Phone number is required for withdrawal requests." });
     }
-    const eligibilityError = withdrawalEligibilityError(user2, parsedAmount);
+    const eligibilityError = withdrawalEligibilityError(user, parsedAmount);
     if (eligibilityError) return res.status(400).json({ error: eligibilityError });
-    user2.balance -= parsedAmount;
+    user.balance -= parsedAmount;
     addTransaction(userId, "withdrawal", parsedAmount, void 0, `API withdrawal via ${providerKey}.`);
     recordWithdrawalFee(userId, getWithdrawalQuote(userId, parsedAmount).fee);
     broadcastUserUpdate(userId);
     await saveStoreAndWait();
-    return res.json({ success: true, balance: user2.balance, message: "Withdrawal processed via API." });
+    return res.json({ success: true, balance: user.balance, message: "Withdrawal processed via API." });
   }
   if (transactionType === "deposit") {
     if (!senderPhone) {
       return res.status(400).json({ error: "Sender phone number is required for deposit requests." });
     }
-    user2.balance += parsedAmount;
+    user.balance += parsedAmount;
     addTransaction(userId, "deposit", parsedAmount, void 0, `API deposit via ${providerKey}.`);
     broadcastUserUpdate(userId);
     await saveStoreAndWait();
-    return res.json({ success: true, balance: user2.balance, message: "Deposit processed via API." });
+    return res.json({ success: true, balance: user.balance, message: "Deposit processed via API." });
   }
   return res.status(400).json({ error: "Unsupported transaction type." });
 });
@@ -1990,32 +2073,33 @@ var saveVipTiersFromAdmin = async (req, res) => {
 app.post("/api/vip/subscribe", verifyFirebaseToken, async (req, res) => {
   const { tier } = req.body;
   const firebaseUid = req.user.uid;
-  const user2 = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
-  if (!user2) {
+  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
   const vipTier = store.vipTiers[tier];
   if (!vipTier) {
     return res.status(400).json({ error: "Invalid VIP tier specified." });
   }
-  if (user2.balance < vipTier.price) {
+  if (user.balance < vipTier.price) {
     return res.status(400).json({ error: "Insufficient funds to purchase this VIP subscription." });
   }
-  user2.balance -= vipTier.price;
-  const currentVipIsSameTier = user2.vip?.tier === tier && user2.vip.expires > Date.now();
-  const startDate = currentVipIsSameTier ? user2.vip.expires : Date.now();
+  user.balance -= vipTier.price;
+  const currentVipIsSameTier = user.vip?.tier === tier && user.vip.expires > Date.now();
+  const startDate = currentVipIsSameTier ? user.vip.expires : Date.now();
   const endDate = startDate + vipTier.durationMonths * 30 * 24 * 60 * 60 * 1e3;
-  user2.vip = {
+  user.vip = {
     tier,
     expires: endDate
   };
-  addTransaction(user2.id, "app_commission", vipTier.price, void 0, `VIP Subscription (${vipTier.name}) purchase.`);
-  await saveUserProfileToFirestore(user2);
+  addTransaction(user.id, "app_commission", vipTier.price, void 0, `VIP plan debit: ${vipTier.name}.`);
+  recordHouseRevenue("vip_subscription", vipTier.price, user.id, `VIP subscription (${vipTier.name}) purchased by ${user.username}.`);
+  await saveUserProfileToFirestore(user);
   await saveStoreAndWait();
-  broadcastUserUpdate(user2.id);
+  broadcastUserUpdate(user.id);
   res.json({
     success: true,
-    user: user2,
+    user,
     message: currentVipIsSameTier ? `${vipTier.name} renewed successfully.` : `Successfully subscribed to ${vipTier.name}!`
   });
 });
@@ -2040,8 +2124,8 @@ app.get("/api/tournaments/:id", (req, res) => {
 app.post("/api/tournaments/:id/register", verifyFirebaseToken, async (req, res) => {
   const { id } = req.params;
   const firebaseUid = req.user.uid;
-  const user2 = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
-  if (!user2) {
+  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
   const tournament = store.tournaments[id];
@@ -2051,32 +2135,32 @@ app.post("/api/tournaments/:id/register", verifyFirebaseToken, async (req, res) 
   if (tournament.status !== "registration_open") {
     return res.status(400).json({ error: "Tournament is not open for registration." });
   }
-  if (user2.balance < tournament.entryFee) {
+  if (user.balance < tournament.entryFee) {
     return res.status(400).json({ error: "Insufficient funds to register for this tournament." });
   }
   if (tournament.players.length >= tournament.maxPlayers) {
     return res.status(400).json({ error: "Tournament is already full." });
   }
-  if (tournament.players.some((p) => p.userId === user2.id)) {
+  if (tournament.players.some((p) => p.userId === user.id)) {
     return res.status(400).json({ error: "You are already registered for this tournament." });
   }
-  user2.balance -= tournament.entryFee;
-  addTransaction(user2.id, "bet_escrow_locked", tournament.entryFee, id, `Tournament entry fee for "${tournament.name}".`);
+  user.balance -= tournament.entryFee;
+  addTransaction(user.id, "bet_escrow_locked", tournament.entryFee, id, `Tournament entry fee for "${tournament.name}".`);
   tournament.players.push({
-    userId: user2.id,
-    username: user2.username,
-    avatar: user2.avatar
+    userId: user.id,
+    username: user.username,
+    avatar: user.avatar
   });
   await saveStoreAndWait();
-  broadcastUserUpdate(user2.id);
+  broadcastUserUpdate(user.id);
   broadcastToAll("tournament_update", tournament);
   res.json({ success: true, tournament, message: `Successfully registered for ${tournament.name}!` });
 });
 app.post("/api/tournaments/:id/unregister", verifyFirebaseToken, async (req, res) => {
   const { id } = req.params;
   const firebaseUid = req.user.uid;
-  const user2 = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
-  if (!user2) {
+  const user = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
+  if (!user) {
     return res.status(404).json({ error: "User not found." });
   }
   const tournament = store.tournaments[id];
@@ -2086,19 +2170,33 @@ app.post("/api/tournaments/:id/unregister", verifyFirebaseToken, async (req, res
   if (tournament.status !== "registration_open") {
     return res.status(400).json({ error: "Cannot unregister after tournament has started or finished." });
   }
-  const playerIndex = tournament.players.findIndex((p) => p.userId === user2.id);
+  const playerIndex = tournament.players.findIndex((p) => p.userId === user.id);
   if (playerIndex === -1) {
     return res.status(400).json({ error: "You are not registered for this tournament." });
   }
   tournament.players.splice(playerIndex, 1);
   if (tournament.entryFee > 0) {
-    user2.balance += tournament.entryFee;
-    addTransaction(user2.id, "deposit", tournament.entryFee, id, `Refund for unregistering from tournament "${tournament.name}".`);
+    const cancellationFee = Number((tournament.entryFee * TOURNAMENT_UNREGISTER_FEE_RATE).toFixed(2));
+    const refundAmount = Number((tournament.entryFee - cancellationFee).toFixed(2));
+    user.balance += refundAmount;
+    addTransaction(user.id, "refund", refundAmount, id, `Refund after voluntarily unregistering from tournament "${tournament.name}" (fee: $${cancellationFee.toFixed(2)}).`);
+    recordHouseRevenue("tournament_cancellation_fee", cancellationFee, id, `Tournament cancellation fee from ${user.username} for "${tournament.name}".`);
   }
   await saveStoreAndWait();
-  broadcastUserUpdate(user2.id);
+  broadcastUserUpdate(user.id);
   broadcastToAll("tournament_update", tournament);
-  res.json({ success: true, tournament, message: `Unregistered from ${tournament.name}. Entry fee refunded.` });
+  res.json({ success: true, tournament, message: `Unregistered from ${tournament.name}. A 10% cancellation fee was deducted.` });
+});
+app.post("/api/tournaments/:id/check-in", verifyFirebaseToken, async (req, res) => {
+  const tournament = store.tournaments[req.params.id];
+  if (!tournament || tournament.status !== "check_in" || !tournament.checkInDeadline || Date.now() > tournament.checkInDeadline) return res.status(400).json({ error: "Tournament check-in is not open." });
+  const user = Object.values(store.users).find((u) => u.firebaseUid === req.user.uid);
+  const player = user && tournament.players.find((p) => p.userId === user.id);
+  if (!player) return res.status(403).json({ error: "You are not registered for this tournament." });
+  player.checkedInAt = Date.now();
+  await saveStoreAndWait();
+  broadcastToAll("tournament_update", tournament);
+  res.json({ success: true, tournament, message: "Tournament check-in confirmed." });
 });
 async function handleTournamentMatchWin(tournamentId, matchId, winnerId) {
   const tournament = store.tournaments[tournamentId];
@@ -2115,10 +2213,24 @@ async function handleTournamentMatchWin(tournamentId, matchId, winnerId) {
       tournament.status = "completed";
       tournament.endDate = Date.now();
       const winnerUser = store.users[winners[0].userId];
-      if (winnerUser) {
+      const prizeAlreadyPaid = store.transactions.some((tx) => tx.matchId === tournament.id && tx.type === "win_payout" && /tournament/i.test(tx.description || ""));
+      if (winnerUser && !prizeAlreadyPaid) {
         winnerUser.balance += tournament.prizePool;
         addTransaction(winnerUser.id, "win_payout", tournament.prizePool, tournament.id, `Tournament "${tournament.name}" prize.`);
         broadcastUserUpdate(winnerUser.id);
+      }
+      const collectedEntryFees = store.transactions.filter((tx) => tx.matchId === tournament.id && tx.type === "bet_escrow_locked" && /tournament entry fee/i.test(tx.description || "")).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const refundedEntryFees = store.transactions.filter((tx) => tx.matchId === tournament.id && (tx.type === "deposit" || tx.type === "refund") && /refund/i.test(tx.description || "")).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const netCollected = Math.max(0, collectedEntryFees - refundedEntryFees);
+      const tournamentMargin = Number((netCollected - tournament.prizePool).toFixed(2));
+      const marginAlreadyRecorded = store.transactions.some((tx) => tx.matchId === tournament.id && tx.revenueCategory === "tournament_margin");
+      if (!marginAlreadyRecorded) {
+        recordHouseRevenue(
+          "tournament_margin",
+          tournamentMargin,
+          tournament.id,
+          `Tournament margin for "${tournament.name}": $${netCollected.toFixed(2)} entries minus $${tournament.prizePool.toFixed(2)} prize.`
+        );
       }
       broadcastToAll("tournament_ended", tournament);
     } else {
@@ -2193,32 +2305,84 @@ function checkAndStartTournaments() {
   const now = Date.now();
   seedDefaultTournaments();
   Object.values(store.tournaments).forEach(async (t) => {
-    if (t.status === "registration_open" && now >= t.startDate) {
-      if (t.players.length >= 2) {
-        t.status = "in_progress";
-        t.matches = createTournamentBracket(t);
-        t.currentRound = 1;
-        for (const match of t.matches) {
-          if (match.status === "pending" && match.player1 && match.player2) {
-            const room = startMatchedRoom(
-              [
-                { id: match.player1.userId, username: match.player1.username, avatar: match.player1.avatar, balance: 0 },
-                { id: match.player2.userId, username: match.player2.username, avatar: match.player2.avatar, balance: 0 }
-              ],
-              0,
-              // No extra bet for tournament matches
-              2,
-              "solo"
-            );
-            match.roomId = room.id;
-            match.status = "in_progress";
-            room.tournamentDetails = { tournamentId: t.id, matchId: match.id };
+    if (t.status === "check_in" && t.checkInDeadline && now >= t.checkInDeadline) {
+      const checkedPlayers = t.players.filter((player) => player.checkedInAt);
+      if (checkedPlayers.length === 0) {
+        t.players.forEach((player) => {
+          const user = store.users[player.userId];
+          if (user && t.entryFee > 0) {
+            user.balance += t.entryFee;
+            addTransaction(user.id, "refund", t.entryFee, t.id, `Full refund because tournament "${t.name}" lacked checked-in players.`);
+            broadcastUserUpdate(user.id);
           }
-        }
+        });
+        t.status = "cancelled";
         await saveStoreAndWait();
-        broadcastToAll("tournament_started", t);
+        broadcastToAll("tournament_update", t);
+        return;
+      }
+      if (checkedPlayers.length === 1) {
+        const winner = store.users[checkedPlayers[0].userId];
+        t.players = checkedPlayers;
+        t.winnerId = checkedPlayers[0].userId;
+        t.status = "completed";
+        t.endDate = Date.now();
+        if (winner && !store.transactions.some((tx) => tx.matchId === t.id && tx.type === "win_payout" && /tournament/i.test(tx.description || ""))) {
+          winner.balance += t.prizePool;
+          addTransaction(winner.id, "win_payout", t.prizePool, t.id, `Tournament "${t.name}" walkover prize.`);
+          broadcastUserUpdate(winner.id);
+        }
+        const collected = store.transactions.filter((tx) => tx.matchId === t.id && tx.type === "bet_escrow_locked" && /tournament entry fee/i.test(tx.description || "")).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        if (!store.transactions.some((tx) => tx.matchId === t.id && tx.revenueCategory === "tournament_margin")) recordHouseRevenue("tournament_margin", Number((collected - t.prizePool).toFixed(2)), t.id, `Tournament margin for walkover tournament "${t.name}".`);
+        await saveStoreAndWait();
+        broadcastToAll("tournament_ended", t);
+        return;
+      }
+      t.players = checkedPlayers;
+      t.status = "in_progress";
+      t.matches = createTournamentBracket(t);
+      t.currentRound = 1;
+      for (const match of t.matches) {
+        if (match.status === "pending" && match.player1 && match.player2) {
+          const room = startMatchedRoom([
+            { id: match.player1.userId, username: match.player1.username, avatar: match.player1.avatar, balance: 0 },
+            { id: match.player2.userId, username: match.player2.username, avatar: match.player2.avatar, balance: 0 }
+          ], 0, 2, "solo");
+          match.roomId = room.id;
+          match.status = "in_progress";
+          room.tournamentDetails = { tournamentId: t.id, matchId: match.id };
+        }
+      }
+      await saveStoreAndWait();
+      broadcastToAll("tournament_started", t);
+      return;
+    }
+    if (t.status === "registration_open" && now >= t.startDate) {
+      const maximumSustainablePrize = Number((t.entryFee * t.maxPlayers * 0.9).toFixed(2));
+      if (/^tourney_(weekly|weekend|daily)_/.test(t.id) && t.prizePool > maximumSustainablePrize) {
+        t.prizePool = maximumSustainablePrize;
+      }
+      const collectedEntryFees = Number((t.entryFee * t.players.length).toFixed(2));
+      if (t.players.length >= 2 && collectedEntryFees >= t.prizePool) {
+        t.status = "check_in";
+        t.checkInDeadline = now + TOURNAMENT_CHECK_IN_MS;
+        await saveStoreAndWait();
+        broadcastToAll("tournament_check_in", t);
       } else {
-        t.startDate = now + 12 * 60 * 60 * 1e3;
+        t.postponementCount = Number(t.postponementCount || 0) + 1;
+        if (t.postponementCount >= TOURNAMENT_MAX_POSTPONEMENTS) {
+          t.players.forEach((player) => {
+            const user = store.users[player.userId];
+            if (user) {
+              user.balance += t.entryFee;
+              addTransaction(user.id, "refund", t.entryFee, t.id, `Full refund for cancelled underfunded tournament "${t.name}".`);
+              broadcastUserUpdate(user.id);
+            }
+          });
+          t.status = "cancelled";
+        } else {
+          t.startDate = now + 12 * 60 * 60 * 1e3;
+        }
         await saveStoreAndWait();
         broadcastToAll("tournament_update", t);
       }
@@ -2307,27 +2471,27 @@ app.post("/api/rooms/:roomId/stop-spectating", (req, res) => {
 });
 app.post("/api/rooms/create", (req, res) => {
   const { userId, betAmount, capacity, gameMode } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const bet = parseFloat(betAmount);
-  if (user2.balance < bet) {
+  if (user.balance < bet) {
     return res.status(400).json({ error: "Insufficient wallet balance for this bet amount." });
   }
   const selectedMode = gameMode === "team" ? "team" : "solo";
   const selectedCapacity = selectedMode === "team" ? 4 : parseInt(capacity) || 2;
   const roomId = Math.random().toString(36).substring(2, 7).toUpperCase();
   const newPlayer = {
-    userId: user2.id,
-    username: user2.username,
-    avatar: user2.avatar,
+    userId: user.id,
+    username: user.username,
+    avatar: user.avatar,
     color: selectedCapacity === 2 && selectedMode === "solo" ? "green" : "red",
     // Host is Green for 2-player solo, Red for others
     isHost: true,
     isReady: true,
     status: "online",
-    winCount: user2.winCount,
-    lossCount: user2.lossCount,
-    balance: user2.balance
+    winCount: user.winCount,
+    lossCount: user.lossCount,
+    balance: user.balance
   };
   const newRoom = {
     id: roomId,
@@ -2345,7 +2509,7 @@ app.post("/api/rooms/create", (req, res) => {
       tokens: [],
       winnerId: null,
       escrowBalance: 0,
-      logs: [{ id: "1", timestamp: Date.now(), text: `Room created by ${user2.username}. Code: ${roomId} (${selectedMode === "team" ? "Team 2v2" : "Solo " + selectedCapacity + "P"})` }],
+      logs: [{ id: "1", timestamp: Date.now(), text: `Room created by ${user.username}. Code: ${roomId} (${selectedMode === "team" ? "Team 2v2" : "Solo " + selectedCapacity + "P"})` }],
       chat: [],
       lastActivity: Date.now()
     },
@@ -2357,8 +2521,8 @@ app.post("/api/rooms/create", (req, res) => {
 });
 app.post("/api/rooms/join", (req, res) => {
   const { userId, roomCode } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const code = (roomCode || "").trim().toUpperCase();
   const room = store.rooms[code];
   if (!room) {
@@ -2377,25 +2541,25 @@ app.post("/api/rooms/join", (req, res) => {
   if (room.players.length >= maxPlayers) {
     return res.status(400).json({ error: `Room is already full at ${maxPlayers} capacity.` });
   }
-  if (user2.balance < room.betAmount) {
+  if (user.balance < room.betAmount) {
     return res.status(400).json({ error: `You need at least $${room.betAmount} in your wallet to join this room.` });
   }
   const newPendingPlayer = {
-    userId: user2.id,
-    username: user2.username,
-    avatar: user2.avatar,
+    userId: user.id,
+    username: user.username,
+    avatar: user.avatar,
     color: "green",
     // Assign color on host approval
     isHost: false,
     isReady: false,
     status: "online",
-    winCount: user2.winCount || 0,
-    lossCount: user2.lossCount || 0,
-    balance: user2.balance || 0
+    winCount: user.winCount || 0,
+    lossCount: user.lossCount || 0,
+    balance: user.balance || 0
   };
   if (!room.pendingPlayers) room.pendingPlayers = [];
   room.pendingPlayers.push(newPendingPlayer);
-  addLog(room, `\u{1F514} Challenger ${user2.username} is requesting to join the match. Waiting for host approval!`);
+  addLog(room, `\u{1F514} Challenger ${user.username} is requesting to join the match. Waiting for host approval!`);
   saveStore();
   broadcastToRoom(room.id, "game_update", room);
   res.json(room);
@@ -2511,7 +2675,8 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
     status: "online",
     winCount: u.winCount || 0,
     lossCount: u.lossCount || 0,
-    balance: u.balance || 0
+    balance: u.balance || 0,
+    inactivityTimer: isBotPlayer(u.id) ? void 0 : 300
   }));
   let totalEscrow = 0;
   players.forEach((p) => {
@@ -2523,7 +2688,7 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
         broadcastUserUpdate(p.userId);
       }
     }
-    totalEscrow += bet;
+    if (!isBotPlayer(p.userId)) totalEscrow += bet;
   });
   const tokens = [];
   players.forEach((p) => {
@@ -2568,11 +2733,11 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
 app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
   try {
     const { userId, betAmount, capacity, gameMode } = req.body;
-    const user2 = store.users[userId];
-    if (!user2) return res.status(404).json({ error: "User not found" });
+    const user = store.users[userId];
+    if (!user) return res.status(404).json({ error: "User not found" });
     cleanupMatchmakingQueues();
     const bet = parseFloat(betAmount);
-    if (user2.balance < bet) {
+    if (user.balance < bet) {
       return res.status(400).json({ error: "Insufficient balance to match stake." });
     }
     const cap = parseInt(capacity) || 2;
@@ -2583,9 +2748,9 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
     }
     if (store.matchmakingQueues[queueKey].includes(userId)) {
       broadcastToAll("matchmaker_seeking", {
-        senderId: user2.id,
-        username: user2.username,
-        avatar: user2.avatar,
+        senderId: user.id,
+        username: user.username,
+        avatar: user.avatar,
         betAmount: bet,
         capacity: cap,
         gameMode: mode,
@@ -2593,13 +2758,13 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
       });
       return res.json({ status: "queued", message: "Already in queue" });
     }
-    user2.seekingJoinedAt = Date.now();
+    user.seekingJoinedAt = Date.now();
     store.matchmakingQueues[queueKey].push(userId);
     if (db) {
       syncMatchmakingRecordWithRetry(userId, {
         userId,
-        username: user2.username,
-        avatar: user2.avatar,
+        username: user.username,
+        avatar: user.avatar,
         betAmount: bet,
         capacity: cap,
         gameMode: mode,
@@ -2608,9 +2773,9 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
       });
     }
     broadcastToAll("matchmaker_seeking", {
-      senderId: user2.id,
-      username: user2.username,
-      avatar: user2.avatar,
+      senderId: user.id,
+      username: user.username,
+      avatar: user.avatar,
       betAmount: bet,
       capacity: cap,
       gameMode: mode,
@@ -2629,13 +2794,13 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
   if (!opponentId) {
     return res.status(400).json({ error: "This endpoint is for direct challenges only. opponentId is required." });
   }
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const oppUser = store.users[opponentId];
   if (!oppUser) return res.status(404).json({ error: "Opponent not found" });
   cleanupMatchmakingQueues();
   const bet = parseFloat(betAmount);
-  if (user2.balance < bet) {
+  if (user.balance < bet) {
     return res.status(400).json({ error: "Insufficient balance to match stake." });
   }
   const cap = parseInt(capacity) || 2;
@@ -2649,7 +2814,7 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
     db.collection("matchmaking").doc(userId).delete().catch((err) => console.error("Failed to delete matchmaking record from Firestore for user:", err));
     db.collection("matchmaking").doc(opponentId).delete().catch((err) => console.error("Failed to delete matchmaking record from Firestore for opponent:", err));
   }
-  const matchedList = [user2, oppUser];
+  const matchedList = [user, oppUser];
   const finalCapacity = 2;
   const finalMode = "solo";
   const room = startMatchedRoom(matchedList, bet, finalCapacity, finalMode);
@@ -2665,15 +2830,15 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
 });
 app.post("/api/rooms/create-bot-room", (req, res) => {
   const { userId, betAmount, capacity, gameMode } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const bet = parseFloat(betAmount) || 0;
-  if (user2.balance < bet) {
+  if (user.balance < bet) {
     return res.status(400).json({ error: "Insufficient wallet balance for this stake." });
   }
   const cap = parseInt(capacity) || 2;
   const mode = gameMode === "team" ? "team" : "solo";
-  const matchedList = [user2];
+  const matchedList = [user];
   const botAvatars = ["\u{1F916}", "\u{1F98A}", "\u26A1", "\u{1F451}"];
   const botNames = ["LudoMaster AI", "SpeedyBot", "ProLudo AI", "ZenBot"];
   while (matchedList.length < cap) {
@@ -2826,33 +2991,33 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
 });
 app.post("/api/rooms/challenge/accept", (req, res) => {
   const { userId, roomId } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: "Challenge lobby no longer exists." });
   if (room.players.length >= (room.capacity || 2)) {
     return res.status(400).json({ error: "Room is already full." });
   }
-  if (user2.balance < room.betAmount) {
+  if (user.balance < room.betAmount) {
     return res.status(400).json({ error: `Insufficient wallet balance to accept this $${room.betAmount} match.` });
   }
   const colors = ["red", "green", "yellow", "blue"];
   const occupiedColors = room.players.map((p) => p.color);
   const assignedColor = colors.find((c) => !occupiedColors.includes(c)) || "green";
   const newPlayer = {
-    userId: user2.id,
-    username: user2.username,
-    avatar: user2.avatar,
+    userId: user.id,
+    username: user.username,
+    avatar: user.avatar,
     color: assignedColor,
     isHost: false,
     isReady: true,
     status: "online",
-    winCount: user2.winCount,
-    lossCount: user2.lossCount,
-    balance: user2.balance
+    winCount: user.winCount,
+    lossCount: user.lossCount,
+    balance: user.balance
   };
   room.players.push(newPlayer);
-  addLog(room, `\u2694\uFE0F ${user2.username} accepted the challenge and joined the room.`);
+  addLog(room, `\u2694\uFE0F ${user.username} accepted the challenge and joined the room.`);
   saveStore();
   const hostId = room.players.find((p) => p.isHost)?.userId;
   if (hostId) {
@@ -2862,13 +3027,13 @@ app.post("/api/rooms/challenge/accept", (req, res) => {
 });
 app.post("/api/rooms/challenge/decline", (req, res) => {
   const { userId, roomId } = req.body;
-  const user2 = store.users[userId];
-  if (!user2) return res.status(404).json({ error: "User not found" });
+  const user = store.users[userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
   const room = store.rooms[roomId];
   if (room) {
     const hostId = room.players.find((p) => p.isHost)?.userId;
     if (hostId) {
-      sendEventToUser(hostId, "game_invite_declined", { receiverName: user2.username });
+      sendEventToUser(hostId, "game_invite_declined", { receiverName: user.username });
     }
     delete store.rooms[roomId];
     saveStore();
@@ -2950,8 +3115,8 @@ app.post("/api/rooms/start", (req, res) => {
   let success = true;
   room.players.forEach((pl) => {
     if (!isBotPlayer(pl.userId)) {
-      const user2 = store.users[pl.userId];
-      if (!user2 || user2.balance < bet) {
+      const user = store.users[pl.userId];
+      if (!user || user.balance < bet) {
         success = false;
       }
     }
@@ -2962,12 +3127,12 @@ app.post("/api/rooms/start", (req, res) => {
   let totalEscrow = 0;
   room.players.forEach((pl) => {
     if (!isBotPlayer(pl.userId)) {
-      const user2 = store.users[pl.userId];
-      user2.balance -= bet;
+      const user = store.users[pl.userId];
+      user.balance -= bet;
       addTransaction(pl.userId, "bet_escrow_locked", bet, room.id, `Escrow lock for Match ${room.id}`);
       broadcastUserUpdate(pl.userId);
     }
-    totalEscrow += bet;
+    if (!isBotPlayer(pl.userId)) totalEscrow += bet;
   });
   const tokens = [];
   room.players.forEach((pl) => {
@@ -3308,6 +3473,32 @@ var hasPermission = (requiredPermission) => {
     }
   };
 };
+var hasAnyPermission = (...required) => async (req, res, next) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const adminId = req.query.userId;
+  if (!adminId) return res.status(403).json({ error: "Admin user ID is required." });
+  const doc = await db.collection("adminUsers").doc(adminId).get();
+  if (!doc.exists) return res.status(403).json({ error: "Invalid admin user." });
+  const permissions = normalizeAdminPermissions(doc.data()?.permissions);
+  if (permissions.includes("all") || required.some((permission) => permissions.includes(permission))) {
+    req.adminPermissions = permissions;
+    req.adminUser = { id: doc.id, ...doc.data() };
+    return next();
+  }
+  return res.status(403).json({ error: "You do not have permission for this action." });
+};
+app.post("/api/admin/cashier/heartbeat", hasPermission("cashier"), async (req, res) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const adminId = String(req.query.userId || "");
+  const ref = db.collection("adminUsers").doc(adminId);
+  const snapshot = await ref.get();
+  const admin = snapshot.data();
+  if (!normalizedCity(admin?.location)) return res.status(400).json({ error: "Cashier city is not configured." });
+  const cashierOnlineAt = Date.now();
+  await ref.update({ cashierOnlineAt });
+  await reassignExpiredCashierRequests(cashierOnlineAt);
+  res.json({ success: true, cashierOnlineAt, location: admin.location });
+});
 app.post("/api/admin/admins/create", hasPermission("all"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   const { username, password, permissions } = req.body;
@@ -3369,15 +3560,25 @@ app.post("/api/admin/tournaments/create", hasPermission("tournaments"), async (r
   if (!name || entryFee === void 0 || !prizePool || !maxPlayers || !startDate) {
     return res.status(400).json({ error: "Missing required tournament fields." });
   }
+  const parsedEntryFee = parseFloat(entryFee);
+  const parsedPrizePool = parseFloat(prizePool);
+  const parsedMaxPlayers = parseInt(maxPlayers, 10);
+  if (!Number.isFinite(parsedEntryFee) || parsedEntryFee <= 0 || !Number.isFinite(parsedPrizePool) || parsedPrizePool <= 0 || !Number.isInteger(parsedMaxPlayers) || parsedMaxPlayers < 2) {
+    return res.status(400).json({ error: "Entry fee, prize pool and player capacity must be valid positive values." });
+  }
+  const sustainablePrizeLimit = Number((parsedEntryFee * parsedMaxPlayers * 0.9).toFixed(2));
+  if (parsedPrizePool > sustainablePrizeLimit) {
+    return res.status(400).json({ error: `Prize pool cannot exceed $${sustainablePrizeLimit.toFixed(2)} (90% of maximum entry fees).` });
+  }
   const id = `tourney_${Date.now()}`;
   const newTournament = {
     id,
     name: String(name).trim(),
-    entryFee: parseFloat(entryFee),
-    prizePool: parseFloat(prizePool),
+    entryFee: parsedEntryFee,
+    prizePool: parsedPrizePool,
     status: "registration_open",
     players: [],
-    maxPlayers: parseInt(maxPlayers, 10),
+    maxPlayers: parsedMaxPlayers,
     startDate: new Date(startDate).getTime(),
     endDate: 0,
     winnerId: null,
@@ -3400,11 +3601,11 @@ app.post("/api/admin/tournaments/:id/cancel", hasPermission("tournaments"), asyn
     return res.status(400).json({ error: "Tournament is already finished or cancelled." });
   }
   tournament.players.forEach((p) => {
-    const user2 = store.users[p.userId];
-    if (user2 && tournament.entryFee > 0) {
-      user2.balance += tournament.entryFee;
-      addTransaction(user2.id, "deposit", tournament.entryFee, tournamentId, `Refund for cancelled tournament "${tournament.name}".`);
-      broadcastUserUpdate(user2.id);
+    const user = store.users[p.userId];
+    if (user && tournament.entryFee > 0) {
+      user.balance += tournament.entryFee;
+      addTransaction(user.id, "deposit", tournament.entryFee, tournamentId, `Refund for cancelled tournament "${tournament.name}".`);
+      broadcastUserUpdate(user.id);
     }
   });
   tournament.status = "cancelled";
@@ -3414,9 +3615,11 @@ app.post("/api/admin/tournaments/:id/cancel", hasPermission("tournaments"), asyn
 });
 app.delete("/api/admin/tournaments/:id", hasPermission("tournaments"), async (req, res) => {
   const tournamentId = req.params.id;
-  if (!store.tournaments[tournamentId]) {
+  const tournament = store.tournaments[tournamentId];
+  if (!tournament) {
     return res.status(404).json({ error: "Tournament not found." });
   }
+  if (tournament.players.length > 0 && tournament.status !== "cancelled") return res.status(409).json({ error: "Cancel this tournament and refund its players before deleting it." });
   delete store.tournaments[tournamentId];
   await saveStoreAndWait();
   res.json({ success: true, message: "Tournament deleted successfully." });
@@ -3433,28 +3636,13 @@ app.post("/api/admin/tournaments/:id/start", hasPermission("tournaments"), async
   if (tournament.players.length < 2) {
     return res.status(400).json({ error: "At least 2 players are required to start a tournament." });
   }
-  tournament.status = "in_progress";
-  tournament.matches = createTournamentBracket(tournament);
-  tournament.currentRound = 1;
-  for (const match of tournament.matches) {
-    if (match.status === "pending" && match.player1 && match.player2) {
-      const room = startMatchedRoom(
-        [
-          { id: match.player1.userId, username: match.player1.username, avatar: match.player1.avatar, balance: 0 },
-          { id: match.player2.userId, username: match.player2.username, avatar: match.player2.avatar, balance: 0 }
-        ],
-        0,
-        2,
-        "solo"
-      );
-      match.roomId = room.id;
-      match.status = "in_progress";
-      room.tournamentDetails = { tournamentId: tournament.id, matchId: match.id };
-    }
-  }
+  const collectedEntryFees = tournament.entryFee * tournament.players.length;
+  if (collectedEntryFees < tournament.prizePool) return res.status(400).json({ error: "Tournament prize is not fully funded by registered entry fees." });
+  tournament.status = "check_in";
+  tournament.checkInDeadline = Date.now() + TOURNAMENT_CHECK_IN_MS;
   await saveStoreAndWait();
-  broadcastToAll("tournament_started", tournament);
-  res.json({ success: true, tournament, message: `Tournament "${tournament.name}" started successfully!` });
+  broadcastToAll("tournament_check_in", tournament);
+  res.json({ success: true, tournament, message: `Check-in opened for tournament "${tournament.name}".` });
 });
 app.post("/api/admin/tournaments/:id/remove-player", hasPermission("tournaments"), async (req, res) => {
   const tournamentId = req.params.id;
@@ -3499,10 +3687,20 @@ app.post("/api/admin/tournaments/:id/edit", hasPermission("tournaments"), async 
   if (!tournament) {
     return res.status(404).json({ error: "Tournament not found." });
   }
+  const nextEntryFee = entryFee !== void 0 ? parseFloat(entryFee) : tournament.entryFee;
+  const nextPrizePool = prizePool !== void 0 ? parseFloat(prizePool) : tournament.prizePool;
+  const nextMaxPlayers = maxPlayers !== void 0 ? parseInt(maxPlayers, 10) : tournament.maxPlayers;
+  if (!Number.isFinite(nextEntryFee) || nextEntryFee <= 0 || !Number.isFinite(nextPrizePool) || nextPrizePool <= 0 || !Number.isInteger(nextMaxPlayers) || nextMaxPlayers < Math.max(2, tournament.players.length)) {
+    return res.status(400).json({ error: "Tournament financial settings or player capacity are invalid." });
+  }
+  const sustainablePrizeLimit = Number((nextEntryFee * nextMaxPlayers * 0.9).toFixed(2));
+  if (nextPrizePool > sustainablePrizeLimit) {
+    return res.status(400).json({ error: `Prize pool cannot exceed $${sustainablePrizeLimit.toFixed(2)} (90% of maximum entry fees).` });
+  }
   if (name) tournament.name = String(name).trim();
-  if (entryFee !== void 0 && !isNaN(parseFloat(entryFee))) tournament.entryFee = parseFloat(entryFee);
-  if (prizePool !== void 0 && !isNaN(parseFloat(prizePool))) tournament.prizePool = parseFloat(prizePool);
-  if (maxPlayers !== void 0 && !isNaN(parseInt(maxPlayers, 10))) tournament.maxPlayers = parseInt(maxPlayers, 10);
+  tournament.entryFee = nextEntryFee;
+  tournament.prizePool = nextPrizePool;
+  tournament.maxPlayers = nextMaxPlayers;
   if (startDate) tournament.startDate = new Date(startDate).getTime();
   await saveStoreAndWait();
   broadcastToAll("tournament_update", tournament);
@@ -3528,7 +3726,8 @@ app.get("/api/admin/settings", hasPermission("settings"), async (req, res) => {
       username: store.adminSettings?.username || process.env.ADMIN_USERNAME || "admin",
       passwordConfigured: Boolean(store.adminSettings?.password),
       roles,
-      vipTiers: store.vipTiers
+      vipTiers: store.vipTiers,
+      adSettings: store.adSettings
     });
   } catch (error) {
     console.error("Failed to retrieve admin roles:", error);
@@ -3572,7 +3771,7 @@ app.post("/api/admin/settings", isAdmin, async (req, res) => {
 });
 app.post("/api/admin/roles/create", hasPermission("all"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { username, password, permissions, name } = req.body;
+  const { username, password, permissions, name, location, cashierMonthlySalary, cashierMonthlyTarget, cashierTargetBonus } = req.body;
   const normalizedPermissions = normalizeAdminPermissions(permissions);
   if (!username || !password || !Array.isArray(permissions) || !name) {
     return res.status(400).json({ error: "Role Name, username, password, and a list of permissions are required." });
@@ -3582,6 +3781,9 @@ app.post("/api/admin/roles/create", hasPermission("all"), async (req, res) => {
   }
   if (normalizedPermissions.length === 0) {
     return res.status(400).json({ error: "Select at least one valid permission." });
+  }
+  if (normalizedPermissions.includes("cashier") && !normalizedCity(location)) {
+    return res.status(400).json({ error: "Cashier location/city is required." });
   }
   try {
     const adminUsersRef = db.collection("adminUsers");
@@ -3597,7 +3799,12 @@ app.post("/api/admin/roles/create", hasPermission("all"), async (req, res) => {
       // In a real app, this MUST be hashed.
       permissions: normalizedPermissions,
       name: String(name).trim(),
-      status: "active"
+      status: "active",
+      location: normalizedPermissions.includes("cashier") ? String(location).trim() : "",
+      cashierMonthlySalary: normalizedPermissions.includes("cashier") ? Math.max(0, Number(cashierMonthlySalary || 0)) : 0,
+      cashierMonthlyTarget: normalizedPermissions.includes("cashier") ? Math.max(0, Math.floor(Number(cashierMonthlyTarget || 0))) : 0,
+      cashierTargetBonus: normalizedPermissions.includes("cashier") ? Math.max(0, Number(cashierTargetBonus || 0)) : 0,
+      cashierNextSalaryDate: normalizedPermissions.includes("cashier") ? Date.now() + 30 * 24 * 60 * 60 * 1e3 : void 0
     };
     await adminUsersRef.doc(newAdminId).set(newAdmin);
     const { password: _, ...userToReturn } = newAdmin;
@@ -3637,6 +3844,21 @@ app.post("/api/admin/roles/:roleId/update", hasPermission("all"), async (req, re
       }
       updatedData.permissions = normalizedPermissions;
     }
+    const effectivePermissions = updatedData.permissions || normalizeAdminPermissions(adminData.permissions);
+    if (effectivePermissions.includes("cashier") && !normalizedCity(updatedData.location ?? adminData.location)) {
+      return res.status(400).json({ error: "Cashier location/city is required." });
+    }
+    updatedData.location = effectivePermissions.includes("cashier") ? String(updatedData.location ?? adminData.location).trim() : "";
+    for (const field of ["cashierMonthlySalary", "cashierTargetBonus"]) {
+      if (updatedData[field] !== void 0) updatedData[field] = Math.max(0, Number(updatedData[field]) || 0);
+    }
+    if (updatedData.cashierMonthlyTarget !== void 0) updatedData.cashierMonthlyTarget = Math.max(0, Math.floor(Number(updatedData.cashierMonthlyTarget) || 0));
+    if (!effectivePermissions.includes("cashier")) {
+      updatedData.cashierMonthlySalary = 0;
+      updatedData.cashierMonthlyTarget = 0;
+      updatedData.cashierTargetBonus = 0;
+    }
+    delete updatedData.cashierOnlineAt;
     if (updatedData.status !== void 0 && !["active", "suspended"].includes(updatedData.status)) {
       return res.status(400).json({ error: "Invalid role status." });
     }
@@ -3684,44 +3906,97 @@ app.delete("/api/admin/roles/:roleId/delete", hasPermission("all"), async (req, 
   }
 });
 app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
-  const users = Object.values(store.users).filter((user2) => !user2.id.startsWith("bot_") && !user2.id.startsWith("user_sim_"));
+  const users = Object.values(store.users).filter((user) => !user.id.startsWith("bot_") && !user.id.startsWith("user_sim_"));
   const rooms = Object.values(store.rooms);
   const tournaments = Object.values(store.tournaments);
   const manualTransactions = store.pendingManualTransactions || [];
   const monthBuckets = /* @__PURE__ */ new Map();
   const now = /* @__PURE__ */ new Date();
+  const revenueBreakdown = {
+    game_rake: 0,
+    team_game_rake: 0,
+    forfeit_rake: 0,
+    bot_result: 0,
+    withdrawal_fee: 0,
+    vip_subscription: 0,
+    tournament_margin: 0,
+    tournament_cancellation_fee: 0
+  };
+  const inferRevenueCategory = (tx) => {
+    if (tx.revenueCategory) return tx.revenueCategory;
+    const description = String(tx.description || "");
+    if (/vip subscription/i.test(description)) return "vip_subscription";
+    if (/withdrawal fee/i.test(description)) return "withdrawal_fee";
+    if (/forfeit.*rake|rake from forfeit/i.test(description)) return "forfeit_rake";
+    if (/team-game rake|team game rake/i.test(description)) return "team_game_rake";
+    if (/bot.*won|bot result/i.test(description)) return "bot_result";
+    if (/tournament margin/i.test(description)) return "tournament_margin";
+    if (/tournament cancellation fee/i.test(description)) return "tournament_cancellation_fee";
+    if (/rake from match/i.test(description)) return "game_rake";
+    return null;
+  };
+  store.transactions.forEach((tx) => {
+    if (tx.type !== "app_commission") return;
+    const category = inferRevenueCategory(tx);
+    if (category) revenueBreakdown[category] += Number(tx.amount || 0);
+  });
+  Object.keys(revenueBreakdown).forEach((key) => {
+    revenueBreakdown[key] = Number(revenueBreakdown[key].toFixed(2));
+  });
+  const recordedHouseRevenue = Number(Object.values(revenueBreakdown).reduce((sum, value) => sum + value, 0).toFixed(2));
+  const welcomeBonusCost = Number(store.transactions.filter((tx) => /welcome signup bonus/i.test(tx.description || "")).reduce((sum, tx) => sum + Number(tx.amount || 0), 0).toFixed(2));
   for (let offset = 5; offset >= 0; offset--) {
     const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
     const key = `${date.getFullYear()}-${date.getMonth()}`;
     monthBuckets.set(key, { month: date.toLocaleString("en", { month: "short" }), deposits: 0, withdrawals: 0, transactions: 0 });
   }
-  store.transactions.forEach((tx2) => {
-    const date = new Date(tx2.timestamp);
+  store.transactions.forEach((tx) => {
+    const date = new Date(tx.timestamp);
     const bucket = monthBuckets.get(`${date.getFullYear()}-${date.getMonth()}`);
     if (!bucket) return;
     bucket.transactions += 1;
-    if (tx2.type === "deposit" || tx2.type === "win_payout" || tx2.type === "refund") bucket.deposits += Number(tx2.amount || 0);
-    if (tx2.type === "withdrawal") bucket.withdrawals += Number(tx2.amount || 0);
+    if (tx.type === "deposit" || tx.type === "win_payout" || tx.type === "refund") bucket.deposits += Number(tx.amount || 0);
+    if (tx.type === "withdrawal") bucket.withdrawals += Number(tx.amount || 0);
   });
   let totalAgents = 0;
   let activeAgents = 0;
   let pendingAgentRequests = 0;
+  let agentFloatIssued = 0;
+  let agentFloatCash = 0;
+  let agentCommissionDiscounts = 0;
+  let monthlyAgents = 0;
+  let monthlySalaryLiability = 0;
+  let cashierPayrollPaid = 0;
   if (db) {
     try {
-      const [agentsSnapshot, agentRequestsSnapshot] = await Promise.all([
+      const [agentsSnapshot, agentRequestsSnapshot, agentTransactionsSnapshot, cashierPaymentsSnapshot] = await Promise.all([
         db.collection("agents").get(),
-        db.collection("agentRequests").where("status", "==", "pending").get()
+        db.collection("agentRequests").where("status", "==", "pending").get(),
+        db.collection("agentTransactions").get(),
+        db.collection("cashierPayments").get()
       ]);
       totalAgents = agentsSnapshot.size;
       activeAgents = agentsSnapshot.docs.filter((doc) => doc.data().status === "Active").length;
+      monthlyAgents = agentsSnapshot.docs.filter((doc) => doc.data().businessModel === "monthly").length;
+      monthlySalaryLiability = agentsSnapshot.docs.filter((doc) => doc.data().businessModel === "monthly" && doc.data().status === "Active").reduce((sum, doc) => sum + Number(doc.data().monthlySalary || 0), 0);
       pendingAgentRequests = agentRequestsSnapshot.size;
+      agentTransactionsSnapshot.docs.forEach((doc) => {
+        const tx = doc.data();
+        if (tx.type !== "FloatPurchase" || Number(tx.amount || 0) <= 0) return;
+        const amount = Number(tx.amount || 0);
+        const discount = Math.max(0, Number(tx.discountAmount || 0));
+        agentFloatIssued += amount;
+        agentCommissionDiscounts += discount;
+        agentFloatCash += Math.max(0, amount - discount);
+      });
+      cashierPayrollPaid = cashierPaymentsSnapshot.docs.reduce((sum, doc) => sum + Number(doc.data().total || 0), 0);
     } catch (error) {
       console.error("Failed to include Firestore agent metrics in admin stats:", error);
     }
   }
   const recentActivity = [
-    ...store.transactions.slice(-8).map((tx2) => ({ id: tx2.id, kind: "transaction", title: tx2.description, amount: tx2.amount, status: tx2.status || "completed", timestamp: tx2.timestamp })),
-    ...manualTransactions.slice(0, 8).map((tx2) => ({ id: tx2.id, kind: "manual", title: `${tx2.username} requested a ${tx2.transactionType}`, amount: tx2.amount, status: tx2.status, timestamp: tx2.createdAt }))
+    ...store.transactions.slice(-8).map((tx) => ({ id: tx.id, kind: "transaction", title: tx.description, amount: tx.amount, status: tx.status || "completed", timestamp: tx.timestamp })),
+    ...manualTransactions.slice(0, 8).map((tx) => ({ id: tx.id, kind: "manual", title: `${tx.username} requested a ${tx.transactionType}`, amount: tx.amount, status: tx.status, timestamp: tx.createdAt }))
   ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
   res.json({
     totalUsers: users.length,
@@ -3729,11 +4004,20 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     activeRooms: rooms.filter((r) => r.status === "playing").length,
     waitingRooms: rooms.filter((r) => r.status === "waiting").length,
     completedRooms: rooms.filter((r) => r.status === "completed").length,
-    houseRevenue: store.houseRevenue || 0,
+    houseRevenue: recordedHouseRevenue,
+    netPlatformEarnings: Number((recordedHouseRevenue - agentCommissionDiscounts - welcomeBonusCost - cashierPayrollPaid).toFixed(2)),
+    revenueBreakdown,
+    welcomeBonusCost,
+    agentFloatIssued: Number(agentFloatIssued.toFixed(2)),
+    agentFloatCash: Number(agentFloatCash.toFixed(2)),
+    agentCommissionDiscounts: Number(agentCommissionDiscounts.toFixed(2)),
+    monthlyAgents,
+    monthlySalaryLiability: Number(monthlySalaryLiability.toFixed(2)),
+    cashierPayrollPaid: Number(cashierPayrollPaid.toFixed(2)),
     onlineClients: activeClients.length,
     totalTransactions: store.transactions.length,
-    pendingAdminTransactions: manualTransactions.filter((tx2) => tx2.status === "pending" && tx2.managedBy !== "agent").length,
-    pendingAgentTransactions: manualTransactions.filter((tx2) => tx2.status === "pending" && tx2.managedBy === "agent").length,
+    pendingAdminTransactions: manualTransactions.filter((tx) => tx.status === "pending" && tx.managedBy !== "agent").length,
+    pendingAgentTransactions: manualTransactions.filter((tx) => tx.status === "pending" && tx.managedBy === "agent").length,
     totalAgents,
     activeAgents,
     pendingAgentRequests,
@@ -3753,11 +4037,12 @@ app.get("/api/admin/rooms", hasPermission("rooms"), (req, res) => {
 app.get("/api/admin/transactions", hasPermission("transactions"), (req, res) => {
   res.json(store.transactions);
 });
-app.get("/api/admin/manual-transactions", hasPermission("transactions"), async (req, res) => {
+app.get("/api/admin/manual-transactions", hasAnyPermission("transactions", "cashier"), async (req, res) => {
+  await reassignExpiredCashierRequests();
   const agentNames = /* @__PURE__ */ new Map();
   if (db) {
     const linkedAgentIds = [...new Set(
-      Object.values(store.users).map((user2) => user2.linkedAgentId).filter((id) => Boolean(id))
+      Object.values(store.users).map((user) => user.linkedAgentId).filter((id) => Boolean(id))
     )];
     await Promise.all(linkedAgentIds.map(async (agentId) => {
       try {
@@ -3770,17 +4055,105 @@ app.get("/api/admin/manual-transactions", hasPermission("transactions"), async (
       }
     }));
   }
-  const transactions = (store.pendingManualTransactions || []).map((tx2) => {
-    const user2 = store.users[tx2.userId];
-    const linkedAgentId = user2?.linkedAgentId;
+  const transactions = (store.pendingManualTransactions || []).map((tx) => {
+    const user = store.users[tx.userId];
+    const linkedAgentId = user?.linkedAgentId;
     return {
-      ...tx2,
-      agentId: linkedAgentId || tx2.agentId,
-      agentUsername: tx2.agentUsername || (linkedAgentId ? agentNames.get(linkedAgentId) : void 0),
-      managedBy: tx2.managedBy || (linkedAgentId ? "agent" : "admin")
+      ...tx,
+      agentId: linkedAgentId || tx.agentId,
+      agentUsername: tx.agentUsername || (linkedAgentId ? agentNames.get(linkedAgentId) : void 0),
+      managedBy: tx.managedBy || (linkedAgentId ? "agent" : "admin")
     };
   });
-  res.json(transactions);
+  const permissions = req.adminPermissions || [];
+  const cashierOnly = permissions.includes("cashier") && !permissions.includes("transactions") && !permissions.includes("all");
+  const adminId = String(req.query.userId || "");
+  res.json(cashierOnly ? transactions.filter((tx) => tx.managedBy !== "agent" && tx.assignedCashierId === adminId) : transactions);
+});
+function cashierPeriod(now = /* @__PURE__ */ new Date()) {
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const key = `${year}-${String(month + 1).padStart(2, "0")}`;
+  return { key, start: Date.UTC(year, month, 1), end: Date.UTC(year, month + 1, 1) };
+}
+app.get("/api/admin/cashiers", hasPermission("settings"), async (_req, res) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const now = Date.now();
+  const period = cashierPeriod();
+  const [adminsSnapshot, paymentsSnapshot] = await Promise.all([
+    db.collection("adminUsers").get(),
+    db.collection("cashierPayments").get()
+  ]);
+  const paidByCashier = new Map(paymentsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((payment) => payment.period === period.key).map((payment) => [payment.cashierId, payment]));
+  const periodRequests = store.pendingManualTransactions.filter((request) => request.createdAt >= period.start && request.createdAt < period.end && request.managedBy !== "agent");
+  const cashiers = adminsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((admin) => normalizeAdminPermissions(admin.permissions).includes("cashier")).map((cashier) => {
+    const resolved = periodRequests.filter((request) => request.resolvedBy === cashier.id);
+    const approved = resolved.filter((request) => request.status === "approved");
+    const rejected = resolved.filter((request) => request.status === "rejected");
+    const responseSamples = resolved.filter((request) => request.resolvedAt && request.assignedCashierAt).map((request) => Math.max(0, Number(request.resolvedAt) - Number(request.assignedCashierAt)));
+    const timedOut = periodRequests.reduce((count, request) => count + (request.cashierTimedOutIds || []).filter((id) => id === cashier.id).length, 0);
+    const monthlyTarget = Math.max(0, Number(cashier.cashierMonthlyTarget || 0));
+    const targetReached = monthlyTarget > 0 && approved.length >= monthlyTarget;
+    const salary = Math.max(0, Number(cashier.cashierMonthlySalary || 0));
+    const bonus = targetReached ? Math.max(0, Number(cashier.cashierTargetBonus || 0)) : 0;
+    const payment = paidByCashier.get(cashier.id);
+    return {
+      id: cashier.id,
+      username: cashier.username,
+      name: cashier.name,
+      location: cashier.location,
+      status: cashier.status || "active",
+      online: cashier.status !== "suspended" && Number(cashier.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS,
+      lastSeenAt: Number(cashier.cashierOnlineAt || 0),
+      monthlySalary: salary,
+      monthlyTarget,
+      targetBonus: Math.max(0, Number(cashier.cashierTargetBonus || 0)),
+      targetReached,
+      approved: approved.length,
+      rejected: rejected.length,
+      completed: resolved.length,
+      deposits: approved.filter((request) => request.transactionType === "deposit").length,
+      withdrawals: approved.filter((request) => request.transactionType === "withdraw").length,
+      handledAmount: Number(approved.reduce((sum, request) => sum + Number(request.amount || 0), 0).toFixed(2)),
+      averageResponseSeconds: responseSamples.length ? Math.round(responseSamples.reduce((sum, value) => sum + value, 0) / responseSamples.length / 1e3) : 0,
+      timedOut,
+      period: period.key,
+      salaryStatus: payment ? "paid" : Number(cashier.cashierNextSalaryDate || 0) <= now ? "due" : "pending",
+      payableAmount: Number((salary + bonus).toFixed(2)),
+      paidAt: payment?.paidAt
+    };
+  });
+  const history = paymentsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).sort((a, b) => Number(b.paidAt || 0) - Number(a.paidAt || 0));
+  res.json({ period: period.key, cashiers, history });
+});
+app.post("/api/admin/cashiers/:cashierId/pay", hasPermission("settings"), async (req, res) => {
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  const cashierId = String(req.params.cashierId || "");
+  const adminId = String(req.query.userId || "");
+  const period = cashierPeriod();
+  const cashierRef = db.collection("adminUsers").doc(cashierId);
+  const paymentRef = db.collection("cashierPayments").doc(`${cashierId}_${period.key}`);
+  try {
+    const result = await db.runTransaction(async (transaction) => {
+      const [cashierDoc, paymentDoc] = await Promise.all([transaction.get(cashierRef), transaction.get(paymentRef)]);
+      if (!cashierDoc.exists) throw new Error("Cashier not found.");
+      if (paymentDoc.exists) throw new Error("This cashier has already been paid for the current period.");
+      const cashier = cashierDoc.data();
+      if (!normalizeAdminPermissions(cashier.permissions).includes("cashier")) throw new Error("Selected account is not a cashier.");
+      const approved = store.pendingManualTransactions.filter((request) => request.managedBy !== "agent" && request.resolvedBy === cashierId && request.status === "approved" && request.createdAt >= period.start && request.createdAt < period.end).length;
+      const target = Math.max(0, Number(cashier.cashierMonthlyTarget || 0));
+      const salary = Math.max(0, Number(cashier.cashierMonthlySalary || 0));
+      const bonus = target > 0 && approved >= target ? Math.max(0, Number(cashier.cashierTargetBonus || 0)) : 0;
+      const payment = { cashierId, cashierName: cashier.name || cashier.username, period: period.key, salary, bonus, total: Number((salary + bonus).toFixed(2)), approvedCount: approved, paidAt: Date.now(), paidBy: adminId };
+      transaction.set(paymentRef, payment);
+      transaction.update(cashierRef, { cashierNextSalaryDate: period.end });
+      return payment;
+    });
+    res.json({ success: true, payment: result });
+  } catch (error) {
+    const message = error?.message || "Cashier payment could not be recorded.";
+    res.status(message.includes("already been paid") ? 409 : 400).json({ error: message });
+  }
 });
 app.get("/api/admin/payment-settings", hasPermission("settings"), (req, res) => {
   res.json(store.paymentProviders);
@@ -3803,86 +4176,123 @@ app.post("/api/admin/payment-settings", hasPermission("settings"), async (req, r
     agentFloatInstructions: store.agentFloatInstructions
   });
 });
-app.post("/api/admin/manual-transactions/:transactionId/approve", hasPermission("transactions"), async (req, res) => {
+app.get("/api/ads/active", (_req, res) => res.json(store.adSettings || DEFAULT_AD_SETTINGS));
+app.get("/api/admin/ad-settings", hasPermission("settings"), (_req, res) => res.json(store.adSettings || DEFAULT_AD_SETTINGS));
+app.post("/api/admin/ad-settings", hasPermission("settings"), async (req, res) => {
+  const value = req.body || {};
+  const formats = ["banner", "ticker", "popup", "adsense"];
+  const placements = ["all", "dashboard", "game"];
+  const durationSeconds = Number(value.durationSeconds) === 2 ? 2 : 3;
+  const intervalSeconds = Math.max(10, Math.min(3600, Number(value.intervalSeconds) || 60));
+  if (!formats.includes(value.format) || !placements.includes(value.placement)) return res.status(400).json({ error: "Invalid ad format or placement." });
+  if (value.enabled && value.format !== "adsense" && !String(value.title || value.message || value.imageUrl || "").trim()) return res.status(400).json({ error: "Add ad text or an image before enabling the campaign." });
+  store.adSettings = { ...DEFAULT_AD_SETTINGS, ...value, durationSeconds, intervalSeconds, updatedAt: Date.now() };
+  await saveStoreAndWait();
+  broadcastToAll("ad_settings_updated", store.adSettings);
+  res.json({ success: true, adSettings: store.adSettings });
+});
+app.post("/api/admin/manual-transactions/:transactionId/approve", hasAnyPermission("transactions", "cashier"), async (req, res) => {
   const { transactionId } = req.params;
-  const tx2 = store.pendingManualTransactions.find((t) => t.id === transactionId);
-  if (!tx2 || tx2.status !== "pending") {
+  const tx = store.pendingManualTransactions.find((t) => t.id === transactionId);
+  if (!tx || tx.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  const user2 = store.users[tx2.userId];
-  if (!user2) {
+  const permissions = req.adminPermissions || [];
+  const cashierOnly = permissions.includes("cashier") && !permissions.includes("transactions") && !permissions.includes("all");
+  if (cashierOnly && (tx.managedBy === "agent" || Boolean(tx.agentId))) {
+    return res.status(403).json({ error: "Agent-managed requests are viewable only by transaction administrators." });
+  }
+  if (cashierOnly && (tx.assignedCashierId !== String(req.query.userId || "") || Number(tx.assignmentExpiresAt || 0) <= Date.now())) {
+    await assignCashierToRequest(tx);
+    return res.status(409).json({ error: "This request is no longer assigned to you." });
+  }
+  const user = store.users[tx.userId];
+  if (!user) {
     return res.status(404).json({ error: "User associated with transaction not found." });
   }
-  if (tx2.managedBy === "agent" || user2.linkedAgentId) {
+  if (tx.managedBy === "agent" || user.linkedAgentId) {
     return res.status(403).json({ error: "This transaction is assigned to an agent and is read-only for administrators." });
   }
-  if (tx2.transactionType === "deposit") {
-    user2.balance += tx2.amount;
-    addTransaction(user2.id, "deposit", tx2.amount, void 0, `Manual deposit approved by admin. Request ID: ${tx2.id}`);
+  if (tx.transactionType === "deposit") {
+    user.balance += tx.amount;
+    addTransaction(user.id, "deposit", tx.amount, void 0, `Manual deposit approved by admin. Request ID: ${tx.id}`);
   } else {
-    const eligibilityError = withdrawalEligibilityError(user2, tx2.amount, tx2.id);
+    const eligibilityError = withdrawalEligibilityError(user, tx.amount, tx.id);
     if (eligibilityError) {
-      tx2.status = "rejected";
-      await saveManualRequestToFirestore(tx2);
+      tx.status = "rejected";
+      await saveManualRequestToFirestore(tx);
       await saveStoreAndWait();
       return res.status(400).json({ error: eligibilityError });
     }
-    if (user2.balance < tx2.amount) {
-      tx2.status = "rejected";
+    if (user.balance < tx.amount) {
+      tx.status = "rejected";
       await saveStoreAndWait();
       return res.status(400).json({ error: "Insufficient balance to approve this withdrawal request. Transaction has been rejected." });
     }
-    user2.balance -= tx2.amount;
-    addTransaction(user2.id, "withdrawal", tx2.amount, void 0, `Manual withdrawal approved by admin. Request ID: ${tx2.id}`);
-    recordWithdrawalFee(user2.id, Number(tx2.fee || 0), tx2.id);
+    user.balance -= tx.amount;
+    addTransaction(user.id, "withdrawal", tx.amount, void 0, `Manual withdrawal approved by admin. Request ID: ${tx.id}`);
+    recordWithdrawalFee(user.id, Number(tx.fee || 0), tx.id);
   }
-  tx2.status = "approved";
-  tx2.managedBy = "admin";
-  tx2.resolvedBy = String(req.query.userId || "admin");
-  tx2.resolverUsername = "Admin";
+  tx.status = "approved";
+  tx.managedBy = "admin";
+  tx.resolvedBy = String(req.query.userId || "admin");
+  tx.resolverUsername = String(req.adminUser?.name || req.adminUser?.username || "Admin");
+  tx.resolvedAt = Date.now();
+  await saveManualRequestToFirestore(tx);
   await saveStoreAndWait();
-  broadcastUserUpdate(user2.id);
-  res.json({ success: true, transaction: tx2 });
+  broadcastUserUpdate(user.id);
+  res.json({ success: true, transaction: tx });
 });
-app.post("/api/admin/manual-transactions/:transactionId/reject", hasPermission("transactions"), async (req, res) => {
+app.post("/api/admin/manual-transactions/:transactionId/reject", hasAnyPermission("transactions", "cashier"), async (req, res) => {
   const { transactionId } = req.params;
-  const tx2 = store.pendingManualTransactions.find((t) => t.id === transactionId);
-  if (!tx2 || tx2.status !== "pending") {
+  const tx = store.pendingManualTransactions.find((t) => t.id === transactionId);
+  if (!tx || tx.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  const user2 = store.users[tx2.userId];
-  if (tx2.managedBy === "agent" || user2?.linkedAgentId) {
+  const permissions = req.adminPermissions || [];
+  const cashierOnly = permissions.includes("cashier") && !permissions.includes("transactions") && !permissions.includes("all");
+  if (cashierOnly && (tx.managedBy === "agent" || Boolean(tx.agentId))) {
+    return res.status(403).json({ error: "Agent-managed requests are viewable only by transaction administrators." });
+  }
+  if (cashierOnly && (tx.assignedCashierId !== String(req.query.userId || "") || Number(tx.assignmentExpiresAt || 0) <= Date.now())) {
+    await assignCashierToRequest(tx);
+    return res.status(409).json({ error: "This request is no longer assigned to you." });
+  }
+  const user = store.users[tx.userId];
+  if (tx.managedBy === "agent" || user?.linkedAgentId) {
     return res.status(403).json({ error: "This transaction is assigned to an agent and is read-only for administrators." });
   }
-  if (!user2) {
-    tx2.status = "rejected";
+  if (!user) {
+    tx.status = "rejected";
     await saveStoreAndWait();
     return res.status(404).json({ error: "User associated with transaction not found. Transaction rejected." });
   }
-  tx2.status = "rejected";
-  tx2.managedBy = "admin";
-  tx2.resolvedBy = String(req.query.userId || "admin");
-  tx2.resolverUsername = "Admin";
+  tx.status = "rejected";
+  tx.managedBy = "admin";
+  tx.resolvedBy = String(req.query.userId || "admin");
+  tx.resolverUsername = String(req.adminUser?.name || req.adminUser?.username || "Admin");
+  tx.resolvedAt = Date.now();
+  await saveManualRequestToFirestore(tx);
   await saveStoreAndWait();
-  sendEventToUser(user2.id, "user_notification", {
+  sendEventToUser(user.id, "user_notification", {
     type: "info",
-    message: `Your ${tx2.transactionType} request for $${tx2.amount} was rejected.`
+    message: `Your ${tx.transactionType} request for $${tx.amount} was rejected.`
   });
-  res.json({ success: true, transaction: tx2 });
+  res.json({ success: true, transaction: tx });
 });
 app.post("/api/admin/impersonate", hasPermission("users"), (req, res) => {
   const { userId, targetUserId } = req.body;
   const targetId = targetUserId || userId;
-  const user2 = store.users[targetId];
-  if (!user2) {
+  const user = store.users[targetId];
+  if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
-  const uName = String(user2.username || "").toLowerCase();
-  const uRole = String(user2.role || "").toLowerCase();
+  const uName = String(user.username || "").toLowerCase();
+  const uRole = String(user.role || "").toLowerCase();
   if (uName === "admin" || uName === "superadmin" || uRole.includes("admin") || uRole.includes("super")) {
     return res.status(400).json({ error: "Full Admin accounts are protected and cannot be impersonated." });
   }
-  res.json({ success: true, user: user2 });
+  res.json({ success: true, user });
 });
 app.post("/api/admin/users/:userId/update", hasPermission("users"), async (req, res) => {
   const userId = req.params.userId;
@@ -3934,7 +4344,7 @@ app.get("/api/admin/agents", hasPermission("agents"), async (req, res) => {
 });
 app.post("/api/admin/agents/create", hasPermission("agents"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
-  const { username, password, commissionRate, location, phone, promoCode } = req.body;
+  const { username, password, commissionRate, location, phone, promoCode, businessModel, monthlySalary, monthlyTarget, dailyTransactionLimit } = req.body;
   const normalizedPromoCode = normalizePromoCode(promoCode);
   if (!username || !password || !commissionRate || !phone || !normalizedPromoCode || !location) {
     return res.status(400).json({ error: "Username, password, commission rate, phone, promo code, and location are required." });
@@ -3972,7 +4382,13 @@ app.post("/api/admin/agents/create", hasPermission("agents"), async (req, res) =
       balance: 0,
       floatBalance: 0,
       status: "Active",
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      businessModel: businessModel === "monthly" ? "monthly" : "independent",
+      monthlySalary: businessModel === "monthly" ? Math.max(0, Number(monthlySalary || 0)) : 0,
+      monthlyTarget: businessModel === "monthly" ? Math.max(0, Number(monthlyTarget || 0)) : 0,
+      dailyTransactionLimit: businessModel === "monthly" ? Math.max(0, Number(dailyTransactionLimit || 0)) : 0,
+      salaryStatus: businessModel === "monthly" ? "current" : void 0,
+      nextSalaryDate: businessModel === "monthly" ? Date.now() + 30 * 24 * 60 * 60 * 1e3 : void 0
     };
     await agentsRef.doc(agentId).set(newAgent);
     res.status(201).json(newAgent);
@@ -3984,7 +4400,7 @@ app.post("/api/admin/agents/create", hasPermission("agents"), async (req, res) =
 app.post("/api/admin/agents/:agentId/update", hasPermission("agents"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   const agentId = req.params.agentId;
-  const { username, password, commissionRate, status, location, phone, promoCode } = req.body;
+  const { username, password, commissionRate, status, location, phone, promoCode, businessModel, monthlySalary, monthlyTarget, dailyTransactionLimit, salaryStatus, nextSalaryDate } = req.body;
   try {
     const agentRef = db.collection("agents").doc(agentId);
     const agentDoc = await agentRef.get();
@@ -4032,6 +4448,23 @@ app.post("/api/admin/agents/:agentId/update", hasPermission("agents"), async (re
     if (normalizedPromoCode !== void 0) {
       updateData.promoCode = normalizedPromoCode;
     }
+    if (businessModel === "independent" || businessModel === "monthly") {
+      updateData.businessModel = businessModel;
+      if (businessModel === "independent") {
+        updateData.monthlySalary = 0;
+        updateData.monthlyTarget = 0;
+        updateData.dailyTransactionLimit = 0;
+        updateData.salaryStatus = void 0;
+        updateData.nextSalaryDate = void 0;
+      }
+    }
+    if (businessModel === "monthly" || agentData.businessModel === "monthly") {
+      if (monthlySalary !== void 0 && Number.isFinite(Number(monthlySalary))) updateData.monthlySalary = Math.max(0, Number(monthlySalary));
+      if (monthlyTarget !== void 0 && Number.isFinite(Number(monthlyTarget))) updateData.monthlyTarget = Math.max(0, Number(monthlyTarget));
+      if (dailyTransactionLimit !== void 0 && Number.isFinite(Number(dailyTransactionLimit))) updateData.dailyTransactionLimit = Math.max(0, Number(dailyTransactionLimit));
+      if (salaryStatus && ["current", "due", "paid"].includes(salaryStatus)) updateData.salaryStatus = salaryStatus;
+      if (nextSalaryDate !== void 0 && Number.isFinite(Number(nextSalaryDate))) updateData.nextSalaryDate = Number(nextSalaryDate);
+    }
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ error: "No valid fields to update." });
     }
@@ -4059,7 +4492,7 @@ app.delete("/api/admin/agents/:agentId/delete", hasPermission("agents"), async (
     if (isFullAdminAgent) {
       return res.status(400).json({ error: "Full Admin agents are protected and cannot be deleted." });
     }
-    const linkedPlayers = Object.values(store.users).filter((user2) => user2.linkedAgentId === agentId);
+    const linkedPlayers = Object.values(store.users).filter((user) => user.linkedAgentId === agentId);
     if (linkedPlayers.length > 0) {
       return res.status(409).json({
         error: `This agent has ${linkedPlayers.length} linked player(s). Reassign or unlink them before deleting the agent.`
@@ -4153,6 +4586,8 @@ app.post("/api/admin/agent-requests/:requestId/approve", hasPermission("agents")
       }
       const currentFloat = agentDoc.data()?.floatBalance || 0;
       const newFloatBalance = currentFloat + request.amount;
+      const commissionRate = Math.max(0, Math.min(1, Number(agentDoc.data()?.commissionRate || 0)));
+      const discountAmount = Number((request.amount * commissionRate).toFixed(2));
       const adminUserDoc = await db.collection("adminUsers").doc(adminId).get();
       const resolverUsername = adminUserDoc.exists ? adminUserDoc.data()?.username : "Unknown Admin";
       t.update(agentRef, { floatBalance: newFloatBalance });
@@ -4168,8 +4603,9 @@ app.post("/api/admin/agent-requests/:requestId/approve", hasPermission("agents")
         agentId: request.agentId,
         type: "FloatPurchase",
         amount: request.amount,
+        discountAmount,
         timestamp: Date.now(),
-        description: `Float request for ${request.amount} approved by admin. Request ID: ${request.id}`
+        description: `Float request for $${request.amount.toFixed(2)} approved; admin cash $${(request.amount - discountAmount).toFixed(2)}, agent commission $${discountAmount.toFixed(2)}. Request ID: ${request.id}`
       };
       t.set(transactionRef, transactionData);
     });
@@ -4234,9 +4670,9 @@ app.post("/api/admin/rooms/:roomId/cancel", hasPermission("rooms"), (req, res) =
   if (room.betAmount > 0) {
     room.players.forEach((p) => {
       if (!isBotPlayer(p.userId)) {
-        const user2 = store.users[p.userId];
-        if (user2) {
-          user2.balance += room.betAmount;
+        const user = store.users[p.userId];
+        if (user) {
+          user.balance += room.betAmount;
           addTransaction(p.userId, "refund", room.betAmount, room.id, `Refund for canceled match ${room.id}.`);
           broadcastUserUpdate(p.userId);
         }
@@ -4251,23 +4687,23 @@ app.post("/api/admin/rooms/:roomId/cancel", hasPermission("rooms"), (req, res) =
 });
 app.post("/api/admin/users/:userId/toggle-admin", hasPermission("users"), (req, res) => {
   const userId = req.params.userId;
-  const user2 = store.users[userId];
-  if (!user2) {
+  const user = store.users[userId];
+  if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
-  const uName = String(user2.username || "").toLowerCase();
-  const uRole = String(user2.role || "").toLowerCase();
+  const uName = String(user.username || "").toLowerCase();
+  const uRole = String(user.role || "").toLowerCase();
   if (uName === "admin" || uName === "superadmin" || uRole.includes("admin") || uRole.includes("super")) {
     return res.status(400).json({ error: "Full Admin users are protected and cannot be modified." });
   }
-  if (user2.role === "admin") {
-    user2.role = "player";
+  if (user.role === "admin") {
+    user.role = "player";
   } else {
-    user2.role = "admin";
+    user.role = "admin";
   }
   saveStore();
-  broadcastUserUpdate(user2.id);
-  res.json({ success: true, user: user2 });
+  broadcastUserUpdate(user.id);
+  res.json({ success: true, user });
 });
 app.get("/api/admin/users/:userId/games", hasPermission("users"), (req, res) => {
   const { userId } = req.params;
@@ -4472,7 +4908,6 @@ app.post("/api/agent/deposit", isAgent, async (req, res) => {
       void 0,
       `Deposit received from agent ${agent.id}.`
     );
-    if (tx.transactionType === "withdraw") recordWithdrawalFee(user.id, Number(tx.fee || 0), tx.id);
     await saveStoreAndWait();
     broadcastUserUpdate(player.id);
     const updatedAgentDoc = await agentRef.get();
@@ -4541,28 +4976,28 @@ app.get("/api/agent/player-requests", isAgent, async (req, res) => {
       return res.status(500).json({ error: "Failed to retrieve player requests." });
     }
   }
-  const agentSpecificTxs = store.pendingManualTransactions.filter((tx2) => {
-    const user2 = store.users[tx2.userId];
-    return tx2.agentId === agent.id && (tx2.managedBy === "agent" || user2?.linkedAgentId === agent.id);
+  const agentSpecificTxs = store.pendingManualTransactions.filter((tx) => {
+    const user = store.users[tx.userId];
+    return tx.agentId === agent.id && (tx.managedBy === "agent" || user?.linkedAgentId === agent.id);
   });
-  const responsePayload = agentSpecificTxs.map((tx2) => {
-    const user2 = store.users[tx2.userId];
+  const responsePayload = agentSpecificTxs.map((tx) => {
+    const user = store.users[tx.userId];
     return {
-      id: tx2.id,
-      playerId: tx2.userId,
-      playerUsername: user2 ? user2.username : "Unknown Player",
-      playerAvatar: user2 ? user2.avatar : "\u2753",
+      id: tx.id,
+      playerId: tx.userId,
+      playerUsername: user ? user.username : "Unknown Player",
+      playerAvatar: user ? user.avatar : "\u2753",
       agentId: agent.id,
       // Agent ID is from the authenticated agent
-      playerPhone: tx2.phone,
+      playerPhone: tx.phone,
       // For withdrawals
-      senderPhone: tx2.senderPhone,
+      senderPhone: tx.senderPhone,
       // For deposits
-      provider: tx2.provider,
-      type: tx2.transactionType,
-      amount: tx2.amount,
-      status: tx2.status,
-      createdAt: tx2.createdAt
+      provider: tx.provider,
+      type: tx.transactionType,
+      amount: tx.amount,
+      status: tx.status,
+      createdAt: tx.createdAt
     };
   });
   responsePayload.sort((a, b) => b.createdAt - a.createdAt);
@@ -4571,28 +5006,28 @@ app.get("/api/agent/player-requests", isAgent, async (req, res) => {
 app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, res) => {
   const { requestId } = req.params;
   const agent = req.agent;
-  const tx2 = await findManualRequest(requestId);
-  if (!tx2 || tx2.status !== "pending") {
+  const tx = await findManualRequest(requestId);
+  if (!tx || tx.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  if (tx2.agentId !== agent.id) {
+  if (tx.agentId !== agent.id) {
     return res.status(403).json({ error: "This transaction request belongs to a different agent." });
   }
-  const user2 = store.users[tx2.userId];
-  if (!user2) {
+  const user = store.users[tx.userId];
+  if (!user) {
     return res.status(404).json({ error: "User associated with transaction not found." });
   }
-  if (user2.linkedAgentId && user2.linkedAgentId !== agent.id) {
+  if (user.linkedAgentId && user.linkedAgentId !== agent.id) {
     return res.status(400).json({ error: "This player is locked to a different agent via promo code." });
   }
   try {
     if (!db) {
       throw new Error("Database not initialized");
     }
-    let approvedUserBalance = user2.balance;
+    let approvedUserBalance = user.balance;
     await db.runTransaction(async (t) => {
       const agentRef = db.collection("agents").doc(agent.id);
-      const userRef = db.collection("users").doc(user2.firebaseUid || user2.id);
+      const userRef = db.collection("users").doc(user.firebaseUid || user.id);
       const agentDoc = await t.get(agentRef);
       const userDoc = await t.get(userRef);
       if (!agentDoc.exists) {
@@ -4600,56 +5035,73 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
       }
       const agentData = agentDoc.data();
       const currentFloat = agentData.floatBalance || 0;
-      const persistedBalance = Number(userDoc.data()?.balance ?? user2.balance);
+      const persistedBalance = Number(userDoc.data()?.balance ?? user.balance);
+      if (agentData.businessModel === "monthly" && Number(agentData.dailyTransactionLimit || 0) > 0) {
+        const startOfDay = /* @__PURE__ */ new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const dailyQuery = db.collection("agentTransactions").where("agentId", "==", agent.id).where("timestamp", ">=", startOfDay.getTime());
+        const dailySnapshot = await t.get(dailyQuery);
+        const processedToday = dailySnapshot.docs.reduce((total, doc) => {
+          const item = doc.data();
+          return ["PlayerDeposit", "PlayerWithdrawal"].includes(item.type) ? total + Number(item.amount || 0) : total;
+        }, 0);
+        if (processedToday + Number(tx.amount || 0) > Number(agentData.dailyTransactionLimit)) {
+          throw new Error(`Daily transaction limit exceeded. Remaining today: $${Math.max(0, Number(agentData.dailyTransactionLimit) - processedToday).toFixed(2)}.`);
+        }
+      }
       let newAgentFloat;
       let newUserBalance;
-      if (tx2.transactionType === "deposit") {
-        if (currentFloat < tx2.amount) {
+      if (tx.transactionType === "deposit") {
+        if (currentFloat < tx.amount) {
           throw new Error("Insufficient float balance to approve this deposit.");
         }
-        newAgentFloat = currentFloat - tx2.amount;
-        newUserBalance = persistedBalance + tx2.amount;
+        newAgentFloat = currentFloat - tx.amount;
+        newUserBalance = persistedBalance + tx.amount;
       } else {
-        const eligibilityError = withdrawalEligibilityError(user2, tx2.amount, tx2.id);
+        const eligibilityError = withdrawalEligibilityError(user, tx.amount, tx.id);
         if (eligibilityError) throw new Error(eligibilityError);
-        if (persistedBalance < tx2.amount) {
+        if (persistedBalance < tx.amount) {
           throw new Error("Player has insufficient balance for this withdrawal.");
         }
-        newAgentFloat = currentFloat + tx2.amount;
-        newUserBalance = persistedBalance - tx2.amount;
+        const withdrawalNet = Number(tx.netAmount ?? tx.amount - Number(tx.fee || 0));
+        newAgentFloat = currentFloat + Math.max(0, withdrawalNet);
+        newUserBalance = persistedBalance - tx.amount;
       }
       const agentTxRef = db.collection("agentTransactions").doc();
       const agentTx = {
         id: agentTxRef.id,
         agentId: agent.id,
-        type: tx2.transactionType === "deposit" ? "PlayerDeposit" : "PlayerWithdrawal",
-        amount: tx2.amount,
-        playerId: user2.id,
-        playerName: user2.username,
+        type: tx.transactionType === "deposit" ? "PlayerDeposit" : "PlayerWithdrawal",
+        amount: tx.amount,
+        playerId: user.id,
+        playerName: user.username,
         timestamp: Date.now(),
-        description: `Approved ${tx2.transactionType} of $${tx2.amount} for player ${user2.username}.`
+        description: `Approved ${tx.transactionType} of $${tx.amount} for player ${user.username}.`
       };
       t.set(agentTxRef, agentTx);
       t.update(agentRef, { floatBalance: newAgentFloat });
-      t.set(userRef, { balance: newUserBalance, id: user2.id, firebaseUid: user2.firebaseUid || null }, { merge: true });
+      t.set(userRef, { balance: newUserBalance, id: user.id, firebaseUid: user.firebaseUid || null }, { merge: true });
       approvedUserBalance = newUserBalance;
     });
-    user2.balance = approvedUserBalance;
+    user.balance = approvedUserBalance;
     addTransaction(
-      user2.id,
-      tx2.transactionType === "deposit" ? "deposit" : "withdrawal",
-      tx2.amount,
+      user.id,
+      tx.transactionType === "deposit" ? "deposit" : "withdrawal",
+      tx.amount,
       void 0,
-      `Manual ${tx2.transactionType} approved by agent ${agent.username}. Request ID: ${tx2.id}`
+      `Manual ${tx.transactionType} approved by agent ${agent.username}. Request ID: ${tx.id}`
     );
-    tx2.status = "approved";
-    tx2.resolvedBy = agent.id;
-    tx2.resolverUsername = agent.username;
-    await saveManualRequestToFirestore(tx2);
-    await saveUserProfileToFirestore(user2);
+    if (tx.transactionType === "withdraw") {
+      recordWithdrawalFee(user.id, Number(tx.fee || 0), tx.id);
+    }
+    tx.status = "approved";
+    tx.resolvedBy = agent.id;
+    tx.resolverUsername = agent.username;
+    await saveManualRequestToFirestore(tx);
+    await saveUserProfileToFirestore(user);
     await saveStoreAndWait();
-    broadcastUserUpdate(user2.id);
-    res.json({ success: true, transaction: tx2 });
+    broadcastUserUpdate(user.id);
+    res.json({ success: true, transaction: tx });
   } catch (error) {
     console.error("Error processing agent transaction approval:", error);
     const message = error instanceof Error ? error.message : "An unknown error occurred.";
@@ -4662,30 +5114,30 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
 app.post("/api/agent/player-requests/:requestId/reject", isAgent, async (req, res) => {
   const { requestId } = req.params;
   const agent = req.agent;
-  const tx2 = await findManualRequest(requestId);
-  if (!tx2 || tx2.status !== "pending") {
+  const tx = await findManualRequest(requestId);
+  if (!tx || tx.status !== "pending") {
     return res.status(404).json({ error: "Pending transaction not found or already processed." });
   }
-  if (tx2.agentId !== agent.id) {
+  if (tx.agentId !== agent.id) {
     return res.status(403).json({ error: "This transaction request belongs to a different agent." });
   }
-  const user2 = store.users[tx2.userId];
-  if (!user2) {
-    tx2.status = "rejected";
-    await saveManualRequestToFirestore(tx2);
+  const user = store.users[tx.userId];
+  if (!user) {
+    tx.status = "rejected";
+    await saveManualRequestToFirestore(tx);
     await saveStoreAndWait();
     return res.status(404).json({ error: "User associated with transaction not found. Transaction rejected." });
   }
-  tx2.status = "rejected";
-  tx2.resolvedBy = agent.id;
-  tx2.resolverUsername = agent.username;
-  await saveManualRequestToFirestore(tx2);
+  tx.status = "rejected";
+  tx.resolvedBy = agent.id;
+  tx.resolverUsername = agent.username;
+  await saveManualRequestToFirestore(tx);
   await saveStoreAndWait();
-  sendEventToUser(user2.id, "user_notification", {
+  sendEventToUser(user.id, "user_notification", {
     type: "info",
-    message: `Your ${tx2.transactionType} request for $${tx2.amount} was rejected by agent ${agent.username}.`
+    message: `Your ${tx.transactionType} request for $${tx.amount} was rejected by agent ${agent.username}.`
   });
-  res.json({ success: true, transaction: tx2 });
+  res.json({ success: true, transaction: tx });
 });
 app.get("/api/agent/payment-instructions", isAgent, (req, res) => {
   const instructions = store.agentFloatInstructions || "";
@@ -4693,7 +5145,7 @@ app.get("/api/agent/payment-instructions", isAgent, (req, res) => {
 });
 app.get("/api/agent/my-players", isAgent, (req, res) => {
   const agent = req.agent;
-  const linkedPlayers = Object.values(store.users).filter((user2) => user2.linkedAgentId === agent.id);
+  const linkedPlayers = Object.values(store.users).filter((user) => user.linkedAgentId === agent.id);
   const sanitizedPlayers = linkedPlayers.map((p) => {
     const { password, ...playerData } = p;
     return playerData;

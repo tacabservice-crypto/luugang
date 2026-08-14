@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards, UserCog } from 'lucide-react';
+import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards, UserCog, BadgeDollarSign } from 'lucide-react';
 
 const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -8,7 +8,8 @@ const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children })
     { name: 'users', label: 'Users', icon: Users, permission: 'users' },
     { name: 'rooms', label: 'Rooms', icon: Home, permission: 'rooms' },
     { name: 'transactions', label: 'Transactions', icon: Code, permission: 'transactions' },
-    { name: 'manual-transactions', label: 'Manual Transactions', icon: Edit, permission: 'transactions' },
+    { name: 'manual-transactions', label: 'Cashier Payments', icon: Edit, permission: 'cashier' },
+    { name: 'cashiers', label: 'Cashier Management', icon: BadgeDollarSign, permission: 'settings' },
     { name: 'agents', label: 'Agents', icon: ShieldCheck, permission: 'agents' },
     { name: 'agent-requests', label: 'Agent Float Requests', icon: WalletCards, permission: 'agents' },
     { name: 'tournaments', label: 'Tournaments', icon: Trophy, permission: 'tournaments' },

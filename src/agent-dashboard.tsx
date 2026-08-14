@@ -770,7 +770,7 @@ const AgentDashboard = () => {
                         >
                             <option value="overview">{text('Overview', 'Guudmar')}</option>
                             <option value="requests">{text('Player Requests', 'Codsiyada Ciyaartoyda')}{pendingRequestsCount ? ` (${pendingRequestsCount})` : ''}</option>
-                            <option value="requestFloat">{text('Request Float', 'Codso Float')}</option>
+                            {agent?.businessModel !== 'monthly' && <option value="requestFloat">{text('Request Float', 'Codso Float')}</option>}
                             <option value="players">{text('My Players', 'Ciyaartoydayda')} ({linkedPlayers.length})</option>
                             <option value="history">{text('Transaction History', 'Taariikhda Dhaqdhaqaaqa')}</option>
                             <option value="floatHistory">{text('Float Requests Log', 'Diiwaanka Codsiyada Float')}</option>
@@ -807,7 +807,7 @@ const AgentDashboard = () => {
                         )}
                     </button>
 
-                    <button
+                    {agent?.businessModel !== 'monthly' && <button
                         onClick={() => setActiveTab('requestFloat')}
                         className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap ${
                             activeTab === 'requestFloat'
@@ -817,7 +817,7 @@ const AgentDashboard = () => {
                     >
                         <PlusCircle className="w-4 h-4" />
                         <span>{text('Request Float', 'Codso Float')}</span>
-                    </button>
+                    </button>}
 
                     <button
                         onClick={() => setActiveTab('players')}
@@ -892,22 +892,22 @@ const AgentDashboard = () => {
                         </div>
                         <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800/80 text-slate-400">
                             <span>{text('Ready for player deposits', 'Diyaar u ah dhigaalka ciyaartoyda')}</span>
-                            <button
+                            {agent.businessModel !== 'monthly' && <button
                                 onClick={() => setActiveTab('requestFloat')}
                                 className="text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1"
                             >
                                 {text('Top Up', 'Ku Shubo')} <ChevronRight className="w-3 h-3" />
-                            </button>
+                            </button>}
                         </div>
                     </div>
 
-                    {/* Commission Rate Card */}
+                    {/* Commission / salary model card */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
                         <div className="flex justify-between items-start mb-3">
                             <div>
-                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">{text('Commission Rate', 'Heerka Komishanka')}</span>
+                                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">{agent.businessModel === 'monthly' ? 'Monthly Salary' : text('Commission Rate', 'Heerka Komishanka')}</span>
                                 <h3 className="text-2xl lg:text-3xl font-extrabold font-mono text-purple-400 mt-1">
-                                    {((agent.commissionRate || 0) * 100).toFixed(1)}%
+                                    {agent.businessModel === 'monthly' ? `$${Number(agent.monthlySalary || 0).toFixed(2)}` : `${((agent.commissionRate || 0) * 100).toFixed(1)}%`}
                                 </h3>
                             </div>
                             <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
@@ -915,7 +915,9 @@ const AgentDashboard = () => {
                             </div>
                         </div>
                         <div className="text-xs pt-2 border-t border-slate-800/80 text-slate-400">
-                            {text('Discount on float purchases', 'Qiimo-dhimista iibsiga float-ka')}
+                            {agent.businessModel === 'monthly'
+                                ? `Target: $${Number(agent.monthlyTarget || 0).toFixed(2)} · Daily limit: $${Number(agent.dailyTransactionLimit || 0).toFixed(2)}`
+                                : text('Discount on float purchases', 'Qiimo-dhimista iibsiga float-ka')}
                         </div>
                     </div>
 
@@ -1369,7 +1371,7 @@ const AgentDashboard = () => {
                 )}
 
                 {/* TAB 3: REQUEST FLOAT */}
-                {activeTab === 'requestFloat' && (
+                {activeTab === 'requestFloat' && agent.businessModel !== 'monthly' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                         
                         {/* Form & Calculator */}

@@ -17,16 +17,17 @@ import { Agent, AgentRequest, ManualTransaction, UserProfile, Tournament, GameRo
 import AgentRequestsTable from '../components/admin/AgentRequestsTable';
 import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
+import CashierManagement from '../components/admin/CashierManagement';
 import { isFullAdmin } from '../utils/admin';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import { userErrorMessage } from '../utils/userError';
 
 const VIEW_PERMISSIONS: Record<string, string> = {
     stats: 'stats', users: 'users', rooms: 'rooms', transactions: 'transactions',
-    'manual-transactions': 'transactions', agents: 'agents', 'agent-requests': 'agents',
+    'manual-transactions': 'cashier', cashiers: 'settings', agents: 'agents', 'agent-requests': 'agents',
     tournaments: 'tournaments', settings: 'settings', 'my-settings': 'self',
 };
-const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
+const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'cashiers', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
 
 const canAccessView = (user: { username: string; role?: string; permissions?: string[] }, targetView: string) => {
     const permissions = user.permissions || [];
@@ -34,7 +35,8 @@ const canAccessView = (user: { username: string; role?: string; permissions?: st
         || user.username === 'admin'
         || user.role === 'Super Admin'
         || VIEW_PERMISSIONS[targetView] === 'self'
-        || permissions.includes(VIEW_PERMISSIONS[targetView]);
+        || permissions.includes(VIEW_PERMISSIONS[targetView])
+        || (targetView === 'manual-transactions' && permissions.includes('transactions'));
 };
 
 const getInitialView = (user: { username: string; role?: string; permissions?: string[] }) =>
@@ -47,6 +49,7 @@ const AdminDashboard: React.FC = () => {
         username: string;
         permissions: string[];
         role?: string;
+        location?: string;
     }
 
     type AdminRole = {
@@ -54,6 +57,7 @@ const AdminDashboard: React.FC = () => {
         name: string;
         permissions: string[];
         status: 'active' | 'suspended';
+        location?: string;
     }
     
     const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
@@ -67,7 +71,7 @@ const AdminDashboard: React.FC = () => {
     const adminId = adminUser?.id;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>('stats');
+    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>('stats');
     const [error, setError] = useState<string | null>(null);
     
     // Data states
@@ -99,12 +103,31 @@ const AdminDashboard: React.FC = () => {
     const [spectatingRoomId, setSpectatingRoomId] = useState<string | null>(null);
 
 
-    const permissionsList = ['stats', 'users', 'rooms', 'transactions', 'agents', 'tournaments', 'settings'];
+    const permissionsList = ['stats', 'users', 'rooms', 'transactions', 'cashier', 'agents', 'tournaments', 'settings'];
 
     const handleLogout = () => {
         localStorage.removeItem('admin_user');
         setAdminUser(null);
     };
+
+    useEffect(() => {
+        if (!adminUser?.permissions?.includes('cashier')) return;
+        let stopped = false;
+        const sendHeartbeat = async () => {
+            try {
+                const response = await fetch(`/api/admin/cashier/heartbeat?userId=${adminUser.id}`, { method: 'POST' });
+                if (!response.ok && !stopped) {
+                    const body = await response.json().catch(() => ({}));
+                    setError(body.error || 'Cashier online status could not be updated.');
+                }
+            } catch {
+                // A brief network interruption is handled by the server's online timeout.
+            }
+        };
+        void sendHeartbeat();
+        const timer = window.setInterval(sendHeartbeat, 30_000);
+        return () => { stopped = true; window.clearInterval(timer); };
+    }, [adminUser?.id, adminUser?.permissions]);
     
     const fetchAgentRequests = useCallback(async () => {
         if (!adminUser) return;
@@ -452,7 +475,7 @@ const AdminDashboard: React.FC = () => {
         }
     };
 
-    const handleCreateAgent = async (agentData: { username: string, password: string, commissionRate: string, location?: string, phone: string, promoCode?: string }) => {
+    const handleCreateAgent = async (agentData: any) => {
         if (!adminId) return;
         setError(null);
         try {
@@ -610,6 +633,14 @@ const AdminDashboard: React.FC = () => {
         setAdminSettings((current: any) => ({ ...current, vipTiers: data.vipTiers }));
     };
 
+    const handleSaveAdSettings = async (adSettings: any) => {
+        if (!adminId) return;
+        const response = await fetch(`/api/admin/ad-settings?userId=${adminId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(adSettings) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to save advertising settings');
+        setAdminSettings((current: any) => ({ ...current, adSettings: data.adSettings }));
+    };
+
     const handleApproveTransaction = async (transactionId: string) => {
         if (!adminUser || !window.confirm('Are you sure you want to approve this transaction?')) return;
         setError(null);
@@ -678,7 +709,7 @@ const AdminDashboard: React.FC = () => {
         if (!adminUser) return false;
         // Super admin has all permissions
         if (adminUser.username === 'admin' || adminUser.role === 'Super Admin') return true;
-        return adminUser.permissions?.includes(permission);
+        return adminUser.permissions?.includes(permission) || (permission === 'cashier' && adminUser.permissions?.includes('transactions'));
     };
 
     const renderView = () => {
@@ -696,6 +727,7 @@ const AdminDashboard: React.FC = () => {
             case 'rooms': return <RoomsTable rooms={rooms} onCancel={handleCancelGame} onSpectate={handleSpectate} />;
             case 'transactions': return <TransactionsTable transactions={transactions} />;
             case 'manual-transactions': return <ManualTransactionsTable transactions={manualTransactions} onApprove={handleApproveTransaction} onReject={handleRejectTransaction} />;
+            case 'cashiers': return <CashierManagement adminId={adminUser.id} />;
             case 'agents': return <AgentsTable agents={agents} onEdit={setEditingAgent} onCredit={setCreditingAgent} onDelete={handleDeleteAgent} onToggleStatus={handleToggleAgentStatus} onCreate={() => setCreateAgentModalOpen(true)} />;
             case 'agent-requests': return <AgentRequestsTable requests={agentRequests} onApprove={handleApproveAgentRequest} onReject={handleRejectAgentRequest} isProcessing={(id) => processingRequestId === id} />;
             case 'tournaments': return <TournamentsTable
@@ -772,6 +804,7 @@ const AdminDashboard: React.FC = () => {
                 paymentSettings={paymentSettings} 
                 onSavePaymentSettings={handleSavePaymentSettings}
                 onSaveVipTiers={handleSaveVipTiers}
+                onSaveAdSettings={handleSaveAdSettings}
                 onCreateRole={() => setCreateRoleModalOpen(true)}
                 onDeleteRole={handleDeleteRole}
                 onUpdateRole={handleUpdateRole}

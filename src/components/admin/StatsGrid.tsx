@@ -40,6 +40,7 @@ const StatsGrid = ({ stats, rooms = [], manualTransactions = [], setView }) => {
     { title: 'Active Games', value: stats.activeRooms, icon: Activity, color: ['#ef4444', '#dc2626'], detail: `${stats.waitingRooms || 0} waiting rooms` },
     { title: 'Transactions', value: stats.totalTransactions || 0, icon: ReceiptText, color: ['#8b5cf6', '#6d28d9'], detail: `${stats.pendingAdminTransactions || 0} need admin review` },
   ];
+  const revenue = stats.revenueBreakdown || {};
 
   return (
     <div className="min-w-0 space-y-6 sm:space-y-8">
@@ -48,6 +49,31 @@ const StatsGrid = ({ stats, rooms = [], manualTransactions = [], setView }) => {
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{mainStats.map(item => <StatCard key={item.title} {...item}/>)}</div>
+
+      <section className="rounded-xl bg-white p-4 shadow-lg sm:p-6">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div><h3 className="text-xl font-bold text-gray-800">Revenue & Cash-flow Breakdown</h3><p className="text-sm text-gray-500">Earned platform income is separated from agent float and promotional costs.</p></div>
+          <div className="rounded-xl bg-emerald-50 px-4 py-2 text-right"><span className="block text-xs font-bold uppercase text-emerald-600">Net platform earnings</span><strong className="text-2xl text-emerald-700">{formatCurrency(stats.netPlatformEarnings || 0)}</strong></div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryItem icon={Trophy} label="Solo game rake" value={formatCurrency(revenue.game_rake || 0)} note="Completed solo matches" color="text-amber-600" />
+          <SummaryItem icon={Users} label="Team-game rake" value={formatCurrency(revenue.team_game_rake || 0)} note="Completed team matches" color="text-blue-600" />
+          <SummaryItem icon={Activity} label="Forfeit rake" value={formatCurrency(revenue.forfeit_rake || 0)} note="Forfeit and inactivity wins" color="text-orange-600" />
+          <SummaryItem icon={CircleDollarSign} label="Bot results" value={formatCurrency(revenue.bot_result || 0)} note="Real stakes retained on bot wins" color="text-indigo-600" />
+          <SummaryItem icon={ArrowDownCircle} label="Withdrawal fees" value={formatCurrency(revenue.withdrawal_fee || 0)} note="No-play fees only" color="text-red-600" />
+          <SummaryItem icon={ShieldCheck} label="VIP subscriptions" value={formatCurrency(revenue.vip_subscription || 0)} note="Realized VIP sales" color="text-purple-600" />
+          <SummaryItem icon={Trophy} label="Tournament margin" value={formatCurrency(revenue.tournament_margin || 0)} note="Entry fees minus prizes" color="text-yellow-600" />
+          <SummaryItem icon={ArrowDownCircle} label="Tournament cancellation fees" value={formatCurrency(revenue.tournament_cancellation_fee || 0)} note="10% voluntary unregister fee" color="text-orange-600" />
+          <SummaryItem icon={DollarSign} label="Welcome bonus cost" value={formatCurrency(stats.welcomeBonusCost || 0)} note="Promotional wallet credits" color="text-rose-600" />
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 border-t border-gray-100 pt-4 sm:grid-cols-3">
+          <SummaryItem icon={CircleDollarSign} label="Agent float issued" value={formatCurrency(stats.agentFloatIssued || 0)} note="Liability issued, not revenue" color="text-slate-600" />
+          <SummaryItem icon={ArrowUpCircle} label="Agent cash received" value={formatCurrency(stats.agentFloatCash || 0)} note="Float value less commission" color="text-emerald-600" />
+          <SummaryItem icon={ArrowDownCircle} label="Agent commissions" value={formatCurrency(stats.agentCommissionDiscounts || 0)} note="Deducted in net earnings" color="text-red-600" />
+          <SummaryItem icon={Users} label="Monthly agents" value={stats.monthlyAgents || 0} note={`${formatCurrency(stats.monthlySalaryLiability || 0)} monthly payroll`} color="text-indigo-600" />
+          <SummaryItem icon={DollarSign} label="Cashier payroll paid" value={formatCurrency(stats.cashierPayrollPaid || 0)} note="Salary and earned performance bonuses" color="text-violet-600" />
+        </div>
+      </section>
 
       <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3">
         <section className="rounded-xl bg-white p-4 shadow-lg sm:p-6 xl:col-span-2">

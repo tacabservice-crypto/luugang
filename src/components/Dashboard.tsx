@@ -35,6 +35,7 @@ import Help from './Help';
 import ActiveGamesList from './ActiveGamesList';
 import UserEditModal from './UserEditModal';
 import AvatarDisplay from './AvatarDisplay';
+import LiveAdBanner from './LiveAdBanner';
 
 interface DashboardProps {
   user: UserProfile;
@@ -662,6 +663,7 @@ export default function Dashboard({
   }
 
   return (
+    <><LiveAdBanner placement="dashboard" />
     <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col pb-12 selection:bg-purple-500 selection:text-white relative overflow-hidden">
       {/* Concentric ripples background like the image */}
       <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
@@ -1137,5 +1139,5 @@ export default function Dashboard({
       {showAboutUs && <AboutUs onClose={() => setShowAboutUs(false)} />}
       {showHelp && <Help onClose={() => setShowHelp(false)} />}
     </div>
-  );
+  </>);
 }

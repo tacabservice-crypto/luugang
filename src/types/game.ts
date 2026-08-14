@@ -35,6 +35,7 @@ export interface WalletTransaction {
   matchId?: string;
   description: string;
   status?: 'pending' | 'approved' | 'rejected' | 'completed';
+  revenueCategory?: 'game_rake' | 'team_game_rake' | 'forfeit_rake' | 'bot_result' | 'withdrawal_fee' | 'vip_subscription' | 'tournament_margin' | 'tournament_cancellation_fee';
 }
 
 export interface ManualTransactionRequest {
@@ -44,8 +45,16 @@ export interface ManualTransactionRequest {
   agentId?: string;
   agentUsername?: string;
   managedBy?: 'admin' | 'agent';
+  cashierCity?: string;
+  assignedCashierId?: string;
+  assignedCashierName?: string;
+  assignedCashierAt?: number;
+  assignmentExpiresAt?: number;
+  cashierAssignmentHistory?: string[];
+  cashierTimedOutIds?: string[];
   resolvedBy?: string;
   resolverUsername?: string;
+  resolvedAt?: number;
   amount: number;
   fee?: number;
   netAmount?: number;
@@ -147,6 +156,12 @@ export interface Agent {
   floatBalance?: number;
   status?: 'Active' | 'Suspended';
   createdAt: number;
+  businessModel?: 'independent' | 'monthly';
+  monthlySalary?: number;
+  monthlyTarget?: number;
+  dailyTransactionLimit?: number;
+  salaryStatus?: 'current' | 'due' | 'paid';
+  nextSalaryDate?: number;
 }
 
 export interface AgentTransaction {
@@ -154,7 +169,7 @@ export interface AgentTransaction {
   agentId: string;
   type: 'FloatPurchase' | 'PlayerDeposit' | 'PlayerWithdrawal' | 'deposit' | 'withdrawal';
   amount: number;
-  discountAmount?: number; // For FloatPurchase, records the profit made by the platform owner
+  discountAmount?: number; // Agent commission/discount; float amount minus this is admin cash received.
   playerId?: string; // For PlayerDeposit, the user who received the funds
   playerName?: string;
   timestamp: number;
@@ -203,8 +218,8 @@ export interface Tournament {
   name: string;
   entryFee: number;
   prizePool: number;
-  status: 'registration_open' | 'in_progress' | 'completed' | 'cancelled';
-  players: { userId: string; username: string; avatar: string; }[];
+  status: 'registration_open' | 'check_in' | 'in_progress' | 'completed' | 'cancelled';
+  players: { userId: string; username: string; avatar: string; checkedInAt?: number; }[];
   maxPlayers: number;
   startDate: number;
   endDate: number;
@@ -212,6 +227,24 @@ export interface Tournament {
   currentRound: number;
   matches: TournamentMatch[]; // References to TournamentMatch IDs or embedded matches
   createdAt: number;
+  postponementCount?: number;
+  checkInDeadline?: number;
+}
+
+export interface PlatformAdSettings {
+  enabled: boolean;
+  format: 'banner' | 'ticker' | 'popup' | 'adsense';
+  placement: 'all' | 'dashboard' | 'game';
+  companyName: string;
+  title: string;
+  message: string;
+  imageUrl?: string;
+  linkUrl?: string;
+  durationSeconds: 2 | 3;
+  intervalSeconds: number;
+  adsenseClient?: string;
+  adsenseSlot?: string;
+  updatedAt?: number;
 }
 
 export interface TournamentMatch {

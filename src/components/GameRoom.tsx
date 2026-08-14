@@ -10,6 +10,7 @@ import LudoBoard from './LudoBoard';
 import PhysicalDice from './PhysicalDice';
 import LanguageToggle from './LanguageToggle';
 import UserEditModal from './UserEditModal';
+import LiveAdBanner from './LiveAdBanner';
 
 import {
   ArrowLeft,
@@ -668,6 +669,7 @@ export default function GameRoomView({
   const topBoxColor = myPlayer?.isHost ? challengerPlayer?.color : hostPlayer?.color;
 
   return (
+    <><LiveAdBanner placement="game" />
     <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col pb-10 selection:bg-purple-500 selection:text-white relative overflow-hidden">
       {/* Concentric ripples background like the image */}
       <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
@@ -1326,6 +1328,6 @@ export default function GameRoomView({
       <audio ref={forfeitAudioRef} src={forfeitAudioSrc} preload="auto" />
       <audio ref={captureAudioRef} src={captureAudioSrc} preload="auto" />
       <audio ref={tokenOutAudioRef} src={tokenOutAudioSrc} preload="auto" />
-    </div>
+    </div></>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { isFullAdmin } from '../utils/admin';
+import LocationPicker from './LocationPicker';
 
 interface EditRoleModalProps {
     isOpen: boolean;
@@ -9,6 +10,10 @@ interface EditRoleModalProps {
         username?: string;
         permissions: string[];
         status: 'active' | 'suspended';
+        location?: string;
+        cashierMonthlySalary?: number;
+        cashierMonthlyTarget?: number;
+        cashierTargetBonus?: number;
     } | null;
     permissionsList: string[];
     onClose: () => void;
@@ -22,6 +27,10 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
         username: '',
         password: '',
         permissions: [],
+        location: '',
+        cashierMonthlySalary: '',
+        cashierMonthlyTarget: '',
+        cashierTargetBonus: '',
     });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -33,9 +42,13 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
                 username: role.username,
                 password: '', // Password is not edited here for security, can be a separate feature
                 permissions: [...role.permissions],
+                location: role.location || '',
+                cashierMonthlySalary: String(role.cashierMonthlySalary || ''),
+                cashierMonthlyTarget: String(role.cashierMonthlyTarget || ''),
+                cashierTargetBonus: String(role.cashierTargetBonus || ''),
             });
         } else {
-            setFormData({ name: '', username: '', password: '', permissions: [] });
+            setFormData({ name: '', username: '', password: '', permissions: [], location: '', cashierMonthlySalary: '', cashierMonthlyTarget: '', cashierTargetBonus: '' });
         }
     }, [role, isOpen]);
 
@@ -69,6 +82,10 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
         }
         if (formData.permissions.length === 0) {
             setError('Select at least one permission.');
+            return;
+        }
+        if (formData.permissions.includes('cashier') && !formData.location.trim()) {
+            setError('Cashier city/location is required.');
             return;
         }
         setIsSaving(true);
@@ -147,6 +164,18 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ isOpen, role, permissions
                             ))}
                         </div>
                     </div>
+                    {formData.permissions.includes('cashier') && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400">Cashier City / Location</label>
+                            <p className="mt-1 text-xs text-gray-500">Only unlinked player requests from this city will be assigned to this cashier.</p>
+                            <LocationPicker value={formData.location} onChange={(location) => setFormData(prev => ({ ...prev, location }))} className="bg-gray-700 text-white w-full px-3 py-2 rounded mt-2" />
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <label className="text-xs text-gray-400">Monthly Salary ($)<input type="number" min="0" step="0.01" value={formData.cashierMonthlySalary} onChange={(e) => setFormData(prev => ({ ...prev, cashierMonthlySalary: e.target.value }))} className="mt-1 w-full rounded bg-gray-700 px-3 py-2 text-white" /></label>
+                                <label className="text-xs text-gray-400">Approved Target<input type="number" min="0" step="1" value={formData.cashierMonthlyTarget} onChange={(e) => setFormData(prev => ({ ...prev, cashierMonthlyTarget: e.target.value }))} className="mt-1 w-full rounded bg-gray-700 px-3 py-2 text-white" /></label>
+                                <label className="text-xs text-gray-400">Target Bonus ($)<input type="number" min="0" step="0.01" value={formData.cashierTargetBonus} onChange={(e) => setFormData(prev => ({ ...prev, cashierTargetBonus: e.target.value }))} className="mt-1 w-full rounded bg-gray-700 px-3 py-2 text-white" /></label>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:items-center">

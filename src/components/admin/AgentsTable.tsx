@@ -23,6 +23,7 @@ const AgentsTable = ({ agents, onCredit, onEdit, onToggleStatus, onDelete, onCre
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent ID</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Commission</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Float Balance</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -45,6 +46,7 @@ const AgentsTable = ({ agents, onCredit, onEdit, onToggleStatus, onDelete, onCre
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-blue-600">{(agent.commissionRate * 100).toFixed(2)}%</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={`rounded-full px-2 py-1 text-xs font-bold ${agent.businessModel==='monthly'?'bg-indigo-100 text-indigo-700':'bg-emerald-100 text-emerald-700'}`}>{agent.businessModel==='monthly' ? `Monthly · ${formatCurrency(agent.monthlySalary||0)}` : 'Independent'}</span></td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-semibold">{formatCurrency(agent.floatBalance)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
