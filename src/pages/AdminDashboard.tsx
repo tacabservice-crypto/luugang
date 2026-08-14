@@ -633,12 +633,12 @@ const AdminDashboard: React.FC = () => {
         setAdminSettings((current: any) => ({ ...current, vipTiers: data.vipTiers }));
     };
 
-    const handleSaveAdSettings = async (adSettings: any) => {
+    const handleSaveAdSettings = async (adCampaigns: any[]) => {
         if (!adminId) return;
-        const response = await fetch(`/api/admin/ad-settings?userId=${adminId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(adSettings) });
+        const response = await fetch(`/api/admin/ad-settings?userId=${adminId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campaigns: adCampaigns }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Failed to save advertising settings');
-        setAdminSettings((current: any) => ({ ...current, adSettings: data.adSettings }));
+        setAdminSettings((current: any) => ({ ...current, adSettings: data.adSettings, adCampaigns: data.adCampaigns }));
     };
 
     const handleSaveOtpSettings = async (enabled: boolean) => {

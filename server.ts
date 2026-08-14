@@ -540,9 +540,17 @@ interface DBStore {
   agentTransactions: AgentTransaction[];
   tournaments: Record<string, Tournament>;
   adSettings: PlatformAdSettings;
+  adCampaigns: PlatformAdSettings[];
 }
 
 const DEFAULT_AD_SETTINGS: PlatformAdSettings = { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' };
+const normalizeStoredAdCampaigns = (value: any): PlatformAdSettings[] => {
+  if (Array.isArray(value?.adCampaigns)) return value.adCampaigns.map((campaign: any) => ({ ...DEFAULT_AD_SETTINGS, ...campaign, id: String(campaign.id || crypto.randomUUID()) }));
+  if (value?.adSettings && (value.adSettings.enabled || value.adSettings.title || value.adSettings.message || value.adSettings.imageUrl)) {
+    return [{ ...DEFAULT_AD_SETTINGS, ...value.adSettings, id: String(value.adSettings.id || crypto.randomUUID()) }];
+  }
+  return [];
+};
 
 const DEFAULT_ADMIN_ROLES: AdminRoleTemplate[] = [
   { id: 'admin', name: 'Administrator', permissions: ['all'] },
@@ -592,7 +600,8 @@ let store: DBStore = {
   agents: {},
   agentTransactions: [],
   tournaments: {},
-  adSettings: { ...DEFAULT_AD_SETTINGS }
+  adSettings: { ...DEFAULT_AD_SETTINGS },
+  adCampaigns: []
 };
 
 function seedDefaultTournaments() {
@@ -684,6 +693,7 @@ function loadStore() {
       store.vipTiers = { ...VIP_TIERS, ...(parsed.vipTiers || {}) };
       store.tournaments = parsed.tournaments || {};
       store.adSettings = { ...DEFAULT_AD_SETTINGS, ...(parsed.adSettings || {}) };
+      store.adCampaigns = normalizeStoredAdCampaigns(parsed);
       seedDefaultTournaments();
       const persistedRoles = Array.isArray(parsed.adminSettings?.roles) ? parsed.adminSettings.roles : [];
       store.adminSettings = {
@@ -745,6 +755,7 @@ async function loadStoreFromFirestore() {
         store.agentTransactions = parsed.agentTransactions || [];
         store.tournaments = parsed.tournaments || {};
         store.adSettings = { ...DEFAULT_AD_SETTINGS, ...(parsed.adSettings || {}) };
+        store.adCampaigns = normalizeStoredAdCampaigns(parsed);
         console.log('Database loaded successfully from Firebase Firestore.');
         // Update local file backup
         fs.writeFileSync(DB_FILE, payload.data, 'utf8');
@@ -5014,6 +5025,7 @@ app.get('/api/admin/settings', hasPermission('settings'), async (req, res) => {
             roles: roles,
             vipTiers: store.vipTiers,
             adSettings: store.adSettings,
+            adCampaigns: store.adCampaigns || [],
             otpEnabled: isOtpEnabled(),
             phoneAuthEnabled: isPhoneAuthEnabled(),
         });
@@ -5567,20 +5579,29 @@ app.post('/api/admin/payment-settings', hasPermission('settings'), async (req, r
     });
 });
 
-app.get('/api/ads/active', (_req, res) => res.json(store.adSettings || DEFAULT_AD_SETTINGS));
-app.get('/api/admin/ad-settings', hasPermission('settings'), (_req, res) => res.json(store.adSettings || DEFAULT_AD_SETTINGS));
+app.get('/api/ads/active', (_req, res) => res.json(store.adCampaigns || []));
+app.get('/api/admin/ad-settings', hasPermission('settings'), (_req, res) => res.json(store.adCampaigns || []));
 app.post('/api/admin/ad-settings', hasPermission('settings'), async (req, res) => {
-  const value = req.body || {};
+  const submitted = Array.isArray(req.body) ? req.body : Array.isArray(req.body?.campaigns) ? req.body.campaigns : [req.body || {}];
   const formats = ['banner', 'ticker', 'popup', 'adsense'];
   const placements = ['all', 'dashboard', 'game'];
-  const durationSeconds = Math.max(1, Math.min(180, Math.round(Number(value.durationSeconds) || 3)));
-  const intervalSeconds = Math.max(10, durationSeconds, Math.min(3600, Math.round(Number(value.intervalSeconds) || 60)));
-  if (!formats.includes(value.format) || !placements.includes(value.placement)) return res.status(400).json({ error: 'Invalid ad format or placement.' });
-  if (value.enabled && value.format !== 'adsense' && !String(value.title || value.message || value.imageUrl || '').trim()) return res.status(400).json({ error: 'Add ad text or an image before enabling the campaign.' });
-  store.adSettings = { ...DEFAULT_AD_SETTINGS, ...value, durationSeconds, intervalSeconds, updatedAt: Date.now() };
+  const campaigns: PlatformAdSettings[] = [];
+  for (const raw of submitted) {
+    const value = raw || {};
+    const durationSeconds = Math.max(1, Math.min(180, Math.round(Number(value.durationSeconds) || 3)));
+    const intervalSeconds = Math.max(10, durationSeconds, Math.min(3600, Math.round(Number(value.intervalSeconds) || 60)));
+    if (!formats.includes(value.format) || !placements.includes(value.placement)) return res.status(400).json({ error: 'Invalid ad format or placement.' });
+    if (value.enabled && value.format !== 'adsense' && !String(value.title || value.message || value.imageUrl || '').trim()) return res.status(400).json({ error: 'Every enabled campaign needs ad text, an image or a video.' });
+    const startAt = Number(value.startAt) > 0 ? Number(value.startAt) : undefined;
+    const endAt = Number(value.endAt) > 0 ? Number(value.endAt) : undefined;
+    if (startAt && endAt && endAt <= startAt) return res.status(400).json({ error: 'Campaign end time must be after its start time.' });
+    campaigns.push({ ...DEFAULT_AD_SETTINGS, ...value, id: String(value.id || crypto.randomUUID()), durationSeconds, intervalSeconds, startAt, endAt, updatedAt: Date.now() });
+  }
+  store.adCampaigns = campaigns;
+  store.adSettings = campaigns[0] || { ...DEFAULT_AD_SETTINGS };
   await saveStoreAndWait();
-  broadcastToAll('ad_settings_updated', store.adSettings);
-  res.json({ success: true, adSettings: store.adSettings });
+  broadcastToAll('ad_settings_updated', store.adCampaigns);
+  res.json({ success: true, adCampaigns: store.adCampaigns, adSettings: store.adSettings });
 });
 
 // Approve a manual transaction

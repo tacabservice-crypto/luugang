@@ -69,3 +69,42 @@ body {
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
+
+@keyframes ludosom-ad-scale {
+  from { opacity: 0; transform: scale(.72); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ludosom-ad-left {
+  from { opacity: 0; transform: translateX(-80px) rotate(-2deg); }
+  to { opacity: 1; transform: translateX(0) rotate(0); }
+}
+
+@keyframes ludosom-ad-right {
+  from { opacity: 0; transform: translateX(80px) rotate(2deg); }
+  to { opacity: 1; transform: translateX(0) rotate(0); }
+}
+
+@keyframes ludosom-ad-drop {
+  from { opacity: 0; transform: translateY(-90px) scale(.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ludosom-ad-exit-up {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-120px) scale(.94); }
+}
+
+.ludosom-ad-enter-scale { animation: ludosom-ad-scale .42s cubic-bezier(.2,.9,.25,1.2) both; }
+.ludosom-ad-enter-left { animation: ludosom-ad-left .48s cubic-bezier(.2,.9,.25,1) both; }
+.ludosom-ad-enter-right { animation: ludosom-ad-right .48s cubic-bezier(.2,.9,.25,1) both; }
+.ludosom-ad-enter-drop { animation: ludosom-ad-drop .48s cubic-bezier(.2,.9,.25,1) both; }
+.ludosom-ad-exit-up { animation: ludosom-ad-exit-up .28s ease-in both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ludosom-ad-enter-scale,
+  .ludosom-ad-enter-left,
+  .ludosom-ad-enter-right,
+  .ludosom-ad-enter-drop,
+  .ludosom-ad-exit-up { animation-duration: .01ms; }
+}

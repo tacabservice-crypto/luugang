@@ -234,6 +234,7 @@ export interface Tournament {
 }
 
 export interface PlatformAdSettings {
+  id?: string;
   enabled: boolean;
   format: 'banner' | 'ticker' | 'popup' | 'adsense';
   placement: 'all' | 'dashboard' | 'game';
@@ -246,6 +247,8 @@ export interface PlatformAdSettings {
   intervalSeconds: number;
   adsenseClient?: string;
   adsenseSlot?: string;
+  startAt?: number;
+  endAt?: number;
   updatedAt?: number;
 }
 
