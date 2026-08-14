@@ -52,3 +52,20 @@ body {
   animation: scroll-up 30s linear infinite;
 }
 
+@keyframes ludosom-ticker-right-to-left {
+  from {
+    transform: translateX(100vw);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+.ludosom-ticker-track {
+  width: max-content;
+  will-change: transform;
+  animation-name: ludosom-ticker-right-to-left;
+  animation-duration: 18s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
