@@ -116,6 +116,28 @@ var TOURNAMENT_CHECK_IN_MS = 5 * 60 * 1e3;
 function hashEmailOtp(uid, otp) {
   return crypto.createHash("sha256").update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || "ludosom"}`).digest("hex");
 }
+function normalizeAuthPhone(value) {
+  const compact = String(value || "").replace(/[\s()-]/g, "");
+  return /^\+[1-9]\d{7,14}$/.test(compact) ? compact : "";
+}
+function createPhoneTurnstileTicket(phone, action) {
+  const payload = Buffer.from(JSON.stringify({ phone, action, expiresAt: Date.now() + 5 * 60 * 1e3 })).toString("base64url");
+  const secret = process.env.TURNSTILE_SECRET_KEY || "";
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+function verifyPhoneTurnstileTicket(ticket, phone, action) {
+  try {
+    const [payload, signature] = String(ticket || "").split(".");
+    if (!payload || !signature || !process.env.TURNSTILE_SECRET_KEY) return false;
+    const expected = crypto.createHmac("sha256", process.env.TURNSTILE_SECRET_KEY).update(payload).digest("base64url");
+    if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return false;
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return decoded.phone === phone && decoded.action === action && Number(decoded.expiresAt) > Date.now();
+  } catch {
+    return false;
+  }
+}
 async function sendOtpEmail(email, otp) {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.OTP_FROM_EMAIL;
@@ -1475,7 +1497,31 @@ app.post("/api/auth/otp/verify", verifyFirebaseToken, async (req, res) => {
   res.json({ success: true, message: "Email verified successfully." });
 });
 app.get("/api/auth/methods", (_req, res) => {
-  res.json({ emailOtpEnabled: isOtpEnabled(), phoneAuthEnabled: isPhoneAuthEnabled() });
+  res.json({
+    emailOtpEnabled: isOtpEnabled(),
+    phoneAuthEnabled: isPhoneAuthEnabled(),
+    turnstileSiteKey: process.env.TURNSTILE_SITE_KEY || process.env.VITE_TURNSTILE_SITE_KEY || ""
+  });
+});
+app.post("/api/auth/turnstile/verify", async (req, res) => {
+  const secret = process.env.TURNSTILE_SECRET_KEY || "";
+  const token = typeof req.body?.token === "string" ? req.body.token : "";
+  const phone = normalizeAuthPhone(req.body?.phone);
+  const action = req.body?.action === "signup" ? "signup" : req.body?.action === "login" ? "login" : null;
+  if (!secret || !phone || !action || !token) return res.status(400).json({ error: "Security check could not be completed." });
+  try {
+    const verificationResponse = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret, response: token, remoteip: req.ip })
+    });
+    const verification = await verificationResponse.json();
+    if (!verificationResponse.ok || verification.success !== true) return res.status(403).json({ error: "Security check failed. Please try again." });
+    res.json({ success: true, ticket: createPhoneTurnstileTicket(phone, action) });
+  } catch (error) {
+    console.error("Turnstile validation failed:", error);
+    res.status(503).json({ error: "Security check is temporarily unavailable." });
+  }
 });
 app.get("/api/auth/profile-status", verifyFirebaseToken, async (req, res) => {
   const profile = await findUserProfileInFirestore(req.user.uid, req.user.email);
@@ -1632,14 +1678,22 @@ data: ${JSON.stringify(seekingData)}
   });
 });
 app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res) => {
-  const { username, email, phone, avatar, promoCode, onboardingComplete } = req.body;
+  const { username, email, phone, avatar, promoCode, onboardingComplete, turnstileTicket, phoneAuthAction } = req.body;
   const firebaseUid = req.user.uid;
   const signInProvider = req.user.firebase?.sign_in_provider;
-  const requiresEmailOtp = isOtpEnabled() && signInProvider !== "phone";
-  if (signInProvider === "phone" && !isPhoneAuthEnabled()) {
+  const tokenEmail = String(req.user.email || "").trim().toLowerCase();
+  const phoneAliasMatch = tokenEmail.match(/^phone\.(\d{8,15})@phone\.ludosom\.app$/);
+  const aliasPhone = phoneAliasMatch ? `+${phoneAliasMatch[1]}` : "";
+  const isPhonePasswordLogin = Boolean(aliasPhone);
+  const suppliedPhone = normalizeAuthPhone(phone);
+  if (isPhonePasswordLogin && phoneAuthAction === "signup" && (suppliedPhone !== aliasPhone || !verifyPhoneTurnstileTicket(turnstileTicket, aliasPhone, phoneAuthAction))) {
+    return res.status(403).json({ error: "Security check is required." });
+  }
+  const requiresEmailOtp = isOtpEnabled() && signInProvider !== "phone" && !isPhonePasswordLogin;
+  if ((signInProvider === "phone" || isPhonePasswordLogin) && !isPhoneAuthEnabled()) {
     return res.status(403).json({ error: "Phone sign-in is currently disabled." });
   }
-  if (isOtpEnabled() && !req.user.email_verified && signInProvider === "password") {
+  if (requiresEmailOtp && !req.user.email_verified && signInProvider === "password") {
     return res.status(403).json({ error: "Please verify your email address before signing in." });
   }
   let foundUser = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
@@ -1651,7 +1705,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       foundUser.emailOtpVerifiedAt = verifiedAt;
     }
     foundUser.avatar = normalizeAppAvatar(foundUser.avatar);
-    foundUser.phone = foundUser.phone || req.user.phone_number || phone || void 0;
+    foundUser.phone = foundUser.phone || aliasPhone || req.user.phone_number || phone || void 0;
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
@@ -1670,7 +1724,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     }
     persistedUser.firebaseUid = firebaseUid;
     persistedUser.email = persistedUser.email || email || void 0;
-    persistedUser.phone = persistedUser.phone || req.user.phone_number || phone || void 0;
+    persistedUser.phone = persistedUser.phone || aliasPhone || req.user.phone_number || phone || void 0;
     persistedUser.avatar = normalizeAppAvatar(persistedUser.avatar);
     if (!persistedUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
@@ -1704,7 +1758,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       return res.json(userByEmail);
     }
   }
-  const verifiedPhone = String(req.user.phone_number || phone || "").replace(/[\s()-]/g, "");
+  const verifiedPhone = aliasPhone || String(req.user.phone_number || phone || "").replace(/[\s()-]/g, "");
   if (verifiedPhone) {
     const userByPhone = Object.values(store.users).find((user) => String(user.phone || "").replace(/[\s()-]/g, "") === verifiedPhone && !user.firebaseUid);
     if (userByPhone) {
@@ -1722,6 +1776,9 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   }
   if (signInProvider === "phone" && onboardingComplete !== true) {
     return res.status(428).json({ error: "Complete phone verification and account setup before continuing." });
+  }
+  if (isPhonePasswordLogin && phoneAuthAction !== "signup") {
+    return res.status(404).json({ error: "No account was found with this phone number." });
   }
   if (signInProvider === "google.com" && isOtpEnabled()) {
     if (onboardingComplete !== true || !db) {
@@ -1753,8 +1810,8 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     id: userId,
     firebaseUid,
     username: cleanUsername,
-    email: email?.trim().toLowerCase() || void 0,
-    phone: req.user.phone_number || (typeof phone === "string" ? phone.trim() : void 0),
+    email: isPhonePasswordLogin ? void 0 : email?.trim().toLowerCase() || void 0,
+    phone: aliasPhone || req.user.phone_number || (typeof phone === "string" ? phone.trim() : void 0),
     avatar: normalizeAppAvatar(avatar),
     balance: WELCOME_BONUS,
     winCount: 0,
@@ -3789,7 +3846,7 @@ app.post("/api/admin/phone-auth-settings", hasPermission("settings"), async (req
   if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "Phone authentication status must be true or false." });
   store.adminSettings.phoneAuthEnabled = req.body.enabled;
   await saveStoreAndWait();
-  res.json({ success: true, phoneAuthEnabled: isPhoneAuthEnabled(), message: isPhoneAuthEnabled() ? "Phone and SMS sign-in is enabled." : "Phone and SMS sign-in is disabled." });
+  res.json({ success: true, phoneAuthEnabled: isPhoneAuthEnabled(), message: isPhoneAuthEnabled() ? "Phone sign-in is enabled." : "Phone sign-in is disabled." });
 });
 app.post("/api/admin/settings", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });

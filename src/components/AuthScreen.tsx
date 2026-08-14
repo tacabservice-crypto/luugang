@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sparkles, Mail, Lock, LogIn, UserPlus, Ticket, RefreshCw, Phone } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import LanguageToggle from './LanguageToggle';
+import TurnstileWidget from './TurnstileWidget';
 import { UserProfile } from '../types/game';
 import { auth } from '../firebase-client'; // Import client-side auth
 import { userErrorMessage } from '../utils/userError';
@@ -16,11 +17,7 @@ import {
   sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup,
-  signOut,
   User,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-  ConfirmationResult,
 } from 'firebase/auth';
 
 const AVATARS = ['/ludosom-logo.png', '🎮', '🏆', '🔥', '👑', '🎲', '⚡', '🤖', '🦊', '🐯', '🐼', '🦁', '🦄'];
@@ -57,18 +54,6 @@ function normalizePhoneNumber(value: string, callingCode: string): string {
   return `${callingCode}${digits}`;
 }
 
-function phoneAuthErrorMessage(error: any): string {
-  const code = String(error?.code || error?.message || '');
-  if (/operation-not-allowed/i.test(code)) return 'Phone login has not been enabled.';
-  if (/invalid-phone-number|missing-phone-number/i.test(code)) return 'Check the selected country and enter the complete phone number.';
-  if (/app-not-authorized|unauthorized-domain/i.test(code)) return 'Phone login is unavailable on this website.';
-  if (/invalid-app-credential|captcha-check-failed|missing-client-type/i.test(code)) return 'Security verification failed. Refresh and try again.';
-  if (/quota-exceeded|too-many-requests|resource-exhausted/i.test(code)) return 'Too many SMS requests. Please try again later.';
-  if (/billing-not-enabled/i.test(code)) return 'SMS service is temporarily unavailable.';
-  if (/network-request-failed|network/i.test(code)) return 'Connection failed. Check your internet and try again.';
-  return 'SMS service is temporarily unavailable. Please try again.';
-}
-
 interface AuthScreenProps {
   onLoginSuccess: (profile: UserProfile, token: string) => void;
   initialError?: string | null;
@@ -102,11 +87,9 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [phoneAuthEnabled, setPhoneAuthEnabled] = useState(true);
   const [selectedCountry, setSelectedCountry] = useState('SO');
   const selectedCallingCode = COUNTRY_CALLING_CODES[selectedCountry] || '+252';
-  const [phone, setPhone] = useState('');
-  const [smsCode, setSmsCode] = useState('');
-  const [phoneVerificationPending, setPhoneVerificationPending] = useState(false);
-  const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null);
-  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -116,6 +99,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         if (!active) return;
         const enabled = methods.phoneAuthEnabled !== false;
         setPhoneAuthEnabled(enabled);
+        setTurnstileSiteKey(String(methods.turnstileSiteKey || ''));
       })
       .catch(() => { /* The backend still enforces the setting. */ });
     return () => { active = false; };
@@ -129,7 +113,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     return response.json();
   };
 
-  const handleBackendLogin = async (firebaseUser: User, onboardingComplete = false) => {
+  const handleBackendLogin = async (firebaseUser: User, onboardingComplete = false, verifiedPhone?: string, turnstileTicket?: string, phoneAuthAction?: 'login' | 'signup') => {
     try {
       const token = await firebaseUser.getIdToken();
       const pendingKey = `ludosom_pending_signup_${firebaseUser.email?.trim().toLowerCase() || firebaseUser.uid}`;
@@ -147,13 +131,15 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         },
         body: JSON.stringify({
           username: pendingSignup?.username || (onboardingComplete ? firebaseUser.displayName || undefined : (isLogin ? undefined : username)),
-          email: firebaseUser.email,
-          phone: firebaseUser.phoneNumber || undefined,
+          email: verifiedPhone ? undefined : firebaseUser.email,
+          phone: verifiedPhone || firebaseUser.phoneNumber || undefined,
           avatar: pendingSignup?.avatar || (onboardingComplete ? undefined : (isLogin ? undefined : avatar)),
           // Keep the entered promo code on a retry/login too. Firebase Auth may
           // have created the account even when the first backend sync failed.
           promoCode: pendingSignup?.promoCode || promoCode.trim() || undefined,
           onboardingComplete,
+          turnstileTicket,
+          phoneAuthAction,
         }),
       });
 
@@ -194,6 +180,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setError(t('nameRequired'));
         return;
       }
+      if (!password || password.length < 6) {
+        setError('Use a password with at least 6 characters.');
+        return;
+      }
+      if (!turnstileSiteKey || !turnstileToken) {
+        setError('Complete the security check first.');
+        return;
+      }
       setLoading(true); setError(''); setSuccessMessage('');
       try {
         const methodsResponse = await fetch(`${API_BASE_URL}/api/auth/methods`);
@@ -203,20 +197,31 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           setPhoneAuthEnabled(false);
           throw new Error('Phone sign-in is currently disabled.');
         }
-        recaptchaRef.current?.clear();
-        recaptchaRef.current = new RecaptchaVerifier(auth, 'phone-recaptcha-container', {
-          size: 'normal',
-          'expired-callback': () => setError('Security check expired. Please try again.'),
+        const action = isLogin ? 'login' : 'signup';
+        const securityResponse = await fetch(`${API_BASE_URL}/api/auth/turnstile/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: turnstileToken, phone: normalizedPhone, action }),
         });
-        const confirmation = await signInWithPhoneNumber(auth, normalizedPhone, recaptchaRef.current);
-        setPhone(normalizedPhone);
-        setPhoneConfirmation(confirmation);
-        setPhoneVerificationPending(true);
-        setSuccessMessage(`SMS code ayaa loo diray ${normalizedPhone}.`);
+        const securityData = await readApiJson(securityResponse);
+        if (!securityResponse.ok) throw new Error(securityData.error || 'Security check failed.');
+        const phoneAlias = `phone.${normalizedPhone.slice(1)}@phone.ludosom.app`;
+        sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
+        const credential = isLogin
+          ? await signInWithEmailAndPassword(auth, phoneAlias, password)
+          : await createUserWithEmailAndPassword(auth, phoneAlias, password);
+        if (!isLogin) {
+          const pendingKey = `ludosom_pending_signup_${credential.user.email?.trim().toLowerCase() || credential.user.uid}`;
+          localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
+        }
+        await handleBackendLogin(credential.user, true, normalizedPhone, securityData.ticket, action);
       } catch (err: any) {
-        recaptchaRef.current?.clear(); recaptchaRef.current = null;
-        console.warn('Phone authentication failed:', err?.code || 'unknown');
-        setError(phoneAuthErrorMessage(err));
+        setTurnstileToken('');
+        setTurnstileResetKey(current => current + 1);
+        const raw = String(err?.code || err?.message || '');
+        if (/email-already-in-use/i.test(raw)) setError('This phone number is already registered. Please sign in.');
+        else if (/invalid-credential|user-not-found/i.test(raw)) setError('No account was found with this phone number and password.');
+        else setError(userErrorMessage(err, 'Phone sign-in could not be completed.'));
       } finally { setLoading(false); }
       return;
     }
@@ -307,50 +312,6 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleVerifyPhone = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!phoneConfirmation || !/^\d{6}$/.test(smsCode)) return setError('Enter the 6-digit SMS code.');
-    setLoading(true); setError('');
-    try {
-      sessionStorage.setItem('ludosom_phone_auth_pending', '1');
-      sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
-      const credential = await phoneConfirmation.confirm(smsCode);
-      const token = await credential.user.getIdToken();
-      const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
-      const status = await readApiJson(statusResponse);
-      if (!statusResponse.ok) throw new Error(status.error || 'Account status could not be checked.');
-      if (isLogin && !status.exists) {
-        sessionStorage.removeItem('ludosom_phone_auth_pending');
-        sessionStorage.removeItem('ludosom_auth_onboarding_pending');
-        await signOut(auth);
-        throw new Error('No account exists with this phone number. Please sign up first.');
-      }
-      if (!isLogin && status.exists) {
-        sessionStorage.removeItem('ludosom_phone_auth_pending');
-        sessionStorage.removeItem('ludosom_auth_onboarding_pending');
-        await signOut(auth);
-        throw new Error('This phone number is already registered. Please sign in.');
-      }
-      setPhoneVerificationPending(false);
-      setOtpUser(credential.user);
-      setExistingAgentLink(Boolean(status.linkedToAgent));
-      if (!isLogin) {
-        const pendingKey = `ludosom_pending_signup_${credential.user.uid}`;
-        localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
-        await handleBackendLogin(credential.user, true);
-      } else if (status.linkedToAgent) {
-        await handleBackendLogin(credential.user, true);
-      } else {
-        setGoogleOnboarding(true);
-        setPromoStep(true);
-        setSuccessMessage('Phone verified. You may add a promo code, or skip this step.');
-      }
-    } catch (err: any) {
-      if (!auth.currentUser) { sessionStorage.removeItem('ludosom_phone_auth_pending'); sessionStorage.removeItem('ludosom_auth_onboarding_pending'); }
-      setError(userErrorMessage(err, 'The SMS code could not be verified.'));
-    } finally { setLoading(false); }
   };
 
   const handleForgotPassword = async () => {
@@ -488,14 +449,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </div>
         )}
 
-        {phoneVerificationPending ? (
-          <form onSubmit={handleVerifyPhone} className="space-y-4">
-            <div className="text-center"><h2 className="text-xl font-black">Verify Phone Number</h2><p className="mt-2 text-xs text-slate-400">Enter the 6-digit SMS code sent to {phone}</p></div>
-            <input value={smsCode} onChange={e => setSmsCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" className="w-full rounded-xl border border-purple-400/40 bg-black/30 px-4 py-4 text-center text-3xl font-black tracking-[0.5em] text-white outline-none focus:border-purple-300" />
-            <button disabled={loading || smsCode.length !== 6} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3.5 text-sm font-black disabled:opacity-50">{loading ? 'Verifying...' : 'Verify SMS Code'}</button>
-            <button type="button" onClick={() => { setPhoneVerificationPending(false); setSmsCode(''); setPhoneConfirmation(null); recaptchaRef.current?.clear(); recaptchaRef.current = null; }} className="w-full text-xs font-bold text-blue-300 hover:text-blue-200">Change phone number</button>
-          </form>
-        ) : promoStep ? (
+        {promoStep ? (
           <div className="space-y-4">
             <div className="text-center"><h2 className="text-xl font-black">Promo Code</h2><p className="mt-2 text-xs leading-relaxed text-slate-400">Haddii aad agent ka heshay promo code, hadda geli. Haddii aadan haysan waad ka boodi kartaa.</p></div>
             <div className="space-y-1"><label className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-400"><Ticket className="h-3 w-3" /> Promo Code (Optional)</label><input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="AGENTPROMO123" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-400" /></div>
@@ -575,11 +529,11 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                 />
               </div>
               {phoneAuthEnabled && identifier.trim() && !identifier.includes('@') && (
-                <p className="px-1 text-[11px] font-medium text-emerald-300">SMS → {normalizePhoneNumber(identifier, selectedCallingCode)}</p>
+                <p className="px-1 text-[11px] font-medium text-emerald-300">Phone → {normalizePhoneNumber(identifier, selectedCallingCode)}</p>
               )}
           </div>
 
-          {(identifier.length === 0 || identifier.includes('@')) && <div className="space-y-1">
+          <div className="space-y-1">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Lock className="w-3 h-3 text-slate-500" /> Password
               </label>
@@ -591,7 +545,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-black/30 border border-white/10 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all"
               />
-              {isLogin && (
+              {isLogin && (identifier.length === 0 || identifier.includes('@')) && (
                 <div className="flex justify-end pt-1">
                   <button
                     type="button"
@@ -603,7 +557,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                   </button>
                 </div>
               )}
-            </div>}
+            </div>
 
           {!isLogin && (
             <div className="space-y-1">
@@ -636,10 +590,13 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </button>
         </form>}
 
-        {phoneAuthEnabled && !phoneVerificationPending && identifier.trim() && !identifier.includes('@') && (
-          <div className="flex h-[78px] w-full items-start justify-center overflow-visible max-[360px]:h-[62px]">
-            <div id="phone-recaptcha-container" className="w-[304px] shrink-0 origin-top scale-100 max-[360px]:scale-[0.8]" />
-          </div>
+        {phoneAuthEnabled && identifier.trim() && !identifier.includes('@') && (
+          <TurnstileWidget
+            siteKey={turnstileSiteKey}
+            resetKey={turnstileResetKey}
+            onToken={setTurnstileToken}
+            onError={setError}
+          />
         )}
 
         <div className="flex items-center gap-3"><div className="h-px flex-1 bg-white/10" /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">or</span><div className="h-px flex-1 bg-white/10" /></div>
