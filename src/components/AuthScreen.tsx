@@ -57,6 +57,18 @@ function normalizePhoneNumber(value: string, callingCode: string): string {
   return `${callingCode}${digits}`;
 }
 
+function phoneAuthErrorMessage(error: any): string {
+  const code = String(error?.code || error?.message || '');
+  if (/operation-not-allowed/i.test(code)) return 'Phone login has not been enabled.';
+  if (/invalid-phone-number|missing-phone-number/i.test(code)) return 'Check the selected country and enter the complete phone number.';
+  if (/app-not-authorized|unauthorized-domain/i.test(code)) return 'Phone login is unavailable on this website.';
+  if (/invalid-app-credential|captcha-check-failed|missing-client-type/i.test(code)) return 'Security verification failed. Refresh and try again.';
+  if (/quota-exceeded|too-many-requests|resource-exhausted/i.test(code)) return 'Too many SMS requests. Please try again later.';
+  if (/billing-not-enabled/i.test(code)) return 'SMS service is temporarily unavailable.';
+  if (/network-request-failed|network/i.test(code)) return 'Connection failed. Check your internet and try again.';
+  return 'SMS service is temporarily unavailable. Please try again.';
+}
+
 interface AuthScreenProps {
   onLoginSuccess: (profile: UserProfile, token: string) => void;
   initialError?: string | null;
@@ -193,8 +205,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         }
         recaptchaRef.current?.clear();
         recaptchaRef.current = new RecaptchaVerifier(auth, 'phone-recaptcha-container', {
-          size: 'invisible',
-          badge: 'inline',
+          size: 'normal',
+          'expired-callback': () => setError('Security check expired. Please try again.'),
         });
         const confirmation = await signInWithPhoneNumber(auth, normalizedPhone, recaptchaRef.current);
         setPhone(normalizedPhone);
@@ -203,9 +215,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setSuccessMessage(`SMS code ayaa loo diray ${normalizedPhone}.`);
       } catch (err: any) {
         recaptchaRef.current?.clear(); recaptchaRef.current = null;
-        setError(/operation-not-allowed/i.test(String(err?.code || err?.message || ''))
-          ? 'Phone login has not been enabled in Firebase yet.'
-          : userErrorMessage(err, 'SMS code could not be sent. Check the phone number and try again.'));
+        console.warn('Phone authentication failed:', err?.code || 'unknown');
+        setError(phoneAuthErrorMessage(err));
       } finally { setLoading(false); }
       return;
     }
@@ -625,7 +636,11 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </button>
         </form>}
 
-        <div id="phone-recaptcha-container" className="flex items-center justify-center overflow-visible [&>div]:mx-auto" />
+        {phoneAuthEnabled && !phoneVerificationPending && identifier.trim() && !identifier.includes('@') && (
+          <div className="flex h-[78px] w-full items-start justify-center overflow-visible max-[360px]:h-[62px]">
+            <div id="phone-recaptcha-container" className="w-[304px] shrink-0 origin-top scale-100 max-[360px]:scale-[0.8]" />
+          </div>
+        )}
 
         <div className="flex items-center gap-3"><div className="h-px flex-1 bg-white/10" /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">or</span><div className="h-px flex-1 bg-white/10" /></div>
         <button type="button" onClick={handleGoogleSignIn} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white px-4 py-3 text-sm font-extrabold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50">
