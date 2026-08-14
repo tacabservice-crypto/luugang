@@ -5640,9 +5640,22 @@ async function startServer() {
   }
   if (migrationMode) {
     console.log("One-time Firebase to MySQL migration requested; starting in the background.");
-    void migrateFirestoreToMySql({ requireExecuteFlag: false }).catch((error) => {
-      console.error("One-time Firebase to MySQL migration failed:", error instanceof Error ? error.message : error);
-    });
+    const runMigrationWithQuotaRetry = async () => {
+      try {
+        await migrateFirestoreToMySql({ requireExecuteFlag: false });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/RESOURCE_EXHAUSTED|quota exceeded/i.test(message)) {
+          const retryMinutes = 15;
+          console.warn(`Firebase quota is unavailable; migration will retry automatically in ${retryMinutes} minutes.`);
+          const retryTimer = setTimeout(() => void runMigrationWithQuotaRetry(), retryMinutes * 6e4);
+          retryTimer.unref?.();
+          return;
+        }
+        console.error("One-time Firebase to MySQL migration failed:", message);
+      }
+    };
+    void runMigrationWithQuotaRetry();
   }
   server.on("upgrade", (req, socket, head) => {
     if (vite && req.url?.includes("__vite_hmr")) {
