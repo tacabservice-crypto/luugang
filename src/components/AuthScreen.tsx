@@ -25,6 +25,33 @@ import {
 
 const AVATARS = ['/ludosom-logo.png', '🎮', '🏆', '🔥', '👑', '🎲', '⚡', '🤖', '🦊', '🐯', '🐼', '🦁', '🦄'];
 
+const COUNTRY_CALLING_CODES: Record<string, string> = {
+  SO: '+252', KE: '+254', ET: '+251', DJ: '+253', UG: '+256', TZ: '+255', RW: '+250',
+  GB: '+44', US: '+1', CA: '+1', SE: '+46', NO: '+47', DK: '+45', FI: '+358', DE: '+49',
+  NL: '+31', BE: '+32', FR: '+33', IT: '+39', ES: '+34', CH: '+41', AT: '+43', IE: '+353',
+  AE: '+971', SA: '+966', QA: '+974', OM: '+968', KW: '+965', BH: '+973', TR: '+90',
+  IN: '+91', PK: '+92', BD: '+880', CN: '+86', JP: '+81', AU: '+61', NZ: '+64', ZA: '+27',
+};
+
+function browserCallingCode(): { region: string; code: string } {
+  try {
+    const region = new Intl.Locale(navigator.language).region?.toUpperCase() || 'SO';
+    return { region, code: COUNTRY_CALLING_CODES[region] || '+252' };
+  } catch {
+    return { region: 'SO', code: '+252' };
+  }
+}
+
+function normalizePhoneNumber(value: string, callingCode: string): string {
+  const compact = value.trim().replace(/[\s()-]/g, '');
+  if (compact.startsWith('+')) return `+${compact.slice(1).replace(/\D/g, '')}`;
+  if (compact.startsWith('00')) return `+${compact.slice(2).replace(/\D/g, '')}`;
+  const digits = compact.replace(/\D/g, '').replace(/^0+/, '');
+  const countryDigits = callingCode.slice(1);
+  if (digits.startsWith(countryDigits)) return `+${digits}`;
+  return `${callingCode}${digits}`;
+}
+
 interface AuthScreenProps {
   onLoginSuccess: (profile: UserProfile, token: string) => void;
   initialError?: string | null;
@@ -41,7 +68,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   })();
   const { t } = useLanguage();
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [promoCode, setPromoCode] = useState('');
   const [avatar, setAvatar] = useState('🎮');
@@ -55,8 +82,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [googleOnboarding, setGoogleOnboarding] = useState(false);
   const [promoStep, setPromoStep] = useState(false);
   const [existingAgentLink, setExistingAgentLink] = useState(false);
-  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [phoneAuthEnabled, setPhoneAuthEnabled] = useState(true);
+  const [{ region: detectedRegion, code: detectedCallingCode }] = useState(browserCallingCode);
   const [phone, setPhone] = useState('');
   const [smsCode, setSmsCode] = useState('');
   const [phoneVerificationPending, setPhoneVerificationPending] = useState(false);
@@ -71,7 +98,6 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         if (!active) return;
         const enabled = methods.phoneAuthEnabled !== false;
         setPhoneAuthEnabled(enabled);
-        if (!enabled) setAuthMethod('email');
       })
       .catch(() => { /* The backend still enforces the setting. */ });
     return () => { active = false; };
@@ -134,9 +160,16 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (authMethod === 'phone') {
-      if (!/^\+[1-9]\d{7,14}$/.test(phone.replace(/[\s()-]/g, ''))) {
-        setError('Enter a valid international phone number, for example +25261XXXXXXX.');
+    const cleanIdentifier = identifier.trim();
+    const usePhone = !cleanIdentifier.includes('@');
+    if (usePhone) {
+      if (!phoneAuthEnabled) {
+        setError('Phone sign-in is currently unavailable. Please use your email.');
+        return;
+      }
+      const normalizedPhone = normalizePhoneNumber(cleanIdentifier, detectedCallingCode);
+      if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
+        setError(`Enter a valid phone number. Local numbers automatically use ${detectedCallingCode}.`);
         return;
       }
       if (!isLogin && !username.trim()) {
@@ -150,23 +183,23 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         if (!methodsResponse.ok) throw new Error(methods.error || 'Login settings could not be checked.');
         if (methods.phoneAuthEnabled === false) {
           setPhoneAuthEnabled(false);
-          setAuthMethod('email');
           throw new Error('Phone sign-in is currently disabled.');
         }
         recaptchaRef.current?.clear();
         recaptchaRef.current = new RecaptchaVerifier(auth, 'phone-recaptcha-container', { size: 'invisible' });
-        const cleanPhone = phone.replace(/[\s()-]/g, '');
-        const confirmation = await signInWithPhoneNumber(auth, cleanPhone, recaptchaRef.current);
+        const confirmation = await signInWithPhoneNumber(auth, normalizedPhone, recaptchaRef.current);
+        setPhone(normalizedPhone);
         setPhoneConfirmation(confirmation);
         setPhoneVerificationPending(true);
-        setSuccessMessage(`SMS code ayaa loo diray ${cleanPhone}.`);
+        setSuccessMessage(`SMS code ayaa loo diray ${normalizedPhone}.`);
       } catch (err: any) {
         recaptchaRef.current?.clear(); recaptchaRef.current = null;
         setError(userErrorMessage(err, 'SMS code could not be sent. Check the phone number and try again.'));
       } finally { setLoading(false); }
       return;
     }
-    if (!email.trim() || !password.trim()) {
+    const normalizedEmail = cleanIdentifier.toLowerCase();
+    if (!normalizedEmail || !password.trim()) {
       setError(t('emailPasswordRequired'));
       return;
     }
@@ -182,7 +215,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     try {
       if (isLogin) {
         // Handle Login
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
         await userCredential.user.reload();
         const token = await userCredential.user.getIdToken();
         const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
@@ -211,7 +244,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       } else {
         // Handle Registration
         sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
         const pendingKey = `ludosom_pending_signup_${userCredential.user.email?.trim().toLowerCase() || userCredential.user.uid}`;
         localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
         const token = await userCredential.user.getIdToken();
@@ -299,7 +332,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   };
 
   const handleForgotPassword = async () => {
-    const resetEmail = email.trim();
+    const resetEmail = identifier.trim().toLowerCase();
     setError('');
     setSuccessMessage('');
     if (!resetEmail) {
@@ -455,10 +488,6 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
             <button type="button" onClick={handleResendOtp} disabled={loading} className="w-full text-xs font-bold text-blue-300 hover:text-blue-200">Resend OTP</button>
           </form>
         ) : <form onSubmit={handleSubmit} className="space-y-4">
-          <div className={`grid ${phoneAuthEnabled ? 'grid-cols-2' : 'grid-cols-1'} gap-1 rounded-xl border border-white/10 bg-black/30 p-1`}>
-            <button type="button" onClick={() => { setAuthMethod('email'); setError(''); }} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-black transition ${authMethod === 'email' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}><Mail size={15}/> Email</button>
-            {phoneAuthEnabled && <button type="button" onClick={() => { setAuthMethod('phone'); setError(''); }} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-black transition ${authMethod === 'phone' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}><Phone size={15}/> Phone</button>}
-          </div>
           {!isLogin && (
             <>
               <div className="space-y-2">
@@ -498,21 +527,23 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
             </>
           )}
 
-          {authMethod === 'email' ? <><div className="space-y-1">
+          <div className="space-y-1">
              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                <Mail className="w-3 h-3 text-slate-500" /> {t('emailAddress')}
+                <Mail className="w-3 h-3 text-slate-500" /><Phone className="w-3 h-3 text-slate-500" /> Email or Phone Number
               </label>
               <input
-                type="email"
+                type="text"
                 required
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                placeholder={phoneAuthEnabled ? 'you@example.com or 61XXXXXXX' : 'you@example.com'}
+                value={identifier}
+                onChange={(e) => { setIdentifier(e.target.value); setError(''); }}
+                autoComplete="username"
                 className="w-full bg-black/30 border border-white/10 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all"
               />
+              {phoneAuthEnabled && !identifier.includes('@') && <p className="text-[10px] text-slate-500">Local prefix: {detectedCallingCode} ({detectedRegion}). Write 61XXXXXXX, 63XXXXXXX or 90XXXXXXX; for another country, start with + and its country code.</p>}
           </div>
 
-          <div className="space-y-1">
+          {(identifier.length === 0 || identifier.includes('@')) && <div className="space-y-1">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Lock className="w-3 h-3 text-slate-500" /> Password
               </label>
@@ -536,10 +567,6 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                   </button>
                 </div>
               )}
-            </div></> : <div className="space-y-1">
-              <label className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-400"><Phone className="h-3 w-3 text-slate-500"/> Phone Number</label>
-              <input type="tel" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="+25261XXXXXXX" autoComplete="tel" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-slate-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400" />
-              <p className="text-[10px] text-slate-500">Use the international country code. Firebase will send an SMS verification code.</p>
             </div>}
 
           {!isLogin && (
