@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { Sparkles, Mail, Lock, LogIn, UserPlus, Ticket, RefreshCw } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Sparkles, Mail, Lock, LogIn, UserPlus, Ticket, RefreshCw, Phone } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import LanguageToggle from './LanguageToggle';
 import { UserProfile } from '../types/game';
@@ -17,7 +17,10 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
-  User
+  User,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  ConfirmationResult,
 } from 'firebase/auth';
 
 const AVATARS = ['/ludosom-logo.png', '🎮', '🏆', '🔥', '👑', '🎲', '⚡', '🤖', '🦊', '🐯', '🐼', '🦁', '🦄'];
@@ -52,6 +55,27 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   const [googleOnboarding, setGoogleOnboarding] = useState(false);
   const [promoStep, setPromoStep] = useState(false);
   const [existingAgentLink, setExistingAgentLink] = useState(false);
+  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const [phoneAuthEnabled, setPhoneAuthEnabled] = useState(true);
+  const [phone, setPhone] = useState('');
+  const [smsCode, setSmsCode] = useState('');
+  const [phoneVerificationPending, setPhoneVerificationPending] = useState(false);
+  const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null);
+  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${API_BASE_URL}/api/auth/methods`)
+      .then(readApiJson)
+      .then(methods => {
+        if (!active) return;
+        const enabled = methods.phoneAuthEnabled !== false;
+        setPhoneAuthEnabled(enabled);
+        if (!enabled) setAuthMethod('email');
+      })
+      .catch(() => { /* The backend still enforces the setting. */ });
+    return () => { active = false; };
+  }, [API_BASE_URL]);
 
   const readApiJson = async (response: Response) => {
     const contentType = response.headers.get('content-type') || '';
@@ -80,6 +104,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         body: JSON.stringify({
           username: pendingSignup?.username || (onboardingComplete ? firebaseUser.displayName || undefined : (isLogin ? undefined : username)),
           email: firebaseUser.email,
+          phone: firebaseUser.phoneNumber || undefined,
           avatar: pendingSignup?.avatar || (onboardingComplete ? undefined : (isLogin ? undefined : avatar)),
           // Keep the entered promo code on a retry/login too. Firebase Auth may
           // have created the account even when the first backend sync failed.
@@ -94,6 +119,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         throw new Error(profileData.error || 'Failed to sync with server.');
       }
       localStorage.removeItem(pendingKey);
+      sessionStorage.removeItem('ludosom_phone_auth_pending');
+      sessionStorage.removeItem('ludosom_auth_onboarding_pending');
       onLoginSuccess(profileData, token);
 
     } catch (err: any) {
@@ -107,6 +134,38 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authMethod === 'phone') {
+      if (!/^\+[1-9]\d{7,14}$/.test(phone.replace(/[\s()-]/g, ''))) {
+        setError('Enter a valid international phone number, for example +25261XXXXXXX.');
+        return;
+      }
+      if (!isLogin && !username.trim()) {
+        setError(t('nameRequired'));
+        return;
+      }
+      setLoading(true); setError(''); setSuccessMessage('');
+      try {
+        const methodsResponse = await fetch(`${API_BASE_URL}/api/auth/methods`);
+        const methods = await readApiJson(methodsResponse);
+        if (!methodsResponse.ok) throw new Error(methods.error || 'Login settings could not be checked.');
+        if (methods.phoneAuthEnabled === false) {
+          setPhoneAuthEnabled(false);
+          setAuthMethod('email');
+          throw new Error('Phone sign-in is currently disabled.');
+        }
+        recaptchaRef.current?.clear();
+        recaptchaRef.current = new RecaptchaVerifier(auth, 'phone-recaptcha-container', { size: 'invisible' });
+        const cleanPhone = phone.replace(/[\s()-]/g, '');
+        const confirmation = await signInWithPhoneNumber(auth, cleanPhone, recaptchaRef.current);
+        setPhoneConfirmation(confirmation);
+        setPhoneVerificationPending(true);
+        setSuccessMessage(`SMS code ayaa loo diray ${cleanPhone}.`);
+      } catch (err: any) {
+        recaptchaRef.current?.clear(); recaptchaRef.current = null;
+        setError(userErrorMessage(err, 'SMS code could not be sent. Check the phone number and try again.'));
+      } finally { setLoading(false); }
+      return;
+    }
     if (!email.trim() || !password.trim()) {
       setError(t('emailPasswordRequired'));
       return;
@@ -151,6 +210,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
 
       } else {
         // Handle Registration
+        sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const pendingKey = `ludosom_pending_signup_${userCredential.user.email?.trim().toLowerCase() || userCredential.user.uid}`;
         localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
@@ -192,6 +252,50 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phoneConfirmation || !/^\d{6}$/.test(smsCode)) return setError('Enter the 6-digit SMS code.');
+    setLoading(true); setError('');
+    try {
+      sessionStorage.setItem('ludosom_phone_auth_pending', '1');
+      sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
+      const credential = await phoneConfirmation.confirm(smsCode);
+      const token = await credential.user.getIdToken();
+      const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
+      const status = await readApiJson(statusResponse);
+      if (!statusResponse.ok) throw new Error(status.error || 'Account status could not be checked.');
+      if (isLogin && !status.exists) {
+        sessionStorage.removeItem('ludosom_phone_auth_pending');
+        sessionStorage.removeItem('ludosom_auth_onboarding_pending');
+        await signOut(auth);
+        throw new Error('No account exists with this phone number. Please sign up first.');
+      }
+      if (!isLogin && status.exists) {
+        sessionStorage.removeItem('ludosom_phone_auth_pending');
+        sessionStorage.removeItem('ludosom_auth_onboarding_pending');
+        await signOut(auth);
+        throw new Error('This phone number is already registered. Please sign in.');
+      }
+      setPhoneVerificationPending(false);
+      setOtpUser(credential.user);
+      setExistingAgentLink(Boolean(status.linkedToAgent));
+      if (!isLogin) {
+        const pendingKey = `ludosom_pending_signup_${credential.user.uid}`;
+        localStorage.setItem(pendingKey, JSON.stringify({ username: username.trim(), avatar, promoCode: promoCode.trim().toUpperCase() || undefined }));
+        await handleBackendLogin(credential.user, true);
+      } else if (status.linkedToAgent) {
+        await handleBackendLogin(credential.user, true);
+      } else {
+        setGoogleOnboarding(true);
+        setPromoStep(true);
+        setSuccessMessage('Phone verified. You may add a promo code, or skip this step.');
+      }
+    } catch (err: any) {
+      if (!auth.currentUser) { sessionStorage.removeItem('ludosom_phone_auth_pending'); sessionStorage.removeItem('ludosom_auth_onboarding_pending'); }
+      setError(userErrorMessage(err, 'The SMS code could not be verified.'));
+    } finally { setLoading(false); }
   };
 
   const handleForgotPassword = async () => {
@@ -257,6 +361,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
+      sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
       const credential = await signInWithPopup(auth, provider);
       const token = await credential.user.getIdToken();
       const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
@@ -280,6 +385,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setSuccessMessage('You may add a promo code, or skip this step.');
       }
     } catch (err: any) {
+      if (!auth.currentUser) sessionStorage.removeItem('ludosom_auth_onboarding_pending');
       if (err?.code !== 'auth/popup-closed-by-user') setError(userErrorMessage(err, 'Google sign-in failed.'));
     } finally {
       setLoading(false);
@@ -327,7 +433,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </div>
         )}
 
-        {promoStep ? (
+        {phoneVerificationPending ? (
+          <form onSubmit={handleVerifyPhone} className="space-y-4">
+            <div className="text-center"><h2 className="text-xl font-black">Verify Phone Number</h2><p className="mt-2 text-xs text-slate-400">Enter the 6-digit SMS code sent to {phone}</p></div>
+            <input value={smsCode} onChange={e => setSmsCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" className="w-full rounded-xl border border-purple-400/40 bg-black/30 px-4 py-4 text-center text-3xl font-black tracking-[0.5em] text-white outline-none focus:border-purple-300" />
+            <button disabled={loading || smsCode.length !== 6} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3.5 text-sm font-black disabled:opacity-50">{loading ? 'Verifying...' : 'Verify SMS Code'}</button>
+            <button type="button" onClick={() => { setPhoneVerificationPending(false); setSmsCode(''); setPhoneConfirmation(null); recaptchaRef.current?.clear(); recaptchaRef.current = null; }} className="w-full text-xs font-bold text-blue-300 hover:text-blue-200">Change phone number</button>
+          </form>
+        ) : promoStep ? (
           <div className="space-y-4">
             <div className="text-center"><h2 className="text-xl font-black">Promo Code</h2><p className="mt-2 text-xs leading-relaxed text-slate-400">Haddii aad agent ka heshay promo code, hadda geli. Haddii aadan haysan waad ka boodi kartaa.</p></div>
             <div className="space-y-1"><label className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-400"><Ticket className="h-3 w-3" /> Promo Code (Optional)</label><input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="AGENTPROMO123" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-400" /></div>
@@ -342,6 +455,10 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
             <button type="button" onClick={handleResendOtp} disabled={loading} className="w-full text-xs font-bold text-blue-300 hover:text-blue-200">Resend OTP</button>
           </form>
         ) : <form onSubmit={handleSubmit} className="space-y-4">
+          <div className={`grid ${phoneAuthEnabled ? 'grid-cols-2' : 'grid-cols-1'} gap-1 rounded-xl border border-white/10 bg-black/30 p-1`}>
+            <button type="button" onClick={() => { setAuthMethod('email'); setError(''); }} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-black transition ${authMethod === 'email' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}><Mail size={15}/> Email</button>
+            {phoneAuthEnabled && <button type="button" onClick={() => { setAuthMethod('phone'); setError(''); }} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-black transition ${authMethod === 'phone' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}><Phone size={15}/> Phone</button>}
+          </div>
           {!isLogin && (
             <>
               <div className="space-y-2">
@@ -381,7 +498,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
             </>
           )}
 
-          <div className="space-y-1">
+          {authMethod === 'email' ? <><div className="space-y-1">
              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Mail className="w-3 h-3 text-slate-500" /> {t('emailAddress')}
               </label>
@@ -419,7 +536,11 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
                   </button>
                 </div>
               )}
-            </div>
+            </div></> : <div className="space-y-1">
+              <label className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-400"><Phone className="h-3 w-3 text-slate-500"/> Phone Number</label>
+              <input type="tel" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="+25261XXXXXXX" autoComplete="tel" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-slate-500 focus:border-blue-400 focus:ring-1 focus:ring-blue-400" />
+              <p className="text-[10px] text-slate-500">Use the international country code. Firebase will send an SMS verification code.</p>
+            </div>}
 
           {!isLogin && (
             <div className="space-y-1">
@@ -451,6 +572,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
             )}
           </button>
         </form>}
+
+        <div id="phone-recaptcha-container" />
 
         <div className="flex items-center gap-3"><div className="h-px flex-1 bg-white/10" /><span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">or</span><div className="h-px flex-1 bg-white/10" /></div>
         <button type="button" onClick={handleGoogleSignIn} disabled={loading} className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white px-4 py-3 text-sm font-extrabold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50">

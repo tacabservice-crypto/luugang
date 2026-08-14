@@ -199,6 +199,8 @@ export interface PlayerAgentRequest {
   provider: 'evc' | 'edahab' | 'sahal' | 'zaad' | 'premier' | string;
   type: 'deposit' | 'withdrawal' | 'withdraw';
   amount: number;
+  fee?: number;
+  netAmount?: number;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;
   resolvedAt?: number;

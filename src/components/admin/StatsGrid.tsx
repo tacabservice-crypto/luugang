@@ -13,7 +13,7 @@ const StatCard = ({ title, value, icon: Icon, color, detail }) => (
   </div>
 );
 
-const SummaryItem = ({ icon: Icon, label, value, note, color = 'text-blue-600', onClick }) => (
+const SummaryItem = ({ icon: Icon, label, value, note, color = 'text-blue-600', onClick = undefined }) => (
   <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-left transition hover:border-purple-200 hover:bg-purple-50/50">
     <span className={`rounded-lg bg-white p-2.5 shadow-sm ${color}`}><Icon size={19}/></span>
     <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-gray-500">{label}</span><span className="block text-lg font-bold text-gray-900">{value}</span>{note && <span className="block truncate text-[11px] text-gray-400">{note}</span>}</span>

@@ -114,10 +114,7 @@ export default function App() {
         try {
           await firebaseUser.reload();
           const providerId = firebaseUser.providerData[0]?.providerId;
-          if (!firebaseUser.emailVerified && providerId === 'password') {
-            await signOut(auth);
-            setError('Please verify your email address before signing in. Check your inbox or spam folder.');
-            setUser(null);
+          if (sessionStorage.getItem('ludosom_auth_onboarding_pending') === '1') {
             setAuthLoading(false);
             return;
           }

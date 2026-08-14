@@ -264,7 +264,7 @@ const AdminDashboard: React.FC = () => {
     useEffect(() => {
         if (adminUser) {
             if (!canAccessView(adminUser, view)) return;
-            if (view !== 'my-settings') fetchData(view);
+            if (view !== 'my-settings' && view !== 'cashiers') fetchData(view);
             if (view === 'settings') {
                 fetchData('payment-settings', false);
                 fetchData('settings', false);
@@ -649,6 +649,14 @@ const AdminDashboard: React.FC = () => {
         setAdminSettings((current: any) => ({ ...current, otpEnabled: data.otpEnabled }));
     };
 
+    const handleSavePhoneAuthSettings = async (enabled: boolean) => {
+        if (!adminId) return;
+        const response = await fetch(`/api/admin/phone-auth-settings?userId=${adminId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to save phone authentication settings');
+        setAdminSettings((current: any) => ({ ...current, phoneAuthEnabled: data.phoneAuthEnabled }));
+    };
+
     const handleApproveTransaction = async (transactionId: string) => {
         if (!adminUser || !window.confirm('Are you sure you want to approve this transaction?')) return;
         setError(null);
@@ -814,6 +822,7 @@ const AdminDashboard: React.FC = () => {
                 onSaveVipTiers={handleSaveVipTiers}
                 onSaveAdSettings={handleSaveAdSettings}
                 onSaveOtpSettings={handleSaveOtpSettings}
+                onSavePhoneAuthSettings={handleSavePhoneAuthSettings}
                 onCreateRole={() => setCreateRoleModalOpen(true)}
                 onDeleteRole={handleDeleteRole}
                 onUpdateRole={handleUpdateRole}

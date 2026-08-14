@@ -11,6 +11,7 @@ const Settings = ({
     onSaveVipTiers,
     onSaveAdSettings,
     onSaveOtpSettings,
+    onSavePhoneAuthSettings,
     onCreateRole,
     onDeleteRole,
     onUpdateRole,
@@ -24,6 +25,7 @@ const Settings = ({
   const [editableVipTiers, setEditableVipTiers] = useState(adminSettings?.vipTiers || {});
   const [editableAdSettings, setEditableAdSettings] = useState(adminSettings?.adSettings || { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' });
   const [otpEnabled, setOtpEnabled] = useState(adminSettings?.otpEnabled !== false);
+  const [phoneAuthEnabled, setPhoneAuthEnabled] = useState(adminSettings?.phoneAuthEnabled !== false);
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   useEffect(() => {
@@ -33,6 +35,7 @@ const Settings = ({
   useEffect(() => setEditableVipTiers(adminSettings?.vipTiers || {}), [adminSettings?.vipTiers]);
   useEffect(() => { if (adminSettings?.adSettings) setEditableAdSettings(adminSettings.adSettings); }, [adminSettings?.adSettings]);
   useEffect(() => setOtpEnabled(adminSettings?.otpEnabled !== false), [adminSettings?.otpEnabled]);
+  useEffect(() => setPhoneAuthEnabled(adminSettings?.phoneAuthEnabled !== false), [adminSettings?.phoneAuthEnabled]);
 
   const updateVipTier = (key, field, value) => setEditableVipTiers(current => ({ ...current, [key]: { ...current[key], [field]: value } }));
 
@@ -106,6 +109,14 @@ const Settings = ({
               </div>
             </div>
             {!otpEnabled && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><strong>Security notice:</strong> Firebase password/Google authentication remains active, but the additional LudoSom email-code check is skipped.</div>}
+            <div className="border-t border-gray-200 pt-5"><h3 className="text-xl font-bold">Phone / SMS Login</h3><p className="mt-1 text-sm text-gray-500">Control whether users can register or sign in with a phone number and a Firebase SMS code.</p></div>
+            <div className={`rounded-xl border p-5 ${phoneAuthEnabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div><p className={`font-black ${phoneAuthEnabled ? 'text-emerald-800' : 'text-amber-900'}`}>Phone login is currently {phoneAuthEnabled ? 'ENABLED' : 'DISABLED'}</p><p className="mt-1 text-sm text-gray-600">{phoneAuthEnabled ? 'The Phone option is visible and Firebase sends an SMS code for every phone sign-in.' : 'The Phone option is hidden and the backend rejects phone-authenticated sessions.'}</p></div>
+                <button onClick={async () => { const next = !phoneAuthEnabled; if (!window.confirm(next ? 'Enable Phone/SMS login?' : 'Disable Phone/SMS login for all users?')) return; try { await onSavePhoneAuthSettings(next); setPhoneAuthEnabled(next); showNotification('success', `Phone/SMS login ${next ? 'enabled' : 'disabled'}.`); } catch (error: any) { showNotification('error', userErrorMessage(error, 'Phone login setting could not be saved.')); } }} className={`shrink-0 rounded-lg px-5 py-3 font-black text-white ${phoneAuthEnabled ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>{phoneAuthEnabled ? 'Disable Phone Login' : 'Enable Phone Login'}</button>
+              </div>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800"><strong>Firebase note:</strong> This switch controls LudoSom. To stop SMS globally—including old cached app versions—also disable the Phone provider in Firebase Authentication.</div>
           </div>
         )}
         {settingsView === 'ads' && (
