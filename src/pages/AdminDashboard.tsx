@@ -641,6 +641,14 @@ const AdminDashboard: React.FC = () => {
         setAdminSettings((current: any) => ({ ...current, adSettings: data.adSettings }));
     };
 
+    const handleSaveOtpSettings = async (enabled: boolean) => {
+        if (!adminId) return;
+        const response = await fetch(`/api/admin/otp-settings?userId=${adminId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to save OTP settings');
+        setAdminSettings((current: any) => ({ ...current, otpEnabled: data.otpEnabled }));
+    };
+
     const handleApproveTransaction = async (transactionId: string) => {
         if (!adminUser || !window.confirm('Are you sure you want to approve this transaction?')) return;
         setError(null);
@@ -805,6 +813,7 @@ const AdminDashboard: React.FC = () => {
                 onSavePaymentSettings={handleSavePaymentSettings}
                 onSaveVipTiers={handleSaveVipTiers}
                 onSaveAdSettings={handleSaveAdSettings}
+                onSaveOtpSettings={handleSaveOtpSettings}
                 onCreateRole={() => setCreateRoleModalOpen(true)}
                 onDeleteRole={handleDeleteRole}
                 onUpdateRole={handleUpdateRole}

@@ -130,7 +130,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         const profileStatus = await readApiJson(statusResponse);
         if (!statusResponse.ok) throw new Error(profileStatus.error || 'Account status could not be checked.');
         setExistingAgentLink(Boolean(profileStatus.linkedToAgent));
-        if (!profileStatus.otpVerified) {
+        if (profileStatus.otpRequired) {
           const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
           const otpData = await readApiJson(otpResponse);
           if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
@@ -158,6 +158,10 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
         const otpData = await readApiJson(otpResponse);
         if (!otpResponse.ok) throw new Error(otpData.error || 'OTP could not be sent.');
+        if (otpData.disabled) {
+          await handleBackendLogin(userCredential.user);
+          return;
+        }
         setOtpUser(userCredential.user);
         setVerificationPending(true);
         setSuccessMessage('Account-ka waa la sameeyay. 6-digit OTP ayaa loo diray email-kaaga.');
@@ -259,7 +263,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       const status = await readApiJson(statusResponse);
       if (!statusResponse.ok) throw new Error(status.error || 'Could not check account status.');
       setExistingAgentLink(Boolean(status.linkedToAgent));
-      if (!status.otpVerified) {
+      if (status.otpRequired) {
         const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
         const otpData = await readApiJson(otpResponse);
         if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');

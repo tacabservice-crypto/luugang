@@ -103,6 +103,7 @@ var DB_FILE = path.join(process.cwd(), "db_store.json");
 var WELCOME_BONUS = 1;
 var OTP_TTL_MS = 10 * 60 * 1e3;
 var OTP_RESEND_MS = 60 * 1e3;
+var isOtpEnabled = () => store.adminSettings?.otpEnabled !== false;
 var MINIMUM_WITHDRAWAL = 2;
 var BONUS_UNLOCK_DEPOSIT_TOTAL = 5;
 var NORMAL_WITHDRAWAL_FEE_RATE = 0;
@@ -354,7 +355,8 @@ function normalizeAdminPermissions(value) {
 var DEFAULT_ADMIN_SETTINGS = {
   username: process.env.ADMIN_USERNAME || "admin",
   password: process.env.ADMIN_PASSWORD || "password",
-  roles: DEFAULT_ADMIN_ROLES
+  roles: DEFAULT_ADMIN_ROLES,
+  otpEnabled: true
 };
 var store = {
   users: {},
@@ -468,7 +470,8 @@ function loadStore() {
       store.adminSettings = {
         username: parsed.adminSettings?.username || process.env.ADMIN_USERNAME || "admin",
         password: parsed.adminSettings?.password || process.env.ADMIN_PASSWORD || "password",
-        roles: persistedRoles.length ? persistedRoles : DEFAULT_ADMIN_ROLES
+        roles: persistedRoles.length ? persistedRoles : DEFAULT_ADMIN_ROLES,
+        otpEnabled: parsed.adminSettings?.otpEnabled !== false
       };
       store.agents = parsed.agents || {};
       store.agentTransactions = parsed.agentTransactions || [];
@@ -516,7 +519,8 @@ async function loadStoreFromFirestore() {
         store.adminSettings = {
           username: parsed.adminSettings?.username || process.env.ADMIN_USERNAME || "admin",
           password: parsed.adminSettings?.password || process.env.ADMIN_PASSWORD || "password",
-          roles: persistedRoles.length ? persistedRoles : DEFAULT_ADMIN_ROLES
+          roles: persistedRoles.length ? persistedRoles : DEFAULT_ADMIN_ROLES,
+          otpEnabled: parsed.adminSettings?.otpEnabled !== false
         };
         store.agents = parsed.agents || {};
         store.agentTransactions = parsed.agentTransactions || [];
@@ -1422,6 +1426,7 @@ var checkVipStatus = (req, res, next) => {
 };
 app.post("/api/auth/otp/request", verifyFirebaseToken, async (req, res) => {
   if (!db || !auth) return res.status(500).json({ error: "Firebase is not configured." });
+  if (!isOtpEnabled()) return res.json({ success: true, disabled: true, message: "Email OTP is currently disabled by the administrator." });
   const uid = req.user.uid;
   const email = String(req.user.email || "").trim().toLowerCase();
   if (!email) return res.status(400).json({ error: "This account has no email address." });
@@ -1440,6 +1445,7 @@ app.post("/api/auth/otp/request", verifyFirebaseToken, async (req, res) => {
 });
 app.post("/api/auth/otp/verify", verifyFirebaseToken, async (req, res) => {
   if (!db || !auth) return res.status(500).json({ error: "Firebase is not configured." });
+  if (!isOtpEnabled()) return res.json({ success: true, disabled: true, message: "Email OTP is currently disabled by the administrator." });
   const otp = String(req.body?.otp || "").trim();
   if (!/^\d{6}$/.test(otp)) return res.status(400).json({ error: "Enter a valid 6-digit code." });
   const ref = db.collection("emailOtps").doc(req.user.uid);
@@ -1466,7 +1472,8 @@ app.post("/api/auth/otp/verify", verifyFirebaseToken, async (req, res) => {
 });
 app.get("/api/auth/profile-status", verifyFirebaseToken, async (req, res) => {
   const profile = await findUserProfileInFirestore(req.user.uid, req.user.email);
-  res.json({ exists: Boolean(profile?.id), otpVerified: Boolean(profile?.emailOtpVerifiedAt), linkedToAgent: Boolean(profile?.linkedAgentId) });
+  const otpEnabled = isOtpEnabled();
+  res.json({ exists: Boolean(profile?.id), otpEnabled, otpRequired: otpEnabled && !profile?.emailOtpVerifiedAt, otpVerified: !otpEnabled || Boolean(profile?.emailOtpVerifiedAt), linkedToAgent: Boolean(profile?.linkedAgentId) });
 });
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
@@ -1621,12 +1628,12 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   const { username, email, avatar, promoCode, onboardingComplete } = req.body;
   const firebaseUid = req.user.uid;
   const signInProvider = req.user.firebase?.sign_in_provider;
-  if (!req.user.email_verified && signInProvider === "password") {
+  if (isOtpEnabled() && !req.user.email_verified && signInProvider === "password") {
     return res.status(403).json({ error: "Please verify your email address before signing in." });
   }
   let foundUser = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
   if (foundUser) {
-    if (!foundUser.emailOtpVerifiedAt) {
+    if (isOtpEnabled() && !foundUser.emailOtpVerifiedAt) {
       const otpVerification = db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
       const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
       if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
@@ -1643,10 +1650,10 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   }
   const persistedUser = await findUserProfileInFirestore(firebaseUid, email);
   if (persistedUser?.id) {
-    if (!persistedUser.emailOtpVerifiedAt) {
-      const otpVerification = db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
-      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
-      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
+    if (isOtpEnabled() && !persistedUser.emailOtpVerifiedAt) {
+      const otpVerification = isOtpEnabled() && db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
+      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.data()?.verifiedAt || 0) : Date.now();
+      if (isOtpEnabled() && (onboardingComplete !== true || !verifiedAt)) return res.status(428).json({ error: "Email OTP verification is required." });
       persistedUser.emailOtpVerifiedAt = verifiedAt;
     }
     persistedUser.firebaseUid = firebaseUid;
@@ -1668,9 +1675,9 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       (u) => u.email?.trim().toLowerCase() === normalizedEmail && !u.firebaseUid
     );
     if (userByEmail) {
-      const otpVerification = db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
-      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
-      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
+      const otpVerification = isOtpEnabled() && db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
+      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.data()?.verifiedAt || 0) : Date.now();
+      if (isOtpEnabled() && (onboardingComplete !== true || !verifiedAt)) return res.status(428).json({ error: "Email OTP verification is required." });
       userByEmail.firebaseUid = firebaseUid;
       userByEmail.email = normalizedEmail;
       userByEmail.emailOtpVerifiedAt = verifiedAt;
@@ -1684,7 +1691,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       return res.json(userByEmail);
     }
   }
-  if (signInProvider === "google.com") {
+  if (signInProvider === "google.com" && isOtpEnabled()) {
     if (onboardingComplete !== true || !db) {
       return res.status(428).json({ error: "Complete email OTP verification and the promo-code step before continuing." });
     }
@@ -1721,7 +1728,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     lossCount: 0,
     linkedAgentId,
     // Add the linked agent ID
-    emailOtpVerifiedAt: Date.now()
+    emailOtpVerifiedAt: isOtpEnabled() ? Date.now() : void 0
   };
   store.users[userId] = newUser;
   addTransaction(userId, "deposit", WELCOME_BONUS, void 0, "Welcome signup bonus.");
@@ -3730,12 +3737,19 @@ app.get("/api/admin/settings", hasPermission("settings"), async (req, res) => {
       passwordConfigured: Boolean(store.adminSettings?.password),
       roles,
       vipTiers: store.vipTiers,
-      adSettings: store.adSettings
+      adSettings: store.adSettings,
+      otpEnabled: isOtpEnabled()
     });
   } catch (error) {
     console.error("Failed to retrieve admin roles:", error);
     res.status(500).json({ error: "Failed to retrieve admin roles." });
   }
+});
+app.post("/api/admin/otp-settings", hasPermission("settings"), async (req, res) => {
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "OTP enabled status must be true or false." });
+  store.adminSettings.otpEnabled = req.body.enabled;
+  await saveStoreAndWait();
+  res.json({ success: true, otpEnabled: isOtpEnabled(), message: isOtpEnabled() ? "Email OTP verification is enabled." : "Email OTP verification is disabled." });
 });
 app.post("/api/admin/settings", isAdmin, async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });

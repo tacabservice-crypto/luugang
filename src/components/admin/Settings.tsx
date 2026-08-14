@@ -10,6 +10,7 @@ const Settings = ({
     onSavePaymentSettings, 
     onSaveVipTiers,
     onSaveAdSettings,
+    onSaveOtpSettings,
     onCreateRole,
     onDeleteRole,
     onUpdateRole,
@@ -22,6 +23,7 @@ const Settings = ({
   const [editablePaymentSettings, setEditablePaymentSettings] = useState(paymentSettings);
   const [editableVipTiers, setEditableVipTiers] = useState(adminSettings?.vipTiers || {});
   const [editableAdSettings, setEditableAdSettings] = useState(adminSettings?.adSettings || { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' });
+  const [otpEnabled, setOtpEnabled] = useState(adminSettings?.otpEnabled !== false);
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   useEffect(() => {
@@ -30,6 +32,7 @@ const Settings = ({
 
   useEffect(() => setEditableVipTiers(adminSettings?.vipTiers || {}), [adminSettings?.vipTiers]);
   useEffect(() => { if (adminSettings?.adSettings) setEditableAdSettings(adminSettings.adSettings); }, [adminSettings?.adSettings]);
+  useEffect(() => setOtpEnabled(adminSettings?.otpEnabled !== false), [adminSettings?.otpEnabled]);
 
   const updateVipTier = (key, field, value) => setEditableVipTiers(current => ({ ...current, [key]: { ...current[key], [field]: value } }));
 
@@ -79,6 +82,7 @@ const Settings = ({
             VIP Plans
           </button>
           <button onClick={() => setSettingsView('ads')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'ads' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Ads & Notices</button>
+          <button onClick={() => setSettingsView('security')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'security' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Login Security</button>
           <button onClick={() => setSettingsView('admin')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'admin' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             Admin Management
           </button>
@@ -92,6 +96,18 @@ const Settings = ({
         )}
 
       <div className="mt-6">
+        {settingsView === 'security' && (
+          <div className="max-w-3xl space-y-4">
+            <div><h3 className="text-xl font-bold">Email OTP Verification</h3><p className="mt-1 text-sm text-gray-500">Control whether users must receive and enter an email code during signup, legacy login, and Google onboarding.</p></div>
+            <div className={`rounded-xl border p-5 ${otpEnabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div><p className={`font-black ${otpEnabled ? 'text-emerald-800' : 'text-amber-900'}`}>OTP is currently {otpEnabled ? 'ENABLED' : 'DISABLED'}</p><p className="mt-1 text-sm text-gray-600">{otpEnabled ? 'Users without prior verification must confirm a code sent to their email.' : 'No OTP emails are sent. Users continue directly to login or the optional promo-code step.'}</p></div>
+                <button onClick={async () => { const next = !otpEnabled; if (!window.confirm(next ? 'Enable Email OTP verification?' : 'Disable Email OTP verification for all users?')) return; try { await onSaveOtpSettings(next); setOtpEnabled(next); showNotification('success', `Email OTP ${next ? 'enabled' : 'disabled'}.`); } catch (error: any) { showNotification('error', userErrorMessage(error, 'OTP setting could not be saved.')); } }} className={`shrink-0 rounded-lg px-5 py-3 font-black text-white ${otpEnabled ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>{otpEnabled ? 'Disable OTP' : 'Enable OTP'}</button>
+              </div>
+            </div>
+            {!otpEnabled && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"><strong>Security notice:</strong> Firebase password/Google authentication remains active, but the additional LudoSom email-code check is skipped.</div>}
+          </div>
+        )}
         {settingsView === 'ads' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Ads & Live Notices</h3><p className="text-sm text-gray-500">Choose any display time from 1 second up to 3 minutes.</p></div><button onClick={async()=>{try{await onSaveAdSettings(editableAdSettings);showNotification('success','Ad settings saved.');}catch(error:any){showNotification('error',userErrorMessage(error,'Ad settings could not be saved.'));}}} className="rounded-md bg-purple-600 px-4 py-2 font-bold text-white">Save Campaign</button></div>
