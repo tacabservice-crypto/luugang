@@ -10,7 +10,7 @@
     "start": "node server.js",
     "preview": "vite preview",
     "db:migrate": "tsx scripts/migrate-mysql.ts",
-    "db:migrate:firebase": "tsx scripts/migrate-firestore-to-mysql.ts --execute",
+    "db:migrate:firebase": "tsx scripts/run-firestore-to-mysql-migration.ts --execute",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

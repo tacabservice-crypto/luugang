@@ -13,4 +13,8 @@ Stage 3 performs a read-only Firebase snapshot and copies it into MySQL with:
 
 The copy never updates or deletes Firebase documents. It verifies every migrated user balance before marking the migration run as verified.
 
+For a Hostinger Node.js deployment without an npm terminal, set `RUN_FIREBASE_MYSQL_MIGRATION_ON_START=true` and redeploy. The HTTP server starts first and the copy runs in the background. A MySQL advisory lock prevents simultaneous copies, while a verified `firebase_initial_v1` record prevents later restarts from copying again.
+
+Wait for a log containing `"status": "verified"`, confirm that `balanceMismatches` is empty, then set the switch back to `false` and redeploy. If Firestore reports `RESOURCE_EXHAUSTED`, keep the switch off until the quota resets.
+
 The migration command is repeatable: every migration filename is recorded in `schema_migrations` and will not be applied twice.

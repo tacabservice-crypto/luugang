@@ -1,12 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import dotenv from 'dotenv';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMySqlPool, closeMySqlPool, isMySqlConfigured } from '../src/server/mysql.ts';
-
-dotenv.config();
-dotenv.config({ path: path.join(process.cwd(), '.env.production') });
 
 type JsonRecord = Record<string, any>;
 const now = () => Date.now();
@@ -68,16 +64,19 @@ async function loadSourceSnapshot() {
   return { store, users, manualRequests: mergedManual, agents: mergedAgents, adminUsers, agentRequests, agentTransactions, cashierPayments, emailOtps };
 }
 
-async function migrate() {
-  if (!process.argv.includes('--execute')) throw new Error('Safety stop: add --execute to run the one-way Firebase to MySQL copy.');
+export async function migrateFirestoreToMySql(options: { requireExecuteFlag?: boolean } = {}) {
+  if (options.requireExecuteFlag !== false && !process.argv.includes('--execute')) throw new Error('Safety stop: add --execute to run the one-way Firebase to MySQL copy.');
   if (!isMySqlConfigured()) throw new Error('MySQL environment variables are incomplete.');
-  const serviceAccount = firebaseCredential();
-  serviceAccount.private_key = String(serviceAccount.private_key || '').replace(/\\n/g, '\n');
-  if (!getApps().length) initializeApp({ credential: cert(serviceAccount) });
-  const source = await loadSourceSnapshot();
+  if (!getApps().length) {
+    const serviceAccount = firebaseCredential();
+    serviceAccount.private_key = String(serviceAccount.private_key || '').replace(/\\n/g, '\n');
+    initializeApp({ credential: cert(serviceAccount) });
+  }
   const pool = getMySqlPool();
   const connection = await pool.getConnection();
   const migrationId = `firebase_${Date.now()}`;
+  const sourceName = 'firebase_initial_v1';
+  let advisoryLockHeld = false;
 
   try {
     await connection.query(`CREATE TABLE IF NOT EXISTS data_migration_runs (
@@ -88,7 +87,20 @@ async function migrate() {
       started_at BIGINT UNSIGNED NOT NULL,
       completed_at BIGINT UNSIGNED NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
-    await connection.execute('INSERT INTO data_migration_runs (id, source_name, status, summary_json, started_at) VALUES (?, ?, ?, ?, ?)', [migrationId, 'firebase', 'running', json({}), now()]);
+    const [lockRows] = await connection.query<any[]>("SELECT GET_LOCK('ludosom_firebase_initial_v1', 0) AS acquired");
+    advisoryLockHeld = Number(lockRows[0]?.acquired) === 1;
+    if (!advisoryLockHeld) {
+      console.log('Firebase to MySQL migration is already running in another application instance.');
+      return { status: 'already-running' as const };
+    }
+    const [completedRows] = await connection.execute<any[]>('SELECT id FROM data_migration_runs WHERE source_name = ? AND status = ? LIMIT 1', [sourceName, 'verified']);
+    if (completedRows.length) {
+      console.log(`Firebase to MySQL migration was already verified (${completedRows[0].id}); skipping.`);
+      return { status: 'already-verified' as const, migrationId: String(completedRows[0].id) };
+    }
+
+    const source = await loadSourceSnapshot();
+    await connection.execute('INSERT INTO data_migration_runs (id, source_name, status, summary_json, started_at) VALUES (?, ?, ?, ?, ?)', [migrationId, sourceName, 'running', json({}), now()]);
     await connection.beginTransaction();
 
     for (const user of source.users.values()) {
@@ -188,17 +200,16 @@ async function migrate() {
     await connection.execute('UPDATE data_migration_runs SET status = ?, summary_json = ?, completed_at = ? WHERE id = ?', ['verified', json(summary), now(), migrationId]);
     console.log(JSON.stringify({ migrationId, status: 'verified', ...summary }, null, 2));
     console.log('Firebase was read only; no Firebase documents were changed or deleted.');
+    return { migrationId, status: 'verified' as const, ...summary };
   } catch (error) {
     try { await connection.rollback(); } catch {}
     try { await connection.execute('UPDATE data_migration_runs SET status = ?, summary_json = ?, completed_at = ? WHERE id = ?', ['failed', json({ error: error instanceof Error ? error.message : String(error) }), now(), migrationId]); } catch {}
     throw error;
   } finally {
+    if (advisoryLockHeld) {
+      try { await connection.query("SELECT RELEASE_LOCK('ludosom_firebase_initial_v1')"); } catch {}
+    }
     connection.release();
     await closeMySqlPool();
   }
 }
-
-migrate().catch(error => {
-  console.error('Firebase to MySQL migration failed:', error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});

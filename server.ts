@@ -40,6 +40,7 @@ function getDistDirectory(): string {
 }
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -6917,6 +6918,13 @@ async function startServer() {
     console.log('Application state initialization completed.');
   } catch (error) {
     console.error('Application state initialization failed; continuing with local fallback:', error);
+  }
+
+  if (String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || '').trim().toLowerCase() === 'true') {
+    console.log('One-time Firebase to MySQL migration requested; starting in the background.');
+    void migrateFirestoreToMySql({ requireExecuteFlag: false }).catch(error => {
+      console.error('One-time Firebase to MySQL migration failed:', error instanceof Error ? error.message : error);
+    });
   }
 
   // Handle Vite HMR WebSocket upgrade requests

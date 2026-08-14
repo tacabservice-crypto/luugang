@@ -3,29 +3,300 @@ import { createRequire as __createRequire } from 'module'; const require = __cre
 // server.ts
 import express from "express";
 import cors from "cors";
-import path from "path";
-import fs from "fs";
+import path2 from "path";
+import fs2 from "fs";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
-import { initializeApp, cert, getApp } from "firebase-admin/app";
+import { initializeApp as initializeApp2, cert as cert2, getApp } from "firebase-admin/app";
+import { getFirestore as getFirestore2 } from "firebase-admin/firestore";
+
+// scripts/migrate-firestore-to-mysql.ts
+import fs from "node:fs";
+import path from "node:path";
+import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+
+// src/server/mysql.ts
+import mysql from "mysql2/promise";
+var pool = null;
+function isMySqlConfigured() {
+  return Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
+}
+function mysqlConfig() {
+  if (!isMySqlConfigured()) {
+    throw new Error("MySQL is not configured. Set MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD and MYSQL_DATABASE.");
+  }
+  const useSsl = String(process.env.MYSQL_SSL || "").toLowerCase() === "true";
+  return {
+    host: process.env.MYSQL_HOST,
+    port: Math.max(1, Number(process.env.MYSQL_PORT) || 3306),
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD || "",
+    database: process.env.MYSQL_DATABASE,
+    waitForConnections: true,
+    connectionLimit: Math.max(1, Math.min(20, Number(process.env.MYSQL_CONNECTION_LIMIT) || 5)),
+    queueLimit: 0,
+    charset: "utf8mb4",
+    timezone: "Z",
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    decimalNumbers: false,
+    ...useSsl ? { ssl: { rejectUnauthorized: String(process.env.MYSQL_SSL_REJECT_UNAUTHORIZED || "true").toLowerCase() !== "false" } } : {}
+  };
+}
+function getMySqlPool() {
+  if (!pool) pool = mysql.createPool(mysqlConfig());
+  return pool;
+}
+async function closeMySqlPool() {
+  if (!pool) return;
+  const activePool = pool;
+  pool = null;
+  await activePool.end();
+}
+
+// scripts/migrate-firestore-to-mysql.ts
+var now = () => Date.now();
+var json = (value) => JSON.stringify(value ?? {});
+var money = (value) => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "0.00";
+var timestamp = (value, fallback = now()) => Math.max(0, Number(value) || fallback);
+function firebaseCredential() {
+  const inline = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (inline) return JSON.parse(inline);
+  const candidates = [
+    process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
+    path.join(process.cwd(), "firebase-admin-key.json"),
+    path.join(process.cwd(), "service-account.json"),
+    path.join(process.cwd(), "firebase-key.json")
+  ].filter(Boolean);
+  const found = candidates.find((file) => fs.existsSync(file));
+  if (!found) throw new Error("Firebase Admin credentials were not found.");
+  return JSON.parse(fs.readFileSync(found, "utf8"));
+}
+async function collectionMap(collectionName) {
+  const snapshot = await getFirestore().collection(collectionName).get();
+  return new Map(snapshot.docs.map((document) => [document.id, { id: document.id, ...document.data() }]));
+}
+async function loadSourceSnapshot() {
+  const db2 = getFirestore();
+  const mainDocument = await db2.collection("ludo_store").doc("main").get();
+  if (!mainDocument.exists || !mainDocument.data()?.data) throw new Error("Firestore ludo_store/main snapshot is missing.");
+  const store2 = JSON.parse(String(mainDocument.data().data));
+  const [firestoreUsers, manualRequests, agents, adminUsers, agentRequests, agentTransactions, cashierPayments, emailOtps] = await Promise.all([
+    collectionMap("users"),
+    collectionMap("manualTransactionRequests"),
+    collectionMap("agents"),
+    collectionMap("adminUsers"),
+    collectionMap("agentRequests"),
+    collectionMap("agentTransactions"),
+    collectionMap("cashierPayments"),
+    collectionMap("emailOtps")
+  ]);
+  const users = /* @__PURE__ */ new Map();
+  Object.values(store2.users || {}).forEach((user) => {
+    if (user?.id && !String(user.id).startsWith("bot_") && !String(user.id).startsWith("user_sim_")) users.set(String(user.id), user);
+  });
+  firestoreUsers.forEach((user) => {
+    if (user?.id) users.set(String(user.id), { ...users.get(String(user.id)) || {}, ...user });
+  });
+  const mergedAgents = new Map(Object.entries(store2.agents || {}));
+  agents.forEach((agent, id) => mergedAgents.set(id, { ...mergedAgents.get(id) || {}, ...agent }));
+  const mergedManual = new Map((store2.pendingManualTransactions || []).map((request) => [String(request.id), request]));
+  manualRequests.forEach((request, id) => mergedManual.set(id, { ...mergedManual.get(id) || {}, ...request }));
+  const ensureUser = (userId) => {
+    const id = String(userId || "").trim();
+    if (!id || id === "house" || id === "platform") return;
+    if (!users.has(id)) users.set(id, { id, username: "Migrated Account", balance: 0, winCount: 0, lossCount: 0, createdAt: now(), migrationPlaceholder: true });
+  };
+  (store2.transactions || []).forEach((transaction) => ensureUser(transaction.userId));
+  mergedManual.forEach((request) => ensureUser(request.userId));
+  return { store: store2, users, manualRequests: mergedManual, agents: mergedAgents, adminUsers, agentRequests, agentTransactions, cashierPayments, emailOtps };
+}
+async function migrateFirestoreToMySql(options = {}) {
+  if (options.requireExecuteFlag !== false && !process.argv.includes("--execute")) throw new Error("Safety stop: add --execute to run the one-way Firebase to MySQL copy.");
+  if (!isMySqlConfigured()) throw new Error("MySQL environment variables are incomplete.");
+  if (!getApps().length) {
+    const serviceAccount2 = firebaseCredential();
+    serviceAccount2.private_key = String(serviceAccount2.private_key || "").replace(/\\n/g, "\n");
+    initializeApp({ credential: cert(serviceAccount2) });
+  }
+  const pool2 = getMySqlPool();
+  const connection = await pool2.getConnection();
+  const migrationId = `firebase_${Date.now()}`;
+  const sourceName = "firebase_initial_v1";
+  let advisoryLockHeld = false;
+  try {
+    await connection.query(`CREATE TABLE IF NOT EXISTS data_migration_runs (
+      id VARCHAR(191) PRIMARY KEY,
+      source_name VARCHAR(64) NOT NULL,
+      status VARCHAR(32) NOT NULL,
+      summary_json JSON NOT NULL,
+      started_at BIGINT UNSIGNED NOT NULL,
+      completed_at BIGINT UNSIGNED NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    const [lockRows] = await connection.query("SELECT GET_LOCK('ludosom_firebase_initial_v1', 0) AS acquired");
+    advisoryLockHeld = Number(lockRows[0]?.acquired) === 1;
+    if (!advisoryLockHeld) {
+      console.log("Firebase to MySQL migration is already running in another application instance.");
+      return { status: "already-running" };
+    }
+    const [completedRows] = await connection.execute("SELECT id FROM data_migration_runs WHERE source_name = ? AND status = ? LIMIT 1", [sourceName, "verified"]);
+    if (completedRows.length) {
+      console.log(`Firebase to MySQL migration was already verified (${completedRows[0].id}); skipping.`);
+      return { status: "already-verified", migrationId: String(completedRows[0].id) };
+    }
+    const source = await loadSourceSnapshot();
+    await connection.execute("INSERT INTO data_migration_runs (id, source_name, status, summary_json, started_at) VALUES (?, ?, ?, ?, ?)", [migrationId, sourceName, "running", json({}), now()]);
+    await connection.beginTransaction();
+    for (const user of source.users.values()) {
+      const id = String(user.id);
+      await connection.execute(
+        `INSERT INTO app_users
+        (id, firebase_uid, email, phone, username, avatar, balance, win_count, loss_count, linked_agent_id, applied_promo_code, email_verified, status, created_at, updated_at, profile_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE firebase_uid=VALUES(firebase_uid), email=VALUES(email), phone=VALUES(phone), username=VALUES(username), avatar=VALUES(avatar), balance=VALUES(balance), win_count=VALUES(win_count), loss_count=VALUES(loss_count), linked_agent_id=VALUES(linked_agent_id), applied_promo_code=VALUES(applied_promo_code), email_verified=VALUES(email_verified), status=VALUES(status), updated_at=VALUES(updated_at), profile_json=VALUES(profile_json), version=version+1`,
+        [id, user.firebaseUid || null, user.email || null, user.phone || user.phoneNumber || null, user.username || "Player", user.avatar || null, money(user.balance), Number(user.winCount || 0), Number(user.lossCount || 0), user.linkedAgentId || null, user.appliedPromoCode || user.promoCode || null, Boolean(user.emailVerified), user.status || "active", timestamp(user.createdAt), now(), json(user)]
+      );
+    }
+    for (const transaction of source.store.transactions || []) {
+      const userId = String(transaction.userId || "");
+      if (!source.users.has(userId)) continue;
+      await connection.execute(
+        `INSERT INTO wallet_transactions (id, user_id, transaction_type, amount, balance_after, status, reference_id, revenue_category, description, created_at, transaction_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=VALUES(status), description=VALUES(description), transaction_json=VALUES(transaction_json)`,
+        [String(transaction.id), userId, transaction.type || "unknown", money(transaction.amount), transaction.balanceAfter === void 0 ? null : money(transaction.balanceAfter), transaction.status || "completed", transaction.referenceId || transaction.matchId || transaction.roomId || null, transaction.revenueCategory || null, transaction.description || null, timestamp(transaction.timestamp || transaction.createdAt), json(transaction)]
+      );
+    }
+    for (const [id, agent] of source.agents) {
+      await connection.execute(
+        `INSERT INTO agents (id, username, password_hash, phone, location, promo_code, commission_rate, balance, float_balance, business_model, status, created_at, updated_at, agent_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username=VALUES(username), password_hash=VALUES(password_hash), phone=VALUES(phone), location=VALUES(location), promo_code=VALUES(promo_code), commission_rate=VALUES(commission_rate), balance=VALUES(balance), float_balance=VALUES(float_balance), business_model=VALUES(business_model), status=VALUES(status), updated_at=VALUES(updated_at), agent_json=VALUES(agent_json)`,
+        [id, agent.username || id, agent.password || agent.passwordHash || null, agent.phone || null, agent.location || null, agent.promoCode || null, Number(agent.commissionRate || 0), money(agent.balance), money(agent.floatBalance), agent.businessModel || "independent", agent.status || "Active", timestamp(agent.createdAt), now(), json(agent)]
+      );
+    }
+    for (const [id, admin] of source.adminUsers) {
+      await connection.execute(
+        `INSERT INTO admin_users (id, username, password_hash, name, permissions_json, status, location, cashier_locations_json, cashier_online_at, admin_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username=VALUES(username), password_hash=VALUES(password_hash), name=VALUES(name), permissions_json=VALUES(permissions_json), status=VALUES(status), location=VALUES(location), cashier_locations_json=VALUES(cashier_locations_json), cashier_online_at=VALUES(cashier_online_at), admin_json=VALUES(admin_json), updated_at=VALUES(updated_at)`,
+        [id, admin.username || id, admin.password || admin.passwordHash || null, admin.name || null, json(admin.permissions || []), admin.status || "active", admin.location || null, json(admin.cashierLocations || []), admin.cashierOnlineAt || null, json(admin), timestamp(admin.createdAt), now()]
+      );
+    }
+    for (const [id, request] of source.manualRequests) {
+      if (!source.users.has(String(request.userId || ""))) continue;
+      await connection.execute(
+        `INSERT INTO manual_transaction_requests (id, user_id, agent_id, managed_by, transaction_type, amount, status, assigned_cashier_id, created_at, resolved_at, request_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE agent_id=VALUES(agent_id), managed_by=VALUES(managed_by), status=VALUES(status), assigned_cashier_id=VALUES(assigned_cashier_id), resolved_at=VALUES(resolved_at), request_json=VALUES(request_json)`,
+        [id, request.userId, request.agentId || null, request.managedBy || (request.agentId ? "agent" : "admin"), request.transactionType || request.type || "deposit", money(request.amount), request.status || "pending", request.assignedCashierId || null, timestamp(request.createdAt), request.resolvedAt || null, json(request)]
+      );
+    }
+    for (const [id, request] of source.agentRequests) {
+      await connection.execute(
+        `INSERT INTO agent_requests (id, agent_id, amount, status, created_at, resolved_at, request_json) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE amount=VALUES(amount), status=VALUES(status), resolved_at=VALUES(resolved_at), request_json=VALUES(request_json)`,
+        [id, request.agentId, money(request.amount), request.status || "pending", timestamp(request.createdAt), request.resolvedAt || null, json(request)]
+      );
+    }
+    for (const [id, transaction] of source.agentTransactions) {
+      await connection.execute(
+        `INSERT INTO agent_transactions (id, agent_id, player_id, transaction_type, amount, discount_amount, created_at, transaction_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE transaction_json=VALUES(transaction_json)`,
+        [id, transaction.agentId, transaction.playerId || null, transaction.type || "unknown", money(transaction.amount), money(transaction.discountAmount), timestamp(transaction.timestamp || transaction.createdAt), json(transaction)]
+      );
+    }
+    for (const [id, room] of Object.entries(source.store.rooms || {})) {
+      await connection.execute(
+        `INSERT INTO game_rooms (id, status, bet_amount, created_at, updated_at, room_json) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=VALUES(status), bet_amount=VALUES(bet_amount), updated_at=VALUES(updated_at), room_json=VALUES(room_json)`,
+        [id, room.status || "unknown", money(room.betAmount), timestamp(room.createdAt), now(), json(room)]
+      );
+    }
+    for (const [id, tournament] of Object.entries(source.store.tournaments || {})) {
+      await connection.execute(
+        `INSERT INTO tournaments (id, name, status, entry_fee, prize_pool, start_at, end_at, tournament_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), status=VALUES(status), entry_fee=VALUES(entry_fee), prize_pool=VALUES(prize_pool), start_at=VALUES(start_at), end_at=VALUES(end_at), tournament_json=VALUES(tournament_json), updated_at=VALUES(updated_at)`,
+        [id, tournament.name || id, tournament.status || "unknown", money(tournament.entryFee), money(tournament.prizePool), timestamp(tournament.startDate), tournament.endDate || null, json(tournament), now()]
+      );
+    }
+    for (const user of source.users.values()) {
+      if (!user.vip?.tier || !Number(user.vip?.expires)) continue;
+      const subscriptionId = `vip_${user.id}_${Number(user.vip.expires)}`;
+      await connection.execute(
+        `INSERT INTO vip_subscriptions (id, user_id, tier_key, amount, starts_at, expires_at, status, subscription_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE tier_key=VALUES(tier_key), expires_at=VALUES(expires_at), status=VALUES(status), subscription_json=VALUES(subscription_json)`,
+        [subscriptionId, user.id, user.vip.tier, money(0), timestamp(user.vip.startedAt || user.createdAt), Number(user.vip.expires), Number(user.vip.expires) > now() ? "active" : "expired", json(user.vip)]
+      );
+    }
+    for (const campaign of source.store.adCampaigns || []) {
+      await connection.execute(
+        `INSERT INTO ad_campaigns (id, enabled, format, placement, company_name, title, starts_at, ends_at, campaign_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), format=VALUES(format), placement=VALUES(placement), company_name=VALUES(company_name), title=VALUES(title), starts_at=VALUES(starts_at), ends_at=VALUES(ends_at), campaign_json=VALUES(campaign_json), updated_at=VALUES(updated_at)`,
+        [String(campaign.id), Boolean(campaign.enabled), campaign.format || "banner", campaign.placement || "all", campaign.companyName || null, campaign.title || null, campaign.startAt || null, campaign.endAt || null, json(campaign), now()]
+      );
+    }
+    const settings = { paymentProviders: source.store.paymentProviders || {}, agentFloatInstructions: source.store.agentFloatInstructions || "", vipTiers: source.store.vipTiers || {}, adminSettings: source.store.adminSettings || {}, adSettings: source.store.adSettings || {} };
+    for (const [key, value] of Object.entries(settings)) await connection.execute("INSERT INTO app_settings (setting_key, setting_json, updated_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_json=VALUES(setting_json), updated_at=VALUES(updated_at)", [key, json(value), now()]);
+    for (const [id, payment] of source.cashierPayments) {
+      await connection.execute(
+        `INSERT INTO cashier_payments (id, cashier_id, period_key, salary, bonus, total, paid_at, paid_by, payment_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE payment_json=VALUES(payment_json)`,
+        [id, payment.cashierId, payment.period || payment.periodKey || "", money(payment.salary), money(payment.bonus), money(payment.total), timestamp(payment.paidAt), payment.paidBy || "unknown", json(payment)]
+      );
+    }
+    for (const [id, otp] of source.emailOtps) {
+      if (!otp.email || !otp.otpHash || !otp.expiresAt) continue;
+      await connection.execute(
+        `INSERT INTO email_otp_challenges (subject_id, email, otp_hash, expires_at, resend_at, attempts, verified_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE email=VALUES(email), otp_hash=VALUES(otp_hash), expires_at=VALUES(expires_at), resend_at=VALUES(resend_at), attempts=VALUES(attempts), verified_at=VALUES(verified_at), updated_at=VALUES(updated_at)`,
+        [id, otp.email, otp.otpHash, timestamp(otp.expiresAt), otp.sentAt ? Number(otp.sentAt) + 6e4 : null, Number(otp.attempts || 0), otp.verifiedAt || null, now()]
+      );
+    }
+    await connection.commit();
+    const [userRows] = await connection.query("SELECT id, balance FROM app_users");
+    const mysqlUsers = new Map(userRows.map((row) => [String(row.id), Number(row.balance)]));
+    const balanceMismatches = [...source.users.values()].filter((user) => Math.abs((mysqlUsers.get(String(user.id)) ?? Number.NaN) - Number(user.balance || 0)) > 9e-3).map((user) => user.id);
+    const tableCounts = {};
+    for (const table of ["app_users", "wallet_transactions", "agents", "admin_users", "manual_transaction_requests", "agent_requests", "agent_transactions", "game_rooms", "tournaments", "ad_campaigns"]) {
+      const [rows] = await connection.query(`SELECT COUNT(*) AS total FROM \`${table}\``);
+      tableCounts[table] = Number(rows[0]?.total || 0);
+    }
+    const summary = { sourceUsers: source.users.size, mysqlUsers: tableCounts.app_users, balanceMismatches, tableCounts };
+    if (balanceMismatches.length) throw new Error(`Balance verification failed for ${balanceMismatches.length} user(s).`);
+    await connection.execute("UPDATE data_migration_runs SET status = ?, summary_json = ?, completed_at = ? WHERE id = ?", ["verified", json(summary), now(), migrationId]);
+    console.log(JSON.stringify({ migrationId, status: "verified", ...summary }, null, 2));
+    console.log("Firebase was read only; no Firebase documents were changed or deleted.");
+    return { migrationId, status: "verified", ...summary };
+  } catch (error) {
+    try {
+      await connection.rollback();
+    } catch {
+    }
+    try {
+      await connection.execute("UPDATE data_migration_runs SET status = ?, summary_json = ?, completed_at = ? WHERE id = ?", ["failed", json({ error: error instanceof Error ? error.message : String(error) }), now(), migrationId]);
+    } catch {
+    }
+    throw error;
+  } finally {
+    if (advisoryLockHeld) {
+      try {
+        await connection.query("SELECT RELEASE_LOCK('ludosom_firebase_initial_v1')");
+      } catch {
+      }
+    }
+    connection.release();
+    await closeMySqlPool();
+  }
+}
+
+// server.ts
 import { getAuth } from "firebase-admin/auth";
 dotenv.config();
-dotenv.config({ path: path.join(process.cwd(), ".env.production") });
-var appDir = typeof __dirname !== "undefined" ? __dirname : import.meta && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd();
+dotenv.config({ path: path2.join(process.cwd(), ".env.production") });
+var appDir = typeof __dirname !== "undefined" ? __dirname : import.meta && import.meta.url ? path2.dirname(fileURLToPath(import.meta.url)) : process.cwd();
 function getDistDirectory() {
-  const cwdDist = path.join(process.cwd(), "dist");
-  if (fs.existsSync(path.join(cwdDist, "index.html"))) {
+  const cwdDist = path2.join(process.cwd(), "dist");
+  if (fs2.existsSync(path2.join(cwdDist, "index.html"))) {
     return cwdDist;
   }
-  const currentDir = typeof __dirname !== "undefined" ? __dirname : import.meta && import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : process.cwd();
-  if (fs.existsSync(path.join(currentDir, "index.html"))) {
+  const currentDir = typeof __dirname !== "undefined" ? __dirname : import.meta && import.meta.url ? path2.dirname(fileURLToPath(import.meta.url)) : process.cwd();
+  if (fs2.existsSync(path2.join(currentDir, "index.html"))) {
     return currentDir;
   }
-  const currentDist = path.join(currentDir, "dist");
-  if (fs.existsSync(path.join(currentDist, "index.html"))) {
+  const currentDist = path2.join(currentDir, "dist");
+  if (fs2.existsSync(path2.join(currentDist, "index.html"))) {
     return currentDist;
   }
   return cwdDist;
@@ -99,7 +370,7 @@ app.use(cors({
 }));
 var rawPort = process.env.PORT || 3002;
 var PORT = typeof rawPort === "string" && !isNaN(Number(rawPort)) ? Number(rawPort) : rawPort;
-var DB_FILE = path.join(process.cwd(), "db_store.json");
+var DB_FILE = path2.join(process.cwd(), "db_store.json");
 var WELCOME_BONUS = 1;
 var OTP_TTL_MS = 10 * 60 * 1e3;
 var OTP_RESEND_MS = 60 * 1e3;
@@ -205,7 +476,7 @@ app.get("/api/locations/search", async (req, res) => {
     res.status(502).json({ error: "Location search is temporarily unavailable." });
   }
 });
-app.use(express.static(path.join(process.cwd(), "public")));
+app.use(express.static(path2.join(process.cwd(), "public")));
 app.use(express.static(getDistDirectory()));
 var db = null;
 var auth = null;
@@ -292,18 +563,18 @@ function getFirebaseServiceAccount() {
     }
   }
   const possiblePaths = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? [process.env.FIREBASE_SERVICE_ACCOUNT_PATH] : [
-    path.join(process.cwd(), "firebase-admin-key.json"),
-    path.join(appDir, "firebase-admin-key.json"),
-    path.join(process.cwd(), "dist", "firebase-admin-key.json"),
-    path.join(process.cwd(), "service-account.json"),
-    path.join(process.cwd(), "firebase-key.json")
+    path2.join(process.cwd(), "firebase-admin-key.json"),
+    path2.join(appDir, "firebase-admin-key.json"),
+    path2.join(process.cwd(), "dist", "firebase-admin-key.json"),
+    path2.join(process.cwd(), "service-account.json"),
+    path2.join(process.cwd(), "firebase-key.json")
   ];
-  const serviceAccountPath = possiblePaths.find((p) => fs.existsSync(p));
+  const serviceAccountPath = possiblePaths.find((p) => fs2.existsSync(p));
   if (!serviceAccountPath) {
     return null;
   }
   try {
-    const serviceAccountFile = fs.readFileSync(serviceAccountPath, "utf8");
+    const serviceAccountFile = fs2.readFileSync(serviceAccountPath, "utf8");
     return JSON.parse(serviceAccountFile);
   } catch (error) {
     console.error("Failed to read Firebase service account file:", error);
@@ -317,12 +588,12 @@ if (serviceAccount) {
     try {
       getApp();
     } catch (error) {
-      initializeApp({
-        credential: cert(serviceAccount),
+      initializeApp2({
+        credential: cert2(serviceAccount),
         databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
       });
     }
-    db = getFirestore();
+    db = getFirestore2();
     auth = getAuth();
     console.log("Firebase Firestore and Auth initialized successfully with Admin SDK.");
   } catch (err) {
@@ -498,7 +769,7 @@ async function cachedAgent(agentId) {
   return agent;
 }
 function seedDefaultTournaments() {
-  const now = Date.now();
+  const now2 = Date.now();
   const oneHour = 60 * 60 * 1e3;
   const oneDay = 24 * 60 * 60 * 1e3;
   const openOrActive = Object.values(store.tournaments).filter(
@@ -506,49 +777,49 @@ function seedDefaultTournaments() {
   );
   if (openOrActive.length < 3) {
     const t1 = {
-      id: `tourney_weekly_${now}_1`,
+      id: `tourney_weekly_${now2}_1`,
       name: "Ludo$om Weekly Champion Cup \u{1F3C6}",
       entryFee: 5,
       prizePool: 72,
       status: "registration_open",
       players: [],
       maxPlayers: 16,
-      startDate: now + oneDay * 2,
+      startDate: now2 + oneDay * 2,
       endDate: 0,
       winnerId: null,
       currentRound: 1,
       matches: [],
-      createdAt: now
+      createdAt: now2
     };
     const t2 = {
-      id: `tourney_weekend_${now}_2`,
+      id: `tourney_weekend_${now2}_2`,
       name: "Weekend High Stakes Knockout \u26A1",
       entryFee: 10,
       prizePool: 72,
       status: "registration_open",
       players: [],
       maxPlayers: 8,
-      startDate: now + oneDay * 4,
+      startDate: now2 + oneDay * 4,
       endDate: 0,
       winnerId: null,
       currentRound: 1,
       matches: [],
-      createdAt: now
+      createdAt: now2
     };
     const t3 = {
-      id: `tourney_daily_${now}_3`,
+      id: `tourney_daily_${now2}_3`,
       name: "Daily Quick Sprint Tournament \u{1F680}",
       entryFee: 2,
       prizePool: 7.2,
       status: "registration_open",
       players: [],
       maxPlayers: 4,
-      startDate: now + oneHour * 6,
+      startDate: now2 + oneHour * 6,
       endDate: 0,
       winnerId: null,
       currentRound: 1,
       matches: [],
-      createdAt: now
+      createdAt: now2
     };
     if (!store.tournaments[t1.id]) store.tournaments[t1.id] = t1;
     if (!store.tournaments[t2.id]) store.tournaments[t2.id] = t2;
@@ -557,8 +828,8 @@ function seedDefaultTournaments() {
 }
 function loadStore() {
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, "utf8");
+    if (fs2.existsSync(DB_FILE)) {
+      const raw = fs2.readFileSync(DB_FILE, "utf8");
       const parsed = JSON.parse(raw);
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
@@ -647,7 +918,7 @@ async function loadStoreFromFirestore() {
         store.adSettings = { ...DEFAULT_AD_SETTINGS, ...parsed.adSettings || {} };
         store.adCampaigns = normalizeStoredAdCampaigns(parsed);
         console.log("Database loaded successfully from Firebase Firestore.");
-        fs.writeFileSync(DB_FILE, payload.data, "utf8");
+        fs2.writeFileSync(DB_FILE, payload.data, "utf8");
         await loadUserProfilesFromFirestore();
         await loadManualRequestsFromFirestore();
         await syncUserProfilesToFirestore();
@@ -754,16 +1025,16 @@ function normalizedCity(location) {
 function cashierCities(admin) {
   return [...new Set([...Array.isArray(admin.cashierLocations) ? admin.cashierLocations : [], admin.location].map(normalizedCity).filter(Boolean))].slice(0, 2);
 }
-async function assignCashierToRequest(request, now = Date.now()) {
+async function assignCashierToRequest(request, now2 = Date.now()) {
   if (!db || request.managedBy === "agent" || request.status !== "pending") return false;
   const user = store.users[request.userId];
   const city = normalizedCity(request.cashierCity || user?.location);
   request.cashierCity = city;
   if (!city) return false;
-  if (request.assignedCashierId && Number(request.assignmentExpiresAt || 0) <= now) {
+  if (request.assignedCashierId && Number(request.assignmentExpiresAt || 0) <= now2) {
     request.cashierTimedOutIds = [...request.cashierTimedOutIds || [], request.assignedCashierId];
   }
-  const eligible = [...adminUsersCache.values()].filter((admin) => admin.status !== "suspended" && normalizeAdminPermissions(admin.permissions).includes("cashier") && cashierCities(admin).includes(city) && Number(admin.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS);
+  const eligible = [...adminUsersCache.values()].filter((admin) => admin.status !== "suspended" && normalizeAdminPermissions(admin.permissions).includes("cashier") && cashierCities(admin).includes(city) && Number(admin.cashierOnlineAt || 0) >= now2 - CASHIER_ONLINE_WINDOW_MS);
   if (eligible.length === 0) {
     const assignmentChanged = Boolean(request.assignedCashierId || request.assignedCashierName || request.assignedCashierAt || request.assignmentExpiresAt);
     request.assignedCashierId = void 0;
@@ -784,17 +1055,17 @@ async function assignCashierToRequest(request, now = Date.now()) {
   const selected = candidates[crypto.randomInt(candidates.length)];
   request.assignedCashierId = selected.id;
   request.assignedCashierName = selected.name || selected.username;
-  request.assignedCashierAt = now;
-  request.assignmentExpiresAt = now + CASHIER_ASSIGNMENT_MS;
+  request.assignedCashierAt = now2;
+  request.assignmentExpiresAt = now2 + CASHIER_ASSIGNMENT_MS;
   request.cashierAssignmentHistory = [.../* @__PURE__ */ new Set([...nextHistory, selected.id])];
   await saveManualRequestToFirestore(request);
   return true;
 }
-async function reassignExpiredCashierRequests(now = Date.now()) {
-  const requests = store.pendingManualTransactions.filter((request) => request.status === "pending" && request.managedBy !== "agent" && (!request.assignedCashierId || Number(request.assignmentExpiresAt || 0) <= now));
+async function reassignExpiredCashierRequests(now2 = Date.now()) {
+  const requests = store.pendingManualTransactions.filter((request) => request.status === "pending" && request.managedBy !== "agent" && (!request.assignedCashierId || Number(request.assignmentExpiresAt || 0) <= now2));
   for (const request of requests) {
     try {
-      await assignCashierToRequest(request, now);
+      await assignCashierToRequest(request, now2);
     } catch (error) {
       console.error(`Cashier assignment failed for ${request.id}:`, error);
     }
@@ -854,7 +1125,7 @@ async function syncToFirestore() {
 }
 function saveStore() {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    fs2.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
     void queueUserProfileSync();
   } catch (error) {
     console.error("Failed to write database to disk.", error);
@@ -862,7 +1133,7 @@ function saveStore() {
 }
 async function saveStoreAndWait() {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    fs2.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
     await syncToFirestore();
     await queueUserProfileSync();
   } catch (error) {
@@ -977,7 +1248,7 @@ function removeSSEClient(res) {
 }
 function cleanupMatchmakingQueues() {
   let changed = false;
-  const now = Date.now();
+  const now2 = Date.now();
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     const beforeLen = store.matchmakingQueues[qKey].length;
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((userId) => {
@@ -988,7 +1259,7 @@ function cleanupMatchmakingQueues() {
       if (inGame) return false;
       const u = store.users[userId];
       const seekingJoinedAt = u?.seekingJoinedAt;
-      if (seekingJoinedAt && now - seekingJoinedAt > 18e4) {
+      if (seekingJoinedAt && now2 - seekingJoinedAt > 18e4) {
         delete u.seekingJoinedAt;
         if (db) {
           db.collection("matchmaking").doc(userId).delete().catch(() => {
@@ -1950,7 +2221,7 @@ app.get("/api/users/online", async (req, res) => {
     return res.status(400).json({ error: "Missing userId parameter" });
   }
   cleanupMatchmakingQueues();
-  const now = Date.now();
+  const now2 = Date.now();
   const onlineList = [];
   Object.values(store.users).forEach((u) => {
     if (u.id.startsWith("user_sim_")) return;
@@ -2455,10 +2726,10 @@ function createTournamentBracket(tournament) {
   return matches;
 }
 function checkAndStartTournaments() {
-  const now = Date.now();
+  const now2 = Date.now();
   seedDefaultTournaments();
   Object.values(store.tournaments).forEach(async (t) => {
-    if (t.status === "check_in" && t.checkInDeadline && now >= t.checkInDeadline) {
+    if (t.status === "check_in" && t.checkInDeadline && now2 >= t.checkInDeadline) {
       const checkedPlayers = t.players.filter((player) => player.checkedInAt);
       if (checkedPlayers.length === 0) {
         t.players.forEach((player) => {
@@ -2510,7 +2781,7 @@ function checkAndStartTournaments() {
       broadcastToAll("tournament_started", t);
       return;
     }
-    if (t.status === "registration_open" && now >= t.startDate) {
+    if (t.status === "registration_open" && now2 >= t.startDate) {
       const maximumSustainablePrize = Number((t.entryFee * t.maxPlayers * 0.9).toFixed(2));
       if (/^tourney_(weekly|weekend|daily)_/.test(t.id) && t.prizePool > maximumSustainablePrize) {
         t.prizePool = maximumSustainablePrize;
@@ -2518,7 +2789,7 @@ function checkAndStartTournaments() {
       const collectedEntryFees = Number((t.entryFee * t.players.length).toFixed(2));
       if (t.players.length >= 2 && collectedEntryFees >= t.prizePool) {
         t.status = "check_in";
-        t.checkInDeadline = now + TOURNAMENT_CHECK_IN_MS;
+        t.checkInDeadline = now2 + TOURNAMENT_CHECK_IN_MS;
         await saveStoreAndWait();
         broadcastToAll("tournament_check_in", t);
       } else {
@@ -2534,7 +2805,7 @@ function checkAndStartTournaments() {
           });
           t.status = "cancelled";
         } else {
-          t.startDate = now + 12 * 60 * 60 * 1e3;
+          t.startDate = now2 + 12 * 60 * 60 * 1e3;
         }
         await saveStoreAndWait();
         broadcastToAll("tournament_update", t);
@@ -2544,13 +2815,13 @@ function checkAndStartTournaments() {
 }
 setInterval(checkAndStartTournaments, 1e4);
 setInterval(() => {
-  const now = Date.now();
+  const now2 = Date.now();
   Object.keys(store.rooms).forEach((roomId) => {
     const room = store.rooms[roomId];
     if (room.status === "playing") {
       const activeHumanPlayers = room.players.filter((p) => !isBotPlayer(p.userId) && p.status !== "left");
-      const lastAct = room.gameState?.lastActivity || room.createdAt || now;
-      if (activeHumanPlayers.length === 0 || now - lastAct > 15 * 60 * 1e3) {
+      const lastAct = room.gameState?.lastActivity || room.createdAt || now2;
+      if (activeHumanPlayers.length === 0 || now2 - lastAct > 15 * 60 * 1e3) {
         room.status = "completed";
         addLog(room, "Room closed due to inactivity or abandonment.");
         saveStore();
@@ -2559,14 +2830,14 @@ setInterval(() => {
   });
 }, 3e4);
 app.get("/api/rooms/active", (req, res) => {
-  const now = Date.now();
+  const now2 = Date.now();
   const activeGames = Object.values(store.rooms).filter((r) => {
     if (r.status !== "playing") return false;
     if (r.gameState?.winnerId) return false;
     const activeHumanPlayers = r.players.filter((p) => !isBotPlayer(p.userId) && p.status !== "left");
     if (activeHumanPlayers.length === 0) return false;
-    const lastAct = r.gameState?.lastActivity || r.createdAt || now;
-    if (now - lastAct > 15 * 60 * 1e3) return false;
+    const lastAct = r.gameState?.lastActivity || r.createdAt || now2;
+    if (now2 - lastAct > 15 * 60 * 1e3) return false;
     return true;
   }).map((r) => ({
     id: r.id,
@@ -4100,7 +4371,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
   const tournaments = Object.values(store.tournaments);
   const manualTransactions = store.pendingManualTransactions || [];
   const monthBuckets = /* @__PURE__ */ new Map();
-  const now = /* @__PURE__ */ new Date();
+  const now2 = /* @__PURE__ */ new Date();
   const revenueBreakdown = {
     game_rake: 0,
     team_game_rake: 0,
@@ -4135,7 +4406,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
   const recordedHouseRevenue = Number(Object.values(revenueBreakdown).reduce((sum, value) => sum + value, 0).toFixed(2));
   const welcomeBonusCost = Number(store.transactions.filter((tx) => /welcome signup bonus/i.test(tx.description || "")).reduce((sum, tx) => sum + Number(tx.amount || 0), 0).toFixed(2));
   for (let offset = 5; offset >= 0; offset--) {
-    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const date = new Date(now2.getFullYear(), now2.getMonth() - offset, 1);
     const key = `${date.getFullYear()}-${date.getMonth()}`;
     monthBuckets.set(key, { month: date.toLocaleString("en", { month: "short" }), deposits: 0, withdrawals: 0, transactions: 0 });
   }
@@ -4225,14 +4496,14 @@ app.get("/api/admin/manual-transactions", hasAnyPermission("transactions", "cash
   const adminId = String(req.query.userId || "");
   res.json(cashierOnly ? transactions.filter((tx) => tx.managedBy !== "agent" && tx.assignedCashierId === adminId) : transactions);
 });
-function cashierPeriod(now = /* @__PURE__ */ new Date()) {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
+function cashierPeriod(now2 = /* @__PURE__ */ new Date()) {
+  const year = now2.getUTCFullYear();
+  const month = now2.getUTCMonth();
   const key = `${year}-${String(month + 1).padStart(2, "0")}`;
   return { key, start: Date.UTC(year, month, 1), end: Date.UTC(year, month + 1, 1) };
 }
 app.get("/api/admin/cashiers", hasPermission("settings"), async (_req, res) => {
-  const now = Date.now();
+  const now2 = Date.now();
   const period = cashierPeriod();
   const payments = [...cashierPaymentsCache.values()];
   const paidByCashier = new Map(payments.filter((payment) => payment.period === period.key).map((payment) => [payment.cashierId, payment]));
@@ -4255,7 +4526,7 @@ app.get("/api/admin/cashiers", hasPermission("settings"), async (_req, res) => {
       location: cashier.location,
       locations: cashierCities(cashier),
       status: cashier.status || "active",
-      online: cashier.status !== "suspended" && Number(cashier.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS,
+      online: cashier.status !== "suspended" && Number(cashier.cashierOnlineAt || 0) >= now2 - CASHIER_ONLINE_WINDOW_MS,
       lastSeenAt: Number(cashier.cashierOnlineAt || 0),
       monthlySalary: salary,
       monthlyTarget,
@@ -4270,7 +4541,7 @@ app.get("/api/admin/cashiers", hasPermission("settings"), async (_req, res) => {
       averageResponseSeconds: responseSamples.length ? Math.round(responseSamples.reduce((sum, value) => sum + value, 0) / responseSamples.length / 1e3) : 0,
       timedOut,
       period: period.key,
-      salaryStatus: payment ? "paid" : Number(cashier.cashierNextSalaryDate || 0) <= now ? "due" : "pending",
+      salaryStatus: payment ? "paid" : Number(cashier.cashierNextSalaryDate || 0) <= now2 ? "due" : "pending",
       payableAmount: Number((salary + bonus).toFixed(2)),
       paidAt: payment?.paidAt
     };
@@ -5290,7 +5561,7 @@ app.get("/api/agent/my-players", isAgent, (req, res) => {
 });
 app.get("/agent", (req, res) => {
   const distPath = getDistDirectory();
-  const agentFile = fs.existsSync(path.join(distPath, "agent.html")) ? path.join(distPath, "agent.html") : path.join(process.cwd(), "agent.html");
+  const agentFile = fs2.existsSync(path2.join(distPath, "agent.html")) ? path2.join(distPath, "agent.html") : path2.join(process.cwd(), "agent.html");
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
@@ -5312,7 +5583,7 @@ app.get(/^(?!\/api).*/, (req, res) => {
     return res.status(404).send("Asset not found");
   }
   const distPath = getDistDirectory();
-  const indexFile = fs.existsSync(path.join(distPath, "index.html")) ? path.join(distPath, "index.html") : path.join(process.cwd(), "index.html");
+  const indexFile = fs2.existsSync(path2.join(distPath, "index.html")) ? path2.join(distPath, "index.html") : path2.join(process.cwd(), "index.html");
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
@@ -5339,6 +5610,12 @@ async function startServer() {
     console.log("Application state initialization completed.");
   } catch (error) {
     console.error("Application state initialization failed; continuing with local fallback:", error);
+  }
+  if (String(process.env.RUN_FIREBASE_MYSQL_MIGRATION_ON_START || "").trim().toLowerCase() === "true") {
+    console.log("One-time Firebase to MySQL migration requested; starting in the background.");
+    void migrateFirestoreToMySql({ requireExecuteFlag: false }).catch((error) => {
+      console.error("One-time Firebase to MySQL migration failed:", error instanceof Error ? error.message : error);
+    });
   }
   server.on("upgrade", (req, socket, head) => {
     if (vite && req.url?.includes("__vite_hmr")) {
