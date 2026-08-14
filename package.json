@@ -9,6 +9,8 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);\" --sourcemap --outfile=server.js && esbuild server.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);\" --sourcemap --outfile=dist/server.js",
     "start": "node server.js",
     "preview": "vite preview",
+    "db:migrate": "tsx scripts/migrate-mysql.ts",
+    "db:migrate:firebase": "tsx scripts/migrate-firestore-to-mysql.ts --execute",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
@@ -26,6 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "mysql2": "^3.23.3",
     "react": "^19.0.1",
     "react-confetti": "^6.4.0",
     "react-dom": "^19.0.1",

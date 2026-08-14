@@ -604,6 +604,92 @@ let store: DBStore = {
   adCampaigns: []
 };
 
+// One live listener per collection replaces thousands of identical reads from
+// browser polling while Firestore remains the authoritative persistent store.
+const adminUsersCache = new Map<string, AdminUser>();
+const agentCache = new Map<string, Agent>();
+const agentRequestsCache = new Map<string, AgentRequest>();
+const agentTransactionsCache = new Map<string, AgentTransaction>();
+const cashierPaymentsCache = new Map<string, any>();
+const firestoreLiveUnsubscribes: Array<() => void> = [];
+
+function removeUserFromMatchmakingQueues(userId: string) {
+  for (const key of Object.keys(store.matchmakingQueues)) {
+    store.matchmakingQueues[key] = store.matchmakingQueues[key].filter(id => id !== userId);
+  }
+  if (store.users[userId]) delete (store.users[userId] as any).seekingJoinedAt;
+}
+
+async function startFirestoreLiveCaches() {
+  if (!db || firestoreLiveUnsubscribes.length) return;
+  const watch = <T>(collectionName: string, cache: Map<string, T>, onChange?: (id: string, value: T | null) => void) => new Promise<void>((resolve) => {
+    let initialized = false;
+    const unsubscribe = db!.collection(collectionName).onSnapshot(snapshot => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'removed') {
+          cache.delete(change.doc.id);
+          onChange?.(change.doc.id, null);
+        } else {
+          const value = { id: change.doc.id, ...change.doc.data() } as T;
+          cache.set(change.doc.id, value);
+          onChange?.(change.doc.id, value);
+        }
+      });
+      if (!initialized) { initialized = true; resolve(); }
+    }, error => {
+      console.error(`Live cache listener failed for ${collectionName}:`, error);
+      if (!initialized) { initialized = true; resolve(); }
+    });
+    firestoreLiveUnsubscribes.push(unsubscribe);
+  });
+
+  await Promise.all([
+    watch<AdminUser>('adminUsers', adminUsersCache),
+    watch<Agent>('agents', agentCache, (id, value) => {
+      if (value) store.agents[id] = value;
+      else delete store.agents[id];
+    }),
+    watch<AgentRequest>('agentRequests', agentRequestsCache),
+    watch<AgentTransaction>('agentTransactions', agentTransactionsCache),
+    watch<any>('cashierPayments', cashierPaymentsCache),
+    watch<any>('matchmaking', new Map<string, any>(), (id, value) => {
+      removeUserFromMatchmakingQueues(id);
+      if (!value || value.status !== 'WAITING_FOR_MATCH' || Date.now() - Number(value.timestamp || 0) > 180000) return;
+      const userId = value.userId || id;
+      const queueKey = `${value.betAmount}_${value.capacity}_${value.gameMode}`;
+      if (!store.matchmakingQueues[queueKey]) store.matchmakingQueues[queueKey] = [];
+      store.matchmakingQueues[queueKey].push(userId);
+      if (!store.users[userId]) {
+        store.users[userId] = { id: userId, username: value.username || 'Player', avatar: value.avatar || '🎮', balance: 0, winCount: 0, lossCount: 0, isOfflinePreference: false };
+      }
+      (store.users[userId] as any).seekingJoinedAt = Number(value.timestamp || Date.now());
+      broadcastToAll('online_players_updated', {});
+    }),
+  ]);
+  console.log('Firestore live caches initialized for admins, agents and matchmaking.');
+}
+
+async function cachedAdminUser(adminId: string) {
+  const cached = adminUsersCache.get(adminId);
+  if (cached || !db) return cached;
+  const snapshot = await db.collection('adminUsers').doc(adminId).get();
+  if (!snapshot.exists) return undefined;
+  const admin = { id: snapshot.id, ...snapshot.data() } as AdminUser;
+  adminUsersCache.set(adminId, admin);
+  return admin;
+}
+
+async function cachedAgent(agentId: string) {
+  const cached = agentCache.get(agentId) || store.agents[agentId];
+  if (cached || !db) return cached;
+  const snapshot = await db.collection('agents').doc(agentId).get();
+  if (!snapshot.exists) return undefined;
+  const agent = { id: snapshot.id, ...snapshot.data() } as Agent;
+  agentCache.set(agentId, agent);
+  store.agents[agentId] = agent;
+  return agent;
+}
+
 function seedDefaultTournaments() {
   const now = Date.now();
   const oneHour = 60 * 60 * 1000;
@@ -897,20 +983,19 @@ async function assignCashierToRequest(request: ManualTransactionRequest, now = D
     request.cashierTimedOutIds = [...(request.cashierTimedOutIds || []), request.assignedCashierId];
   }
 
-  const snapshot = await db.collection('adminUsers').get();
-  const eligible = snapshot.docs
-    .map(doc => ({ id: doc.id, ...doc.data() } as any))
+  const eligible = [...adminUsersCache.values()]
     .filter(admin => admin.status !== 'suspended'
       && normalizeAdminPermissions(admin.permissions).includes('cashier')
       && cashierCities(admin).includes(city)
       && Number(admin.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS);
 
   if (eligible.length === 0) {
+    const assignmentChanged = Boolean(request.assignedCashierId || request.assignedCashierName || request.assignedCashierAt || request.assignmentExpiresAt);
     request.assignedCashierId = undefined;
     request.assignedCashierName = undefined;
     request.assignedCashierAt = undefined;
     request.assignmentExpiresAt = undefined;
-    await saveManualRequestToFirestore(request);
+    if (assignmentChanged) await saveManualRequestToFirestore(request);
     return false;
   }
 
@@ -2457,53 +2542,8 @@ app.get('/api/users/online', async (req, res) => {
 
   const now = Date.now();
 
-  // Sync matchmaking queue from Firestore if db is available to support multi-instance
-  if (db) {
-    try {
-      const qs = await db.collection('matchmaking').get();
-      qs.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data && data.status === 'WAITING_FOR_MATCH') {
-          // Firestore is the shared source across hosting processes. A user can
-          // be connected to a different instance, so local SSE presence must
-          // never hide or delete their active search.
-          const isStale = (now - (data.timestamp || 0)) > 180000;
-
-          if (isStale) {
-            // Delete only genuinely expired records from Firestore.
-            db.collection('matchmaking').doc(data.userId).delete().catch(() => {});
-            // Remove from memory queue if present
-            for (const qKey of Object.keys(store.matchmakingQueues)) {
-              store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter(id => id !== data.userId);
-            }
-          } else {
-            const qKey = `${data.betAmount}_${data.capacity}_${data.gameMode}`;
-            if (!store.matchmakingQueues[qKey]) {
-              store.matchmakingQueues[qKey] = [];
-            }
-            if (!store.matchmakingQueues[qKey].includes(data.userId)) {
-              store.matchmakingQueues[qKey].push(data.userId);
-              // Reconstruct user in store if not present
-              if (!store.users[data.userId]) {
-                store.users[data.userId] = {
-                  id: data.userId,
-                  username: data.username,
-                  avatar: data.avatar,
-                  balance: 100, // Fallback
-                  winCount: 0,
-                  lossCount: 0,
-                  isOfflinePreference: false
-                };
-              }
-              (store.users[data.userId] as any).seekingJoinedAt = data.timestamp || Date.now();
-            }
-          }
-        }
-      });
-    } catch (e) {
-      console.error('Failed to sync matchmaking from Firestore:', e);
-    }
-  }
+  // Cross-process matchmaking is kept current by the single server-side
+  // Firestore listener; this request now reads only the in-memory queue.
 
   const onlineList: any[] = [];
 
@@ -3505,14 +3545,12 @@ app.get('/api/rooms/:roomId', (req, res) => {
 
 // Get a list of all active agents for players to choose from, sorted by location
 app.get('/api/agents', async (req, res) => {
-  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const playerLocation = req.query.location as string | undefined;
 
   try {
-    const agentsSnapshot = await db.collection('agents').where('status', '==', 'Active').get();
-    const activeAgents = agentsSnapshot.docs.map(doc => {
-      const { password, ...agentData } = doc.data() as Agent;
-      return { ...agentData, id: agentData.id || doc.id };
+    const activeAgents = Object.values(store.agents).filter(agent => agent.status === 'Active').map(agent => {
+      const { password, ...agentData } = agent;
+      return agentData;
     });
 
     if (playerLocation) {
@@ -4699,16 +4737,13 @@ const hasPermission = (requiredPermission: string) => {
         }
 
         try {
-            const adminUserRef = db.collection('adminUsers').doc(adminId);
-            const adminUserDoc = await adminUserRef.get();
-
-            if (!adminUserDoc.exists) {
+            const adminUser = await cachedAdminUser(adminId);
+            if (!adminUser) {
                 return res.status(403).json({ error: 'Access denied. Invalid admin user.' });
             }
-
-            const adminUser = adminUserDoc.data() as AdminUser;
             // The 'all' permission grants access to everything
             if (adminUser.permissions.includes('all') || adminUser.permissions.includes(requiredPermission)) {
+                (req as any).adminUser = adminUser;
                 next(); // User has permission, proceed
             } else {
                 res.status(403).json({ error: 'Access denied. You do not have permission for this action.' });
@@ -4722,9 +4757,9 @@ const hasPermission = (requiredPermission: string) => {
 const hasAnyPermission = (...required: string[]) => async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const adminId = req.query.userId as string; if (!adminId) return res.status(403).json({ error: 'Admin user ID is required.' });
-  const doc = await db.collection('adminUsers').doc(adminId).get(); if (!doc.exists) return res.status(403).json({ error: 'Invalid admin user.' });
-  const permissions = normalizeAdminPermissions(doc.data()?.permissions);
-  if (permissions.includes('all') || required.some(permission => permissions.includes(permission))) { (req as any).adminPermissions = permissions; (req as any).adminUser = { id: doc.id, ...doc.data() }; return next(); }
+  const admin = await cachedAdminUser(adminId); if (!admin) return res.status(403).json({ error: 'Invalid admin user.' });
+  const permissions = normalizeAdminPermissions(admin.permissions);
+  if (permissions.includes('all') || required.some(permission => permissions.includes(permission))) { (req as any).adminPermissions = permissions; (req as any).adminUser = admin; return next(); }
   return res.status(403).json({ error: 'You do not have permission for this action.' });
 };
 
@@ -4732,11 +4767,12 @@ app.post('/api/admin/cashier/heartbeat', hasPermission('cashier'), async (req, r
   if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const adminId = String(req.query.userId || '');
   const ref = db.collection('adminUsers').doc(adminId);
-  const snapshot = await ref.get();
-  const admin = snapshot.data() as AdminUser;
+  const admin = (req as any).adminUser as AdminUser;
   if (cashierCities(admin || {}).length === 0) return res.status(400).json({ error: 'Cashier city is not configured.' });
   const cashierOnlineAt = Date.now();
   await ref.update({ cashierOnlineAt });
+  const updatedAdmin = { ...admin, cashierOnlineAt };
+  adminUsersCache.set(adminId, updatedAdmin);
   await reassignExpiredCashierRequests(cashierOnlineAt);
   res.json({ success: true, cashierOnlineAt, locations: cashierCities(admin) });
 });
@@ -4790,9 +4826,8 @@ const isAdmin = async (req: express.Request, res: express.Response, next: expres
     }
 
     try {
-        const doc = await db.collection('adminUsers').doc(adminId).get();
-        if (doc.exists) {
-            const admin = doc.data() as AdminUser;
+        const admin = await cachedAdminUser(adminId);
+        if (admin) {
             if (admin.status === 'suspended') {
                 return res.status(403).json({ error: 'Access denied. This admin account is suspended.' });
             }
@@ -5275,6 +5310,38 @@ app.delete('/api/admin/roles/:roleId/delete', hasPermission('all'), async (req, 
     }
 });
 
+type CachedAdminFinancialMetrics = {
+  totalAgents: number;
+  activeAgents: number;
+  pendingAgentRequests: number;
+  agentFloatIssued: number;
+  agentFloatCash: number;
+  agentCommissionDiscounts: number;
+  monthlyAgents: number;
+  monthlySalaryLiability: number;
+  cashierPayrollPaid: number;
+};
+async function getAdminFinancialMetrics(): Promise<CachedAdminFinancialMetrics> {
+  const empty: CachedAdminFinancialMetrics = { totalAgents: 0, activeAgents: 0, pendingAgentRequests: 0, agentFloatIssued: 0, agentFloatCash: 0, agentCommissionDiscounts: 0, monthlyAgents: 0, monthlySalaryLiability: 0, cashierPayrollPaid: 0 };
+    const agents = Object.values(store.agents);
+    const value = { ...empty };
+    value.totalAgents = agents.length;
+    value.activeAgents = agents.filter(agent => agent.status === 'Active').length;
+    value.monthlyAgents = agents.filter(agent => agent.businessModel === 'monthly').length;
+    value.monthlySalaryLiability = agents.filter(agent => agent.businessModel === 'monthly' && agent.status === 'Active').reduce((sum, agent) => sum + Number(agent.monthlySalary || 0), 0);
+    value.pendingAgentRequests = [...agentRequestsCache.values()].filter(request => request.status === 'pending').length;
+    agentTransactionsCache.forEach(transaction => {
+      if (transaction.type !== 'FloatPurchase' || Number(transaction.amount || 0) <= 0) return;
+      const amount = Number(transaction.amount || 0);
+      const discount = Math.max(0, Number(transaction.discountAmount || 0));
+      value.agentFloatIssued += amount;
+      value.agentCommissionDiscounts += discount;
+      value.agentFloatCash += Math.max(0, amount - discount);
+    });
+    value.cashierPayrollPaid = [...cashierPaymentsCache.values()].reduce((sum, payment) => sum + Number(payment.total || 0), 0);
+    return value;
+}
+
 // Get all runtime stats
 app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
     const users = Object.values(store.users).filter(user => !user.id.startsWith('bot_') && !user.id.startsWith('user_sim_'));
@@ -5342,31 +5409,12 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
     let monthlySalaryLiability = 0;
     let cashierPayrollPaid = 0;
     if (db) {
-        try {
-            const [agentsSnapshot, agentRequestsSnapshot, agentTransactionsSnapshot, cashierPaymentsSnapshot] = await Promise.all([
-                db.collection('agents').get(),
-                db.collection('agentRequests').where('status', '==', 'pending').get(),
-                db.collection('agentTransactions').get(),
-                db.collection('cashierPayments').get(),
-            ]);
-            totalAgents = agentsSnapshot.size;
-            activeAgents = agentsSnapshot.docs.filter(doc => doc.data().status === 'Active').length;
-            monthlyAgents = agentsSnapshot.docs.filter(doc => doc.data().businessModel === 'monthly').length;
-            monthlySalaryLiability = agentsSnapshot.docs.filter(doc => doc.data().businessModel === 'monthly' && doc.data().status === 'Active').reduce((sum, doc) => sum + Number(doc.data().monthlySalary || 0), 0);
-            pendingAgentRequests = agentRequestsSnapshot.size;
-            agentTransactionsSnapshot.docs.forEach(doc => {
-                const tx = doc.data() as AgentTransaction;
-                if (tx.type !== 'FloatPurchase' || Number(tx.amount || 0) <= 0) return;
-                const amount = Number(tx.amount || 0);
-                const discount = Math.max(0, Number(tx.discountAmount || 0));
-                agentFloatIssued += amount;
-                agentCommissionDiscounts += discount;
-                agentFloatCash += Math.max(0, amount - discount);
-            });
-            cashierPayrollPaid = cashierPaymentsSnapshot.docs.reduce((sum, doc) => sum + Number(doc.data().total || 0), 0);
-        } catch (error) {
-            console.error('Failed to include Firestore agent metrics in admin stats:', error);
-        }
+      try {
+        const metrics = await getAdminFinancialMetrics();
+        ({ totalAgents, activeAgents, pendingAgentRequests, agentFloatIssued, agentFloatCash, agentCommissionDiscounts, monthlyAgents, monthlySalaryLiability, cashierPayrollPaid } = metrics);
+      } catch (error) {
+        console.error('Failed to include Firestore agent metrics in admin stats:', error);
+      }
     }
 
     const recentActivity = [
@@ -5423,22 +5471,7 @@ app.get('/api/admin/transactions', hasPermission('transactions'), (req, res) => 
 // Get all pending manual transactions
 app.get('/api/admin/manual-transactions', hasAnyPermission('transactions', 'cashier'), async (req, res) => {
     await reassignExpiredCashierRequests();
-    const agentNames = new Map<string, string>();
-    if (db) {
-        const linkedAgentIds = [...new Set(
-            Object.values(store.users).map(user => user.linkedAgentId).filter((id): id is string => Boolean(id))
-        )];
-        await Promise.all(linkedAgentIds.map(async agentId => {
-            try {
-                const agentDoc = await db.collection('agents').doc(agentId).get();
-                if (agentDoc.exists) {
-                    agentNames.set(agentId, (agentDoc.data() as Agent).username);
-                }
-            } catch (error) {
-                console.error(`Failed to load agent ${agentId} for admin transaction monitoring:`, error);
-            }
-        }));
-    }
+    const agentNames = new Map(Object.values(store.agents).map(agent => [agent.id, agent.username]));
 
     const transactions = (store.pendingManualTransactions || []).map(tx => {
         const user = store.users[tx.userId];
@@ -5464,21 +5497,15 @@ function cashierPeriod(now = new Date()) {
 }
 
 app.get('/api/admin/cashiers', hasPermission('settings'), async (_req, res) => {
-  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const now = Date.now();
   const period = cashierPeriod();
-  const [adminsSnapshot, paymentsSnapshot] = await Promise.all([
-    db.collection('adminUsers').get(),
-    db.collection('cashierPayments').get(),
-  ]);
-  const paidByCashier = new Map(paymentsSnapshot.docs
-    .map(doc => ({ id: doc.id, ...doc.data() } as any))
+  const payments = [...cashierPaymentsCache.values()];
+  const paidByCashier = new Map(payments
     .filter(payment => payment.period === period.key)
     .map(payment => [payment.cashierId, payment]));
   const periodRequests = store.pendingManualTransactions.filter(request => request.createdAt >= period.start && request.createdAt < period.end && request.managedBy !== 'agent');
 
-  const cashiers = adminsSnapshot.docs
-    .map(doc => ({ id: doc.id, ...doc.data() } as any))
+  const cashiers = [...adminUsersCache.values()]
     .filter(admin => normalizeAdminPermissions(admin.permissions).includes('cashier'))
     .map(cashier => {
       const resolved = periodRequests.filter(request => request.resolvedBy === cashier.id);
@@ -5519,7 +5546,7 @@ app.get('/api/admin/cashiers', hasPermission('settings'), async (_req, res) => {
         paidAt: payment?.paidAt,
       };
     });
-  const history = paymentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a: any, b: any) => Number(b.paidAt || 0) - Number(a.paidAt || 0));
+  const history = payments.sort((a: any, b: any) => Number(b.paidAt || 0) - Number(a.paidAt || 0));
   res.json({ period: period.key, cashiers, history });
 });
 
@@ -5788,11 +5815,8 @@ app.post('/api/admin/users/:userId/update', hasPermission('users'), async (req, 
 
 // Get all agents
 app.get('/api/admin/agents', hasPermission('agents'), async (req, res) => {
-  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   try {
-    const agentsSnapshot = await db.collection('agents').get();
-    const agents = agentsSnapshot.docs.map(doc => doc.data());
-    res.json(agents);
+    res.json(Object.values(store.agents));
   } catch (error) {
     console.error('Failed to get agents:', error);
     res.status(500).json({ error: 'Failed to retrieve agents from database.' });
@@ -6067,10 +6091,8 @@ app.post('/api/admin/agents/:agentId/credit', hasPermission('agents'), async (re
 
 // Get all agent requests for admin view
 app.get('/api/admin/agent-requests', hasPermission('agents'), async (req, res) => {
-  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   try {
-    const requestsSnapshot = await db.collection('agentRequests').orderBy('createdAt', 'desc').get();
-    const requests = requestsSnapshot.docs.map(doc => doc.data());
+    const requests = [...agentRequestsCache.values()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     res.json(requests);
   } catch (error) {
     console.error('Failed to get agent requests:', error);
@@ -6335,14 +6357,10 @@ async function isAgent(req: any, res: express.Response, next: express.NextFuncti
     }
     
     try {
-        const agentRef = db.collection('agents').doc(agentId);
-        const agentDoc = await agentRef.get();
-
-        if (!agentDoc.exists) {
+        const agent = await cachedAgent(agentId);
+        if (!agent) {
             return res.status(403).json({ error: 'Access denied. Invalid agent ID.' });
         }
-        
-        const agent = agentDoc.data() as Agent;
 
         if (agent.status !== 'Active') {
             return res.status(403).json({ error: 'Access denied. Inactive agent ID.' });
@@ -6457,16 +6475,9 @@ app.get('/api/agent/player-lookup', isAgent, (req, res) => {
 
 // Get agent's own transaction history
 app.get('/api/agent/transactions', isAgent, async (req, res) => {
-    if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const agent = (req as any).agent;
     try {
-        // Query without ordering to prevent missing-index errors.
-        const snapshot = await db.collection('agentTransactions')
-            .where('agentId', '==', agent.id)
-            .get();
-        
-        // Sort the results in memory.
-        const transactions = snapshot.docs.map(doc => doc.data());
+        const transactions = [...agentTransactionsCache.values()].filter(transaction => transaction.agentId === agent.id);
         transactions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         res.json(transactions);
@@ -6591,13 +6602,9 @@ app.post('/api/agent/request-float', isAgent, async (req, res) => {
 
 // Agent gets their own list of float requests
 app.get('/api/agent/requests', isAgent, async (req, res) => {
-    if (!db) return res.status(500).json({ error: 'Database not initialized' });
     const agent: Agent = (req as any).agent;
     try {
-        const requestsSnapshot = await db.collection('agentRequests')
-            .where('agentId', '==', agent.id)
-            .get();
-        const requests = requestsSnapshot.docs.map(doc => doc.data());
+        const requests = [...agentRequestsCache.values()].filter(request => request.agentId === agent.id);
         requests.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         res.json(requests);
     } catch (error) {
@@ -6609,21 +6616,6 @@ app.get('/api/agent/requests', isAgent, async (req, res) => {
 // Agent gets list of manual player requests for transactions
 app.get('/api/agent/player-requests', isAgent, async (req, res) => {
     const agent: Agent = (req as any).agent;
-
-    if (db) {
-      try {
-        const snapshot = await db.collection('manualTransactionRequests').where('agentId', '==', agent.id).get();
-        snapshot.docs.forEach(doc => {
-          const request = { id: doc.id, ...doc.data() } as ManualTransactionRequest;
-          const index = store.pendingManualTransactions.findIndex(item => item.id === request.id);
-          if (index >= 0) store.pendingManualTransactions[index] = request;
-          else store.pendingManualTransactions.push(request);
-        });
-      } catch (error) {
-        console.error(`Failed to load player requests for agent ${agent.id}:`, error);
-        return res.status(500).json({ error: 'Failed to retrieve player requests.' });
-      }
-    }
 
     const agentSpecificTxs = store.pendingManualTransactions.filter(tx => {
         const user = store.users[tx.userId];
@@ -6921,6 +6913,7 @@ async function startServer() {
   try {
     await loadStoreFromFirestore();
     purgeSimulatedUsers();
+    await startFirestoreLiveCaches();
     console.log('Application state initialization completed.');
   } catch (error) {
     console.error('Application state initialization failed; continuing with local fallback:', error);
@@ -6936,6 +6929,7 @@ async function startServer() {
   // Graceful shutdown
   process.on('SIGINT', () => {
     console.log('\nShutting down server...');
+    firestoreLiveUnsubscribes.splice(0).forEach(unsubscribe => unsubscribe());
     server.close(() => {
       console.log('Server shut down.');
       process.exit(0);
