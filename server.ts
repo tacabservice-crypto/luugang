@@ -46,7 +46,7 @@ import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
-import { loadMySqlPrimaryCaches } from './src/server/mysql-primary-data.ts';
+import { approveMySqlAgentPlayerRequest, loadMySqlPrimaryCaches, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -972,7 +972,17 @@ async function loadUserProfilesFromFirestore() {
 }
 
 async function syncUserProfilesToFirestore() {
-  if (!db || isMySqlRuntimePrimary()) return;
+  if (isMySqlRuntimePrimary()) {
+    const changedUsers = Object.values(store.users).filter(user =>
+      !user.id.startsWith('user_sim_') && !user.id.startsWith('bot_')
+      && persistedUserProfiles.get(user.firebaseUid || user.id) !== serializeUserProfile(user));
+    for (const user of changedUsers) {
+      await saveMySqlUserProfile(user);
+      persistedUserProfiles.set(user.firebaseUid || user.id, serializeUserProfile(user));
+    }
+    return;
+  }
+  if (!db) return;
 
   const users = Object.values(store.users).filter((user) => {
     if (user.id.startsWith('user_sim_') || user.id.startsWith('bot_')) return false;
@@ -1002,7 +1012,8 @@ function queueUserProfileSync() {
 }
 
 async function saveUserProfileToFirestore(user: UserProfile) {
-  if (!db || isMySqlRuntimePrimary()) return;
+  if (isMySqlRuntimePrimary()) return saveMySqlUserProfile(user);
+  if (!db) return;
   const documentId = user.firebaseUid || user.id;
   const cleanProfile = JSON.parse(JSON.stringify(user));
   await db.collection('users').doc(documentId).set(cleanProfile, { merge: true });
@@ -1010,7 +1021,7 @@ async function saveUserProfileToFirestore(user: UserProfile) {
 }
 
 async function saveManualRequestToFirestore(request: ManualTransactionRequest) {
-  if (isMySqlRuntimePrimary()) return;
+  if (isMySqlRuntimePrimary()) return saveMySqlManualRequest(request);
   if (!db) throw new Error('Database not initialized');
   await db.collection('manualTransactionRequests').doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
 }
@@ -6837,7 +6848,30 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
         }
 
         let approvedUserBalance = user.balance;
-        await db.runTransaction(async (t) => {
+        if (isMySqlRuntimePrimary()) {
+          if (tx.transactionType === 'withdraw') {
+            const eligibilityError = withdrawalEligibilityError(user, tx.amount, tx.id);
+            if (eligibilityError) throw new Error(eligibilityError);
+          }
+          const agentTx: AgentTransaction = {
+            id: `agent_tx_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+            agentId: agent.id,
+            type: tx.transactionType === 'deposit' ? 'PlayerDeposit' : 'PlayerWithdrawal',
+            amount: tx.amount,
+            playerId: user.id,
+            playerName: user.username,
+            timestamp: Date.now(),
+            description: `Approved ${tx.transactionType} of $${tx.amount} for player ${user.username}.`,
+          };
+          const approved = await approveMySqlAgentPlayerRequest({ agent, user, request: tx, agentTransaction: agentTx });
+          approvedUserBalance = Number(approved.user.balance);
+          Object.assign(agent, approved.agent);
+          Object.assign(user, approved.user);
+          Object.assign(tx, approved.request);
+          store.agents[agent.id] = agent;
+          agentCache.set(agent.id, agent);
+          agentTransactionsCache.set(agentTx.id, agentTx);
+        } else await db.runTransaction(async (t) => {
             const agentRef = db.collection('agents').doc(agent.id);
             const userRef = db.collection('users').doc(user.firebaseUid || user.id);
             const agentDoc = await t.get(agentRef);
