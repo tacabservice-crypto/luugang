@@ -43,6 +43,7 @@ import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
+import { loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -811,11 +812,25 @@ function loadStore() {
   }
 }
 
+async function loadStoreFromMySql(): Promise<boolean> {
+  try {
+    const snapshot = await loadRuntimeStoreFromMySql();
+    if (!snapshot) return false;
+    fs.writeFileSync(DB_FILE, JSON.stringify(snapshot), 'utf8');
+    loadStore();
+    console.log('Database loaded successfully from MySQL runtime store.');
+    return true;
+  } catch (error) {
+    console.error('Failed to load MySQL runtime store; using Firebase fallback.', error);
+    return false;
+  }
+}
+
 // Load store from Firebase Firestore
-async function loadStoreFromFirestore() {
+async function loadStoreFromFirestore(): Promise<boolean> {
   if (!db) {
     loadStore();
-    return;
+    return false;
   }
   try {
     console.log('Fetching latest state from Firebase Firestore...');
@@ -859,7 +874,7 @@ async function loadStoreFromFirestore() {
         await loadUserProfilesFromFirestore();
         await loadManualRequestsFromFirestore();
         await syncUserProfilesToFirestore();
-        return;
+        return true;
       }
     }
     console.log('No existing state in Firestore. Loading from local store fallback...');
@@ -867,9 +882,11 @@ async function loadStoreFromFirestore() {
     await loadUserProfilesFromFirestore();
     await loadManualRequestsFromFirestore();
     await syncUserProfilesToFirestore();
+    return false;
   } catch (err) {
     console.error('Failed to load store from Firestore:', err);
     loadStore();
+    return false;
   }
 }
 
@@ -1109,10 +1126,31 @@ async function syncToFirestore() {
   }
 }
 
+let pendingMySqlStoreSnapshot: Record<string, any> | null = null;
+let mySqlStoreSync: Promise<void> | null = null;
+
+function queueMySqlStoreSync(): Promise<void> {
+  if (firebaseMySqlMigrationMode || mysqlRuntimeStoreMode() === 'disabled') return Promise.resolve();
+  pendingMySqlStoreSnapshot = JSON.parse(JSON.stringify(store));
+  if (!mySqlStoreSync) {
+    mySqlStoreSync = (async () => {
+      while (pendingMySqlStoreSnapshot) {
+        const snapshot = pendingMySqlStoreSnapshot;
+        pendingMySqlStoreSnapshot = null;
+        await saveRuntimeStoreToMySql(snapshot);
+      }
+    })().finally(() => {
+      mySqlStoreSync = null;
+    });
+  }
+  return mySqlStoreSync;
+}
+
 // Save store to disk and sync with Firestore
 function saveStore() {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
+    void queueMySqlStoreSync().catch(error => console.error('MySQL shadow store synchronization failed:', error));
     void queueUserProfileSync();
   } catch (error) {
     console.error('Failed to write database to disk.', error);
@@ -1123,6 +1161,11 @@ function saveStore() {
 async function saveStoreAndWait() {
     try {
       fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
+      try {
+        await queueMySqlStoreSync();
+      } catch (error) {
+        console.error('MySQL shadow store synchronization failed; continuing with Firebase:', error);
+      }
       await syncToFirestore();
       await queueUserProfileSync();
     } catch (error) {
@@ -6942,8 +6985,20 @@ async function startServer() {
   // Hostinger requires listen() within three seconds. Load persistent state only
   // after binding the port; loadStoreFromFirestore already falls back to disk.
   try {
-    await loadStoreFromFirestore();
+    const runtimeStoreMode = mysqlRuntimeStoreMode();
+    let loadedFromFirebase = false;
+    let loadedFromMySql = false;
+    if (runtimeStoreMode === 'primary' && !migrationMode) {
+      loadedFromMySql = await loadStoreFromMySql();
+    }
+    if (!loadedFromMySql) {
+      loadedFromFirebase = await loadStoreFromFirestore();
+    }
     purgeSimulatedUsers();
+    if (!migrationMode && loadedFromFirebase && runtimeStoreMode !== 'disabled') {
+      await saveRuntimeStoreToMySql(JSON.parse(JSON.stringify(store)));
+      console.log(`MySQL runtime store ${runtimeStoreMode === 'shadow' ? 'shadow' : 'fallback'} snapshot verified.`);
+    }
     if (!migrationMode) {
       await startFirestoreLiveCaches();
       console.log('Application state initialization completed.');

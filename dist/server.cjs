@@ -311,6 +311,31 @@ async function migrateFirestoreToMySql(options = {}) {
   }
 }
 
+// src/server/mysql-runtime-store.ts
+function mysqlRuntimeStoreMode() {
+  if (!isMySqlConfigured()) return "disabled";
+  const configured = String(process.env.MYSQL_RUNTIME_STORE_MODE || "shadow").trim().toLowerCase();
+  return configured === "primary" ? "primary" : configured === "disabled" ? "disabled" : "shadow";
+}
+async function loadRuntimeStoreFromMySql() {
+  const [rows] = await getMySqlPool().execute(
+    "SELECT setting_json FROM app_settings WHERE setting_key = ? LIMIT 1",
+    ["runtime_store"]
+  );
+  if (!rows.length) return null;
+  const value = rows[0].setting_json;
+  if (typeof value === "string") return JSON.parse(value);
+  return value && typeof value === "object" ? value : null;
+}
+async function saveRuntimeStoreToMySql(snapshot) {
+  await getMySqlPool().execute(
+    `INSERT INTO app_settings (setting_key, setting_json, updated_at)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE setting_json = VALUES(setting_json), updated_at = VALUES(updated_at)`,
+    ["runtime_store", JSON.stringify(snapshot), Date.now()]
+  );
+}
+
 // server.ts
 var import_auth = require("firebase-admin/auth");
 var import_meta = {};
@@ -909,10 +934,23 @@ function loadStore() {
     console.error("Failed to load database. Starting fresh.", error);
   }
 }
+async function loadStoreFromMySql() {
+  try {
+    const snapshot = await loadRuntimeStoreFromMySql();
+    if (!snapshot) return false;
+    import_fs.default.writeFileSync(DB_FILE, JSON.stringify(snapshot), "utf8");
+    loadStore();
+    console.log("Database loaded successfully from MySQL runtime store.");
+    return true;
+  } catch (error) {
+    console.error("Failed to load MySQL runtime store; using Firebase fallback.", error);
+    return false;
+  }
+}
 async function loadStoreFromFirestore() {
   if (!db) {
     loadStore();
-    return;
+    return false;
   }
   try {
     console.log("Fetching latest state from Firebase Firestore...");
@@ -959,7 +997,7 @@ async function loadStoreFromFirestore() {
         await loadUserProfilesFromFirestore();
         await loadManualRequestsFromFirestore();
         await syncUserProfilesToFirestore();
-        return;
+        return true;
       }
     }
     console.log("No existing state in Firestore. Loading from local store fallback...");
@@ -967,9 +1005,11 @@ async function loadStoreFromFirestore() {
     await loadUserProfilesFromFirestore();
     await loadManualRequestsFromFirestore();
     await syncUserProfilesToFirestore();
+    return false;
   } catch (err) {
     console.error("Failed to load store from Firestore:", err);
     loadStore();
+    return false;
   }
 }
 var persistedUserProfiles = /* @__PURE__ */ new Map();
@@ -1160,9 +1200,28 @@ async function syncToFirestore() {
     console.error("Failed to sync store to Firestore:", err);
   }
 }
+var pendingMySqlStoreSnapshot = null;
+var mySqlStoreSync = null;
+function queueMySqlStoreSync() {
+  if (firebaseMySqlMigrationMode || mysqlRuntimeStoreMode() === "disabled") return Promise.resolve();
+  pendingMySqlStoreSnapshot = JSON.parse(JSON.stringify(store));
+  if (!mySqlStoreSync) {
+    mySqlStoreSync = (async () => {
+      while (pendingMySqlStoreSnapshot) {
+        const snapshot = pendingMySqlStoreSnapshot;
+        pendingMySqlStoreSnapshot = null;
+        await saveRuntimeStoreToMySql(snapshot);
+      }
+    })().finally(() => {
+      mySqlStoreSync = null;
+    });
+  }
+  return mySqlStoreSync;
+}
 function saveStore() {
   try {
     import_fs.default.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    void queueMySqlStoreSync().catch((error) => console.error("MySQL shadow store synchronization failed:", error));
     void queueUserProfileSync();
   } catch (error) {
     console.error("Failed to write database to disk.", error);
@@ -1171,6 +1230,11 @@ function saveStore() {
 async function saveStoreAndWait() {
   try {
     import_fs.default.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    try {
+      await queueMySqlStoreSync();
+    } catch (error) {
+      console.error("MySQL shadow store synchronization failed; continuing with Firebase:", error);
+    }
     await syncToFirestore();
     await queueUserProfileSync();
   } catch (error) {
@@ -5655,8 +5719,20 @@ async function startServer() {
     console.warn("MySQL connection check skipped: configuration is incomplete.");
   }
   try {
-    await loadStoreFromFirestore();
+    const runtimeStoreMode = mysqlRuntimeStoreMode();
+    let loadedFromFirebase = false;
+    let loadedFromMySql = false;
+    if (runtimeStoreMode === "primary" && !migrationMode) {
+      loadedFromMySql = await loadStoreFromMySql();
+    }
+    if (!loadedFromMySql) {
+      loadedFromFirebase = await loadStoreFromFirestore();
+    }
     purgeSimulatedUsers();
+    if (!migrationMode && loadedFromFirebase && runtimeStoreMode !== "disabled") {
+      await saveRuntimeStoreToMySql(JSON.parse(JSON.stringify(store)));
+      console.log(`MySQL runtime store ${runtimeStoreMode === "shadow" ? "shadow" : "fallback"} snapshot verified.`);
+    }
     if (!migrationMode) {
       await startFirestoreLiveCaches();
       console.log("Application state initialization completed.");

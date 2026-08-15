@@ -17,4 +17,8 @@ For a Hostinger Node.js deployment without an npm terminal, set `RUN_FIREBASE_MY
 
 Wait for a log containing `"status": "verified"`, confirm that `balanceMismatches` is empty, then set the switch back to `false` and redeploy. If Firestore reports `RESOURCE_EXHAUSTED`, keep the switch off until the quota resets.
 
+## Stage 4 runtime store
+
+`MYSQL_RUNTIME_STORE_MODE=shadow` keeps Firebase as the read source while every new central store snapshot is also written to MySQL. MySQL failures are logged but do not block the Firebase fallback. Do not select `primary` until the shadow snapshot has been observed successfully in production and the Stage 5 cutover is approved.
+
 The migration command is repeatable: every migration filename is recorded in `schema_migrations` and will not be applied twice.
