@@ -1017,6 +1017,7 @@ var userProfileSyncQueue = Promise.resolve();
 function serializeUserProfile(user) {
   return JSON.stringify(user);
 }
+var isMySqlRuntimePrimary = () => mysqlRuntimeStoreMode() === "primary";
 async function loadUserProfilesFromFirestore() {
   if (!db) return;
   const snapshot = await db.collection("users").get();
@@ -1190,7 +1191,7 @@ async function refreshUserProfileById(userId) {
   return knownUser || null;
 }
 async function syncToFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   try {
     const storeRef = db.collection("ludo_store").doc("main");
     const serialized = JSON.stringify(store);
@@ -5732,6 +5733,9 @@ async function startServer() {
     if (!migrationMode && loadedFromFirebase && runtimeStoreMode !== "disabled") {
       await saveRuntimeStoreToMySql(JSON.parse(JSON.stringify(store)));
       console.log(`MySQL runtime store ${runtimeStoreMode === "shadow" ? "shadow" : "fallback"} snapshot verified.`);
+    }
+    if (!migrationMode && runtimeStoreMode === "primary" && loadedFromMySql) {
+      console.log("MySQL runtime store primary mode active; central Firestore writes are disabled.");
     }
     if (!migrationMode) {
       await startFirestoreLiveCaches();

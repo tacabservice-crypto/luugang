@@ -21,4 +21,6 @@ Wait for a log containing `"status": "verified"`, confirm that `balanceMismatche
 
 `MYSQL_RUNTIME_STORE_MODE=shadow` keeps Firebase as the read source while every new central store snapshot is also written to MySQL. MySQL failures are logged but do not block the Firebase fallback. Do not select `primary` until the shadow snapshot has been observed successfully in production and the Stage 5 cutover is approved.
 
+After shadow verification, `MYSQL_RUNTIME_STORE_MODE=primary` loads and saves the central runtime snapshot through MySQL and stops writes to `ludo_store/main`. Firebase Auth plus explicit user, admin, agent, OTP, manual-transaction and matchmaking compatibility records remain enabled until their financial transaction paths are migrated separately.
+
 The migration command is repeatable: every migration filename is recorded in `schema_migrations` and will not be applied twice.
