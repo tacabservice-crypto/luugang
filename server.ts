@@ -44,6 +44,8 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
+import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
+import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -204,6 +206,24 @@ const TOURNAMENT_CHECK_IN_MS = 5 * 60 * 1000;
 
 function hashEmailOtp(uid: string, otp: string): string {
   return crypto.createHash('sha256').update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || 'ludosom'}`).digest('hex');
+}
+
+async function readEmailOtp(uid: string): Promise<StoredEmailOtp | null> {
+  if (isMySqlRuntimePrimary()) return getMySqlEmailOtp(uid);
+  if (!db) return null;
+  const snapshot = await db.collection('emailOtps').doc(uid).get();
+  return snapshot.exists ? snapshot.data() as StoredEmailOtp : null;
+}
+
+async function writeEmailOtp(uid: string, record: StoredEmailOtp): Promise<void> {
+  if (isMySqlRuntimePrimary()) return saveMySqlEmailOtp(uid, record);
+  if (!db) throw new Error('Database not initialized');
+  await db.collection('emailOtps').doc(uid).set(record);
+}
+
+async function removeEmailOtp(uid: string): Promise<void> {
+  if (isMySqlRuntimePrimary()) return deleteMySqlEmailOtp(uid);
+  if (db) await db.collection('emailOtps').doc(uid).delete();
 }
 
 function normalizeAuthPhone(value: unknown): string {
@@ -655,7 +675,7 @@ async function startFirestoreLiveCaches() {
     firestoreLiveUnsubscribes.push(unsubscribe);
   });
 
-  await Promise.all([
+  const watchers: Array<Promise<void>> = [
     watch<AdminUser>('adminUsers', adminUsersCache),
     watch<Agent>('agents', agentCache, (id, value) => {
       if (value) store.agents[id] = value;
@@ -664,7 +684,9 @@ async function startFirestoreLiveCaches() {
     watch<AgentRequest>('agentRequests', agentRequestsCache),
     watch<AgentTransaction>('agentTransactions', agentTransactionsCache),
     watch<any>('cashierPayments', cashierPaymentsCache),
-    watch<any>('matchmaking', new Map<string, any>(), (id, value) => {
+  ];
+  if (!isMySqlRuntimePrimary()) {
+    watchers.push(watch<any>('matchmaking', new Map<string, any>(), (id, value) => {
       removeUserFromMatchmakingQueues(id);
       if (!value || value.status !== 'WAITING_FOR_MATCH' || Date.now() - Number(value.timestamp || 0) > 180000) return;
       const userId = value.userId || id;
@@ -676,9 +698,10 @@ async function startFirestoreLiveCaches() {
       }
       (store.users[userId] as any).seekingJoinedAt = Number(value.timestamp || Date.now());
       broadcastToAll('online_players_updated', {});
-    }),
-  ]);
-  console.log('Firestore live caches initialized for admins, agents and matchmaking.');
+    }));
+  }
+  await Promise.all(watchers);
+  console.log(`Firestore live caches initialized for admins and agents${isMySqlRuntimePrimary() ? '; matchmaking uses MySQL' : ' and matchmaking'}.`);
 }
 
 async function cachedAdminUser(adminId: string) {
@@ -1346,9 +1369,7 @@ function cleanupMatchmakingQueues() {
       const seekingJoinedAt = (u as any)?.seekingJoinedAt;
       if (seekingJoinedAt && (now - seekingJoinedAt > 180000)) {
         delete (u as any).seekingJoinedAt;
-        if (db) {
-          db.collection('matchmaking').doc(userId).delete().catch(() => {});
-        }
+        void deleteSharedMatchmakingRecords(userId);
         return false;
       }
 
@@ -1366,13 +1387,75 @@ function cleanupMatchmakingQueues() {
 }
 
 function syncMatchmakingRecordWithRetry(userId: string, record: Record<string, unknown>, attempt = 1) {
-  if (!db) return;
-  db.collection('matchmaking').doc(userId).set(record).catch(error => {
+  const operation = isMySqlRuntimePrimary()
+    ? upsertMySqlMatchmaking(record)
+    : db?.collection('matchmaking').doc(userId).set(record);
+  if (!operation) return;
+  operation.catch(error => {
     console.error(`Failed to sync matchmaking record (attempt ${attempt}):`, error);
     if (attempt < 3) {
       setTimeout(() => syncMatchmakingRecordWithRetry(userId, record, attempt + 1), attempt * 1000);
     }
   });
+}
+
+async function deleteSharedMatchmakingRecords(...userIds: string[]) {
+  if (isMySqlRuntimePrimary()) {
+    await deleteMySqlMatchmaking(userIds);
+    return;
+  }
+  if (!db) return;
+  await Promise.all(userIds.map(userId => db!.collection('matchmaking').doc(userId).delete()));
+}
+
+let mysqlMatchmakingSignature = '';
+let mysqlMatchmakingTimer: NodeJS.Timeout | null = null;
+let mysqlCashierHeartbeatTimer: NodeJS.Timeout | null = null;
+
+async function refreshMySqlMatchmakingQueues() {
+  const records = await listActiveMySqlMatchmaking();
+  const signature = JSON.stringify(records.map(record => [record.userId, record.timestamp]));
+  if (signature === mysqlMatchmakingSignature) return;
+  mysqlMatchmakingSignature = signature;
+  for (const key of Object.keys(store.matchmakingQueues)) store.matchmakingQueues[key] = [];
+  for (const record of records) {
+    const userId = String(record.userId || '');
+    if (!userId) continue;
+    const queueKey = `${record.betAmount}_${record.capacity}_${record.gameMode}`;
+    if (!store.matchmakingQueues[queueKey]) store.matchmakingQueues[queueKey] = [];
+    store.matchmakingQueues[queueKey].push(userId);
+    if (!store.users[userId]) store.users[userId] = { id: userId, username: record.username || 'Player', avatar: record.avatar || '🎮', balance: 0, winCount: 0, lossCount: 0, isOfflinePreference: false };
+    (store.users[userId] as any).seekingJoinedAt = Number(record.timestamp || Date.now());
+  }
+  broadcastToAll('online_players_updated', {});
+}
+
+async function startMySqlMatchmakingSync() {
+  if (!isMySqlRuntimePrimary() || mysqlMatchmakingTimer) return;
+  await refreshMySqlMatchmakingQueues();
+  mysqlMatchmakingTimer = setInterval(() => {
+    void refreshMySqlMatchmakingQueues().catch(error => console.error('MySQL matchmaking refresh failed:', error));
+  }, 2_000);
+  mysqlMatchmakingTimer.unref?.();
+  console.log('MySQL matchmaking realtime synchronization initialized.');
+}
+
+async function refreshMySqlCashierHeartbeats() {
+  const heartbeats = await listMySqlCashierHeartbeats();
+  heartbeats.forEach(({ id, cashierOnlineAt }) => {
+    const admin = adminUsersCache.get(id);
+    if (admin) adminUsersCache.set(id, { ...admin, cashierOnlineAt });
+  });
+}
+
+async function startMySqlCashierHeartbeatSync() {
+  if (!isMySqlRuntimePrimary() || mysqlCashierHeartbeatTimer) return;
+  await refreshMySqlCashierHeartbeats();
+  mysqlCashierHeartbeatTimer = setInterval(() => {
+    void refreshMySqlCashierHeartbeats().catch(error => console.error('MySQL cashier heartbeat refresh failed:', error));
+  }, 15_000);
+  mysqlCashierHeartbeatTimer.unref?.();
+  console.log('MySQL cashier heartbeat synchronization initialized.');
 }
 
 // ==========================================
@@ -2013,14 +2096,8 @@ setInterval(() => {
       // Remove these players from the queue
       store.matchmakingQueues[queueKey] = [];
 
-      // Clean up Firestore matchmaking documents
-      if (db) {
-        realPlayers.forEach(p => {
-          db.collection('matchmaking').doc(p.id).delete().catch(err => {
-            console.error('Failed to delete matchmaking record from Firestore on auto-fill:', err);
-          });
-        });
-      }
+      void deleteSharedMatchmakingRecords(...realPlayers.map(player => player.id))
+        .catch(error => console.error('Failed to delete shared matchmaking records on auto-fill:', error));
 
       // Generate bots for the remaining slots
       const matchedList = [...realPlayers];
@@ -2115,7 +2192,7 @@ const checkVipStatus = (req: any, res: any, next: any) => {
 };
 
 app.post('/api/auth/otp/request', verifyFirebaseToken, async (req: any, res) => {
-  if (!db || !auth) return res.status(500).json({ error: 'Firebase is not configured.' });
+  if (!auth) return res.status(500).json({ error: 'Authentication is not configured.' });
   if (!isOtpEnabled()) return res.json({ success: true, disabled: true, message: 'Email OTP is currently disabled by the administrator.' });
   const uid = req.user.uid;
   const email = String(req.user.email || '').trim().toLowerCase();
@@ -2123,44 +2200,41 @@ app.post('/api/auth/otp/request', verifyFirebaseToken, async (req: any, res) => 
   const provider = req.user.firebase?.sign_in_provider;
   if (provider !== 'password' && provider !== 'google.com') return res.status(400).json({ error: 'This sign-in provider does not support email OTP.' });
 
-  const ref = db.collection('emailOtps').doc(uid);
-  const existing = await ref.get();
-  const sentAt = Number(existing.data()?.sentAt || 0);
+  const existing = await readEmailOtp(uid);
+  const sentAt = Number(existing?.sentAt || 0);
   if (Date.now() - sentAt < OTP_RESEND_MS) {
     return res.status(429).json({ error: `Please wait ${Math.ceil((OTP_RESEND_MS - (Date.now() - sentAt)) / 1000)} seconds before requesting another code.` });
   }
 
   const otp = crypto.randomInt(100000, 1000000).toString();
   await sendOtpEmail(email, otp);
-  await ref.set({ email, provider, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0, verifiedAt: null });
+  await writeEmailOtp(uid, { email, provider, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0, verifiedAt: null });
   res.json({ success: true, message: 'A 6-digit verification code was sent to your email.', expiresIn: OTP_TTL_MS / 1000 });
 });
 
 app.post('/api/auth/otp/verify', verifyFirebaseToken, async (req: any, res) => {
-  if (!db || !auth) return res.status(500).json({ error: 'Firebase is not configured.' });
+  if (!auth) return res.status(500).json({ error: 'Authentication is not configured.' });
   if (!isOtpEnabled()) return res.json({ success: true, disabled: true, message: 'Email OTP is currently disabled by the administrator.' });
   const otp = String(req.body?.otp || '').trim();
   if (!/^\d{6}$/.test(otp)) return res.status(400).json({ error: 'Enter a valid 6-digit code.' });
-  const ref = db.collection('emailOtps').doc(req.user.uid);
-  const snapshot = await ref.get();
-  if (!snapshot.exists) return res.status(400).json({ error: 'No active verification code. Request a new code.' });
-  const record = snapshot.data()!;
+  const record = await readEmailOtp(req.user.uid);
+  if (!record) return res.status(400).json({ error: 'No active verification code. Request a new code.' });
   if (Number(record.expiresAt) < Date.now()) {
-    await ref.delete();
+    await removeEmailOtp(req.user.uid);
     return res.status(400).json({ error: 'This code has expired. Request a new code.' });
   }
   if (Number(record.attempts || 0) >= 5) {
-    await ref.delete();
+    await removeEmailOtp(req.user.uid);
     return res.status(429).json({ error: 'Too many incorrect attempts. Request a new code.' });
   }
   const suppliedHash = Buffer.from(hashEmailOtp(req.user.uid, otp), 'hex');
   const storedHash = Buffer.from(String(record.otpHash), 'hex');
   if (suppliedHash.length !== storedHash.length || !crypto.timingSafeEqual(suppliedHash, storedHash)) {
-    await ref.update({ attempts: Number(record.attempts || 0) + 1 });
+    await writeEmailOtp(req.user.uid, { ...record, attempts: Number(record.attempts || 0) + 1 });
     return res.status(400).json({ error: 'Incorrect verification code.' });
   }
   if (req.user.firebase?.sign_in_provider === 'password') await auth.updateUser(req.user.uid, { emailVerified: true });
-  await ref.set({ otpHash: null, expiresAt: null, attempts: 0, verifiedAt: Date.now() }, { merge: true });
+  await writeEmailOtp(req.user.uid, { ...record, otpHash: '', expiresAt: 0, attempts: 0, verifiedAt: Date.now() });
   res.json({ success: true, message: 'Email verified successfully.' });
 });
 
@@ -2403,8 +2477,8 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
 
   if (foundUser) {
     if (requiresEmailOtp && !foundUser.emailOtpVerifiedAt) {
-      const otpVerification = db ? await db.collection('emailOtps').doc(firebaseUid).get() : null;
-      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      const otpVerification = await readEmailOtp(firebaseUid);
+      const verifiedAt = Number(otpVerification?.verifiedAt || 0);
       if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: 'Email OTP verification is required.' });
       foundUser.emailOtpVerifiedAt = verifiedAt;
     }
@@ -2424,8 +2498,8 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   const persistedUser = await findUserProfileInFirestore(firebaseUid, email);
   if (persistedUser?.id) {
     if (requiresEmailOtp && !persistedUser.emailOtpVerifiedAt) {
-      const otpVerification = db ? await db.collection('emailOtps').doc(firebaseUid).get() : null;
-      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      const otpVerification = await readEmailOtp(firebaseUid);
+      const verifiedAt = Number(otpVerification?.verifiedAt || 0);
       if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: 'Email OTP verification is required.' });
       persistedUser.emailOtpVerifiedAt = verifiedAt;
     }
@@ -2451,8 +2525,8 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
       u => u.email?.trim().toLowerCase() === normalizedEmail && !u.firebaseUid
     );
     if (userByEmail) {
-      const otpVerification = isOtpEnabled() && db ? await db.collection('emailOtps').doc(firebaseUid).get() : null;
-      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.data()?.verifiedAt || 0) : Date.now();
+      const otpVerification = isOtpEnabled() ? await readEmailOtp(firebaseUid) : null;
+      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.verifiedAt || 0) : Date.now();
       if (isOtpEnabled() && (onboardingComplete !== true || !verifiedAt)) return res.status(428).json({ error: 'Email OTP verification is required.' });
       userByEmail.firebaseUid = firebaseUid; // Link account
       userByEmail.email = normalizedEmail;
@@ -2494,15 +2568,15 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   }
 
   if (signInProvider === 'google.com' && isOtpEnabled()) {
-    if (onboardingComplete !== true || !db) {
+    if (onboardingComplete !== true) {
       return res.status(428).json({ error: 'Complete email OTP verification and the promo-code step before continuing.' });
     }
-    const otpVerification = await db.collection('emailOtps').doc(firebaseUid).get();
-    const verifiedAt = Number(otpVerification.data()?.verifiedAt || 0);
+    const otpVerification = await readEmailOtp(firebaseUid);
+    const verifiedAt = Number(otpVerification?.verifiedAt || 0);
     if (!verifiedAt || Date.now() - verifiedAt > 30 * 60 * 1000) {
       return res.status(403).json({ error: 'Google onboarding OTP verification is required.' });
     }
-    await otpVerification.ref.delete();
+    await removeEmailOtp(firebaseUid);
   }
 
   // Signup sends a username. If it is absent, Firebase Auth has already
@@ -3873,11 +3947,8 @@ app.post('/api/rooms/matchmaking/join', (req, res) => {
   if (store.users[userId]) delete (store.users[userId] as any).seekingJoinedAt;
   if (store.users[opponentId]) delete (store.users[opponentId] as any).seekingJoinedAt;
 
-  // Clean up Firestore matchmaking documents if they exist
-  if (db) {
-    db.collection('matchmaking').doc(userId).delete().catch(err => console.error('Failed to delete matchmaking record from Firestore for user:', err));
-    db.collection('matchmaking').doc(opponentId).delete().catch(err => console.error('Failed to delete matchmaking record from Firestore for opponent:', err));
-  }
+  void deleteSharedMatchmakingRecords(userId, opponentId)
+    .catch(error => console.error('Failed to delete shared matchmaking records for matched users:', error));
 
   const matchedList = [user, oppUser];
   // For a direct 1v1 challenge, capacity is always 2 and mode is solo.
@@ -3944,12 +4015,8 @@ app.post('/api/rooms/matchmaking/leave', (req, res) => {
     saveStore();
     broadcastToAll('matchmaker_seeking_cancelled', { senderId: userId });
 
-    // Also delete matchmaking record in Firestore if exists
-    if (db) {
-      db.collection('matchmaking').doc(userId).delete().catch(err => {
-        console.error('Failed to delete matchmaking record from Firestore on leave:', err);
-      });
-    }
+    void deleteSharedMatchmakingRecords(userId)
+      .catch(error => console.error('Failed to delete shared matchmaking record on leave:', error));
   }
   res.json({ success: true });
 });
@@ -4099,10 +4166,8 @@ app.post('/api/rooms/challenge/invite', (req, res) => {
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter(id => id !== senderId && id !== receiverId);
   }
-  if (db) {
-    db.collection('matchmaking').doc(senderId).delete().catch(err => console.error('Failed to delete sender from matchmaking on challenge:', err));
-    db.collection('matchmaking').doc(receiverId).delete().catch(err => console.error('Failed to delete receiver from matchmaking on challenge:', err));
-  }
+  void deleteSharedMatchmakingRecords(senderId, receiverId)
+    .catch(error => console.error('Failed to delete shared matchmaking records on challenge:', error));
   broadcastToAll('matchmaker_seeking_cancelled', { senderId });
   broadcastToAll('matchmaker_seeking_cancelled', { senderId: receiverId });
 
@@ -4820,13 +4885,16 @@ const hasAnyPermission = (...required: string[]) => async (req: express.Request,
 };
 
 app.post('/api/admin/cashier/heartbeat', hasPermission('cashier'), async (req, res) => {
-  if (!db) return res.status(500).json({ error: 'Database not initialized' });
   const adminId = String(req.query.userId || '');
-  const ref = db.collection('adminUsers').doc(adminId);
   const admin = (req as any).adminUser as AdminUser;
   if (cashierCities(admin || {}).length === 0) return res.status(400).json({ error: 'Cashier city is not configured.' });
   const cashierOnlineAt = Date.now();
-  await ref.update({ cashierOnlineAt });
+  if (isMySqlRuntimePrimary()) {
+    await updateMySqlCashierHeartbeat(adminId, cashierOnlineAt);
+  } else {
+    if (!db) return res.status(500).json({ error: 'Database not initialized' });
+    await db.collection('adminUsers').doc(adminId).update({ cashierOnlineAt });
+  }
   const updatedAdmin = { ...admin, cashierOnlineAt };
   adminUsersCache.set(adminId, updatedAdmin);
   await reassignExpiredCashierRequests(cashierOnlineAt);
@@ -7006,6 +7074,8 @@ async function startServer() {
     }
     if (!migrationMode) {
       await startFirestoreLiveCaches();
+      await startMySqlMatchmakingSync();
+      await startMySqlCashierHeartbeatSync();
       console.log('Application state initialization completed.');
     } else {
       console.log('Migration mode active: Firestore live caches are paused to preserve quota.');
@@ -7045,6 +7115,8 @@ async function startServer() {
   process.on('SIGINT', () => {
     console.log('\nShutting down server...');
     firestoreLiveUnsubscribes.splice(0).forEach(unsubscribe => unsubscribe());
+    if (mysqlMatchmakingTimer) clearInterval(mysqlMatchmakingTimer);
+    if (mysqlCashierHeartbeatTimer) clearInterval(mysqlCashierHeartbeatTimer);
     server.close(() => {
       console.log('Server shut down.');
       process.exit(0);

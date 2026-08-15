@@ -315,6 +315,80 @@ async function saveRuntimeStoreToMySql(snapshot) {
   );
 }
 
+// src/server/mysql-realtime.ts
+var schemaReady = null;
+function ensureMySqlRealtimeSchema() {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      await getMySqlPool().query(`CREATE TABLE IF NOT EXISTS matchmaking_queue (
+        user_id VARCHAR(191) PRIMARY KEY,
+        status VARCHAR(40) NOT NULL,
+        bet_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        capacity SMALLINT UNSIGNED NOT NULL DEFAULT 2,
+        game_mode VARCHAR(20) NOT NULL DEFAULT 'solo',
+        updated_at BIGINT UNSIGNED NOT NULL,
+        expires_at BIGINT UNSIGNED NOT NULL,
+        record_json JSON NOT NULL,
+        INDEX idx_matchmaking_active (status, expires_at),
+        INDEX idx_matchmaking_queue (bet_amount, capacity, game_mode, expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    })().catch((error) => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+async function upsertMySqlMatchmaking(record) {
+  await ensureMySqlRealtimeSchema();
+  const updatedAt = Number(record.timestamp || Date.now());
+  await getMySqlPool().execute(
+    `INSERT INTO matchmaking_queue (user_id, status, bet_amount, capacity, game_mode, updated_at, expires_at, record_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE status=VALUES(status), bet_amount=VALUES(bet_amount), capacity=VALUES(capacity), game_mode=VALUES(game_mode), updated_at=VALUES(updated_at), expires_at=VALUES(expires_at), record_json=VALUES(record_json)`,
+    [String(record.userId), record.status || "WAITING_FOR_MATCH", Number(record.betAmount || 0).toFixed(2), Number(record.capacity || 2), record.gameMode || "solo", updatedAt, updatedAt + 18e4, JSON.stringify(record)]
+  );
+}
+async function deleteMySqlMatchmaking(userIds) {
+  const ids = [...new Set(userIds.map(String).filter(Boolean))];
+  if (!ids.length) return;
+  await ensureMySqlRealtimeSchema();
+  await getMySqlPool().query("DELETE FROM matchmaking_queue WHERE user_id IN (?)", [ids]);
+}
+async function listActiveMySqlMatchmaking() {
+  await ensureMySqlRealtimeSchema();
+  const now2 = Date.now();
+  await getMySqlPool().execute("DELETE FROM matchmaking_queue WHERE expires_at <= ?", [now2]);
+  const [rows] = await getMySqlPool().execute("SELECT record_json FROM matchmaking_queue WHERE status = ? AND expires_at > ? ORDER BY updated_at ASC", ["WAITING_FOR_MATCH", now2]);
+  return rows.map((row) => typeof row.record_json === "string" ? JSON.parse(row.record_json) : row.record_json);
+}
+async function updateMySqlCashierHeartbeat(adminId, cashierOnlineAt) {
+  await getMySqlPool().execute("UPDATE admin_users SET cashier_online_at = ?, updated_at = ? WHERE id = ?", [cashierOnlineAt, Date.now(), adminId]);
+}
+async function listMySqlCashierHeartbeats() {
+  const [rows] = await getMySqlPool().query("SELECT id, cashier_online_at FROM admin_users WHERE cashier_online_at IS NOT NULL");
+  return rows.map((row) => ({ id: String(row.id), cashierOnlineAt: Number(row.cashier_online_at || 0) }));
+}
+
+// src/server/mysql-otp.ts
+async function getMySqlEmailOtp(subjectId) {
+  const [rows] = await getMySqlPool().execute("SELECT * FROM email_otp_challenges WHERE subject_id = ? LIMIT 1", [subjectId]);
+  if (!rows.length) return null;
+  const row = rows[0];
+  return { email: row.email, provider: void 0, otpHash: row.otp_hash || "", expiresAt: Number(row.expires_at || 0), sentAt: Number(row.resend_at || 0) - 6e4, attempts: Number(row.attempts || 0), verifiedAt: row.verified_at == null ? null : Number(row.verified_at) };
+}
+async function saveMySqlEmailOtp(subjectId, record) {
+  await getMySqlPool().execute(
+    `INSERT INTO email_otp_challenges (subject_id, email, otp_hash, expires_at, resend_at, attempts, verified_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE email=VALUES(email), otp_hash=VALUES(otp_hash), expires_at=VALUES(expires_at), resend_at=VALUES(resend_at), attempts=VALUES(attempts), verified_at=VALUES(verified_at), updated_at=VALUES(updated_at)`,
+    [subjectId, record.email, record.otpHash, record.expiresAt, record.sentAt + 6e4, record.attempts, record.verifiedAt, Date.now()]
+  );
+}
+async function deleteMySqlEmailOtp(subjectId) {
+  await getMySqlPool().execute("DELETE FROM email_otp_challenges WHERE subject_id = ?", [subjectId]);
+}
+
 // server.ts
 import { getAuth } from "firebase-admin/auth";
 dotenv.config();
@@ -426,6 +500,21 @@ var TOURNAMENT_MAX_POSTPONEMENTS = 2;
 var TOURNAMENT_CHECK_IN_MS = 5 * 60 * 1e3;
 function hashEmailOtp(uid, otp) {
   return crypto.createHash("sha256").update(`${uid}:${otp}:${process.env.OTP_HASH_SECRET || process.env.FIREBASE_PROJECT_ID || "ludosom"}`).digest("hex");
+}
+async function readEmailOtp(uid) {
+  if (isMySqlRuntimePrimary()) return getMySqlEmailOtp(uid);
+  if (!db) return null;
+  const snapshot = await db.collection("emailOtps").doc(uid).get();
+  return snapshot.exists ? snapshot.data() : null;
+}
+async function writeEmailOtp(uid, record) {
+  if (isMySqlRuntimePrimary()) return saveMySqlEmailOtp(uid, record);
+  if (!db) throw new Error("Database not initialized");
+  await db.collection("emailOtps").doc(uid).set(record);
+}
+async function removeEmailOtp(uid) {
+  if (isMySqlRuntimePrimary()) return deleteMySqlEmailOtp(uid);
+  if (db) await db.collection("emailOtps").doc(uid).delete();
 }
 function normalizeAuthPhone(value) {
   const compact = String(value || "").replace(/[\s()-]/g, "");
@@ -764,7 +853,7 @@ async function startFirestoreLiveCaches() {
     });
     firestoreLiveUnsubscribes.push(unsubscribe);
   });
-  await Promise.all([
+  const watchers = [
     watch("adminUsers", adminUsersCache),
     watch("agents", agentCache, (id, value) => {
       if (value) store.agents[id] = value;
@@ -772,8 +861,10 @@ async function startFirestoreLiveCaches() {
     }),
     watch("agentRequests", agentRequestsCache),
     watch("agentTransactions", agentTransactionsCache),
-    watch("cashierPayments", cashierPaymentsCache),
-    watch("matchmaking", /* @__PURE__ */ new Map(), (id, value) => {
+    watch("cashierPayments", cashierPaymentsCache)
+  ];
+  if (!isMySqlRuntimePrimary()) {
+    watchers.push(watch("matchmaking", /* @__PURE__ */ new Map(), (id, value) => {
       removeUserFromMatchmakingQueues(id);
       if (!value || value.status !== "WAITING_FOR_MATCH" || Date.now() - Number(value.timestamp || 0) > 18e4) return;
       const userId = value.userId || id;
@@ -785,9 +876,10 @@ async function startFirestoreLiveCaches() {
       }
       store.users[userId].seekingJoinedAt = Number(value.timestamp || Date.now());
       broadcastToAll("online_players_updated", {});
-    })
-  ]);
-  console.log("Firestore live caches initialized for admins, agents and matchmaking.");
+    }));
+  }
+  await Promise.all(watchers);
+  console.log(`Firestore live caches initialized for admins and agents${isMySqlRuntimePrimary() ? "; matchmaking uses MySQL" : " and matchmaking"}.`);
 }
 async function cachedAdminUser(adminId) {
   const cached = adminUsersCache.get(adminId);
@@ -1341,10 +1433,7 @@ function cleanupMatchmakingQueues() {
       const seekingJoinedAt = u?.seekingJoinedAt;
       if (seekingJoinedAt && now2 - seekingJoinedAt > 18e4) {
         delete u.seekingJoinedAt;
-        if (db) {
-          db.collection("matchmaking").doc(userId).delete().catch(() => {
-          });
-        }
+        void deleteSharedMatchmakingRecords(userId);
         return false;
       }
       return true;
@@ -1358,13 +1447,67 @@ function cleanupMatchmakingQueues() {
   }
 }
 function syncMatchmakingRecordWithRetry(userId, record, attempt = 1) {
-  if (!db) return;
-  db.collection("matchmaking").doc(userId).set(record).catch((error) => {
+  const operation = isMySqlRuntimePrimary() ? upsertMySqlMatchmaking(record) : db?.collection("matchmaking").doc(userId).set(record);
+  if (!operation) return;
+  operation.catch((error) => {
     console.error(`Failed to sync matchmaking record (attempt ${attempt}):`, error);
     if (attempt < 3) {
       setTimeout(() => syncMatchmakingRecordWithRetry(userId, record, attempt + 1), attempt * 1e3);
     }
   });
+}
+async function deleteSharedMatchmakingRecords(...userIds) {
+  if (isMySqlRuntimePrimary()) {
+    await deleteMySqlMatchmaking(userIds);
+    return;
+  }
+  if (!db) return;
+  await Promise.all(userIds.map((userId) => db.collection("matchmaking").doc(userId).delete()));
+}
+var mysqlMatchmakingSignature = "";
+var mysqlMatchmakingTimer = null;
+var mysqlCashierHeartbeatTimer = null;
+async function refreshMySqlMatchmakingQueues() {
+  const records = await listActiveMySqlMatchmaking();
+  const signature = JSON.stringify(records.map((record) => [record.userId, record.timestamp]));
+  if (signature === mysqlMatchmakingSignature) return;
+  mysqlMatchmakingSignature = signature;
+  for (const key of Object.keys(store.matchmakingQueues)) store.matchmakingQueues[key] = [];
+  for (const record of records) {
+    const userId = String(record.userId || "");
+    if (!userId) continue;
+    const queueKey = `${record.betAmount}_${record.capacity}_${record.gameMode}`;
+    if (!store.matchmakingQueues[queueKey]) store.matchmakingQueues[queueKey] = [];
+    store.matchmakingQueues[queueKey].push(userId);
+    if (!store.users[userId]) store.users[userId] = { id: userId, username: record.username || "Player", avatar: record.avatar || "\u{1F3AE}", balance: 0, winCount: 0, lossCount: 0, isOfflinePreference: false };
+    store.users[userId].seekingJoinedAt = Number(record.timestamp || Date.now());
+  }
+  broadcastToAll("online_players_updated", {});
+}
+async function startMySqlMatchmakingSync() {
+  if (!isMySqlRuntimePrimary() || mysqlMatchmakingTimer) return;
+  await refreshMySqlMatchmakingQueues();
+  mysqlMatchmakingTimer = setInterval(() => {
+    void refreshMySqlMatchmakingQueues().catch((error) => console.error("MySQL matchmaking refresh failed:", error));
+  }, 2e3);
+  mysqlMatchmakingTimer.unref?.();
+  console.log("MySQL matchmaking realtime synchronization initialized.");
+}
+async function refreshMySqlCashierHeartbeats() {
+  const heartbeats = await listMySqlCashierHeartbeats();
+  heartbeats.forEach(({ id, cashierOnlineAt }) => {
+    const admin = adminUsersCache.get(id);
+    if (admin) adminUsersCache.set(id, { ...admin, cashierOnlineAt });
+  });
+}
+async function startMySqlCashierHeartbeatSync() {
+  if (!isMySqlRuntimePrimary() || mysqlCashierHeartbeatTimer) return;
+  await refreshMySqlCashierHeartbeats();
+  mysqlCashierHeartbeatTimer = setInterval(() => {
+    void refreshMySqlCashierHeartbeats().catch((error) => console.error("MySQL cashier heartbeat refresh failed:", error));
+  }, 15e3);
+  mysqlCashierHeartbeatTimer.unref?.();
+  console.log("MySQL cashier heartbeat synchronization initialized.");
 }
 var START_OFFSETS = {
   green: 0,
@@ -1819,13 +1962,7 @@ setInterval(() => {
       console.log(`Matchmaking timeout for queue ${queueKey}. Auto-filling remaining seats with bots...`);
       const realPlayers = connectedQueueUserIds.map((id) => store.users[id]).filter(Boolean);
       store.matchmakingQueues[queueKey] = [];
-      if (db) {
-        realPlayers.forEach((p) => {
-          db.collection("matchmaking").doc(p.id).delete().catch((err) => {
-            console.error("Failed to delete matchmaking record from Firestore on auto-fill:", err);
-          });
-        });
-      }
+      void deleteSharedMatchmakingRecords(...realPlayers.map((player) => player.id)).catch((error) => console.error("Failed to delete shared matchmaking records on auto-fill:", error));
       const matchedList = [...realPlayers];
       const botAvatars = ["\u{1F916}", "\u{1F98A}", "\u26A1", "\u{1F451}"];
       const botNames = ["Dhili Master AI", "SomaliLudoBot", "LudoPro AI", "DesertFox AI", "NomadLudo AI"];
@@ -1896,49 +2033,46 @@ var checkVipStatus = (req, res, next) => {
   next();
 };
 app.post("/api/auth/otp/request", verifyFirebaseToken, async (req, res) => {
-  if (!db || !auth) return res.status(500).json({ error: "Firebase is not configured." });
+  if (!auth) return res.status(500).json({ error: "Authentication is not configured." });
   if (!isOtpEnabled()) return res.json({ success: true, disabled: true, message: "Email OTP is currently disabled by the administrator." });
   const uid = req.user.uid;
   const email = String(req.user.email || "").trim().toLowerCase();
   if (!email) return res.status(400).json({ error: "This account has no email address." });
   const provider = req.user.firebase?.sign_in_provider;
   if (provider !== "password" && provider !== "google.com") return res.status(400).json({ error: "This sign-in provider does not support email OTP." });
-  const ref = db.collection("emailOtps").doc(uid);
-  const existing = await ref.get();
-  const sentAt = Number(existing.data()?.sentAt || 0);
+  const existing = await readEmailOtp(uid);
+  const sentAt = Number(existing?.sentAt || 0);
   if (Date.now() - sentAt < OTP_RESEND_MS) {
     return res.status(429).json({ error: `Please wait ${Math.ceil((OTP_RESEND_MS - (Date.now() - sentAt)) / 1e3)} seconds before requesting another code.` });
   }
   const otp = crypto.randomInt(1e5, 1e6).toString();
   await sendOtpEmail(email, otp);
-  await ref.set({ email, provider, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0, verifiedAt: null });
+  await writeEmailOtp(uid, { email, provider, otpHash: hashEmailOtp(uid, otp), expiresAt: Date.now() + OTP_TTL_MS, sentAt: Date.now(), attempts: 0, verifiedAt: null });
   res.json({ success: true, message: "A 6-digit verification code was sent to your email.", expiresIn: OTP_TTL_MS / 1e3 });
 });
 app.post("/api/auth/otp/verify", verifyFirebaseToken, async (req, res) => {
-  if (!db || !auth) return res.status(500).json({ error: "Firebase is not configured." });
+  if (!auth) return res.status(500).json({ error: "Authentication is not configured." });
   if (!isOtpEnabled()) return res.json({ success: true, disabled: true, message: "Email OTP is currently disabled by the administrator." });
   const otp = String(req.body?.otp || "").trim();
   if (!/^\d{6}$/.test(otp)) return res.status(400).json({ error: "Enter a valid 6-digit code." });
-  const ref = db.collection("emailOtps").doc(req.user.uid);
-  const snapshot = await ref.get();
-  if (!snapshot.exists) return res.status(400).json({ error: "No active verification code. Request a new code." });
-  const record = snapshot.data();
+  const record = await readEmailOtp(req.user.uid);
+  if (!record) return res.status(400).json({ error: "No active verification code. Request a new code." });
   if (Number(record.expiresAt) < Date.now()) {
-    await ref.delete();
+    await removeEmailOtp(req.user.uid);
     return res.status(400).json({ error: "This code has expired. Request a new code." });
   }
   if (Number(record.attempts || 0) >= 5) {
-    await ref.delete();
+    await removeEmailOtp(req.user.uid);
     return res.status(429).json({ error: "Too many incorrect attempts. Request a new code." });
   }
   const suppliedHash = Buffer.from(hashEmailOtp(req.user.uid, otp), "hex");
   const storedHash = Buffer.from(String(record.otpHash), "hex");
   if (suppliedHash.length !== storedHash.length || !crypto.timingSafeEqual(suppliedHash, storedHash)) {
-    await ref.update({ attempts: Number(record.attempts || 0) + 1 });
+    await writeEmailOtp(req.user.uid, { ...record, attempts: Number(record.attempts || 0) + 1 });
     return res.status(400).json({ error: "Incorrect verification code." });
   }
   if (req.user.firebase?.sign_in_provider === "password") await auth.updateUser(req.user.uid, { emailVerified: true });
-  await ref.set({ otpHash: null, expiresAt: null, attempts: 0, verifiedAt: Date.now() }, { merge: true });
+  await writeEmailOtp(req.user.uid, { ...record, otpHash: "", expiresAt: 0, attempts: 0, verifiedAt: Date.now() });
   res.json({ success: true, message: "Email verified successfully." });
 });
 app.get("/api/auth/methods", (_req, res) => {
@@ -2144,8 +2278,8 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   let foundUser = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
   if (foundUser) {
     if (requiresEmailOtp && !foundUser.emailOtpVerifiedAt) {
-      const otpVerification = db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
-      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      const otpVerification = await readEmailOtp(firebaseUid);
+      const verifiedAt = Number(otpVerification?.verifiedAt || 0);
       if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
       foundUser.emailOtpVerifiedAt = verifiedAt;
     }
@@ -2162,8 +2296,8 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   const persistedUser = await findUserProfileInFirestore(firebaseUid, email);
   if (persistedUser?.id) {
     if (requiresEmailOtp && !persistedUser.emailOtpVerifiedAt) {
-      const otpVerification = db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
-      const verifiedAt = Number(otpVerification?.data()?.verifiedAt || 0);
+      const otpVerification = await readEmailOtp(firebaseUid);
+      const verifiedAt = Number(otpVerification?.verifiedAt || 0);
       if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
       persistedUser.emailOtpVerifiedAt = verifiedAt;
     }
@@ -2187,8 +2321,8 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       (u) => u.email?.trim().toLowerCase() === normalizedEmail && !u.firebaseUid
     );
     if (userByEmail) {
-      const otpVerification = isOtpEnabled() && db ? await db.collection("emailOtps").doc(firebaseUid).get() : null;
-      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.data()?.verifiedAt || 0) : Date.now();
+      const otpVerification = isOtpEnabled() ? await readEmailOtp(firebaseUid) : null;
+      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.verifiedAt || 0) : Date.now();
       if (isOtpEnabled() && (onboardingComplete !== true || !verifiedAt)) return res.status(428).json({ error: "Email OTP verification is required." });
       userByEmail.firebaseUid = firebaseUid;
       userByEmail.email = normalizedEmail;
@@ -2226,15 +2360,15 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     return res.status(404).json({ error: "No account was found with this phone number." });
   }
   if (signInProvider === "google.com" && isOtpEnabled()) {
-    if (onboardingComplete !== true || !db) {
+    if (onboardingComplete !== true) {
       return res.status(428).json({ error: "Complete email OTP verification and the promo-code step before continuing." });
     }
-    const otpVerification = await db.collection("emailOtps").doc(firebaseUid).get();
-    const verifiedAt = Number(otpVerification.data()?.verifiedAt || 0);
+    const otpVerification = await readEmailOtp(firebaseUid);
+    const verifiedAt = Number(otpVerification?.verifiedAt || 0);
     if (!verifiedAt || Date.now() - verifiedAt > 30 * 60 * 1e3) {
       return res.status(403).json({ error: "Google onboarding OTP verification is required." });
     }
-    await otpVerification.ref.delete();
+    await removeEmailOtp(firebaseUid);
   }
   const recoveredUsername = req.user.name || email?.split("@")[0] || `user${Date.now()}`;
   const cleanUsername = (username || recoveredUsername).trim().substring(0, 20);
@@ -3312,10 +3446,7 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
   }
   if (store.users[userId]) delete store.users[userId].seekingJoinedAt;
   if (store.users[opponentId]) delete store.users[opponentId].seekingJoinedAt;
-  if (db) {
-    db.collection("matchmaking").doc(userId).delete().catch((err) => console.error("Failed to delete matchmaking record from Firestore for user:", err));
-    db.collection("matchmaking").doc(opponentId).delete().catch((err) => console.error("Failed to delete matchmaking record from Firestore for opponent:", err));
-  }
+  void deleteSharedMatchmakingRecords(userId, opponentId).catch((error) => console.error("Failed to delete shared matchmaking records for matched users:", error));
   const matchedList = [user, oppUser];
   const finalCapacity = 2;
   const finalMode = "solo";
@@ -3368,11 +3499,7 @@ app.post("/api/rooms/matchmaking/leave", (req, res) => {
     }
     saveStore();
     broadcastToAll("matchmaker_seeking_cancelled", { senderId: userId });
-    if (db) {
-      db.collection("matchmaking").doc(userId).delete().catch((err) => {
-        console.error("Failed to delete matchmaking record from Firestore on leave:", err);
-      });
-    }
+    void deleteSharedMatchmakingRecords(userId).catch((error) => console.error("Failed to delete shared matchmaking record on leave:", error));
   }
   res.json({ success: true });
 });
@@ -3473,10 +3600,7 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== senderId && id !== receiverId);
   }
-  if (db) {
-    db.collection("matchmaking").doc(senderId).delete().catch((err) => console.error("Failed to delete sender from matchmaking on challenge:", err));
-    db.collection("matchmaking").doc(receiverId).delete().catch((err) => console.error("Failed to delete receiver from matchmaking on challenge:", err));
-  }
+  void deleteSharedMatchmakingRecords(senderId, receiverId).catch((error) => console.error("Failed to delete shared matchmaking records on challenge:", error));
   broadcastToAll("matchmaker_seeking_cancelled", { senderId });
   broadcastToAll("matchmaker_seeking_cancelled", { senderId: receiverId });
   saveStore();
@@ -3989,13 +4113,16 @@ var hasAnyPermission = (...required) => async (req, res, next) => {
   return res.status(403).json({ error: "You do not have permission for this action." });
 };
 app.post("/api/admin/cashier/heartbeat", hasPermission("cashier"), async (req, res) => {
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
   const adminId = String(req.query.userId || "");
-  const ref = db.collection("adminUsers").doc(adminId);
   const admin = req.adminUser;
   if (cashierCities(admin || {}).length === 0) return res.status(400).json({ error: "Cashier city is not configured." });
   const cashierOnlineAt = Date.now();
-  await ref.update({ cashierOnlineAt });
+  if (isMySqlRuntimePrimary()) {
+    await updateMySqlCashierHeartbeat(adminId, cashierOnlineAt);
+  } else {
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    await db.collection("adminUsers").doc(adminId).update({ cashierOnlineAt });
+  }
   const updatedAdmin = { ...admin, cashierOnlineAt };
   adminUsersCache.set(adminId, updatedAdmin);
   await reassignExpiredCashierRequests(cashierOnlineAt);
@@ -5717,6 +5844,8 @@ async function startServer() {
     }
     if (!migrationMode) {
       await startFirestoreLiveCaches();
+      await startMySqlMatchmakingSync();
+      await startMySqlCashierHeartbeatSync();
       console.log("Application state initialization completed.");
     } else {
       console.log("Migration mode active: Firestore live caches are paused to preserve quota.");
@@ -5751,6 +5880,8 @@ async function startServer() {
   process.on("SIGINT", () => {
     console.log("\nShutting down server...");
     firestoreLiveUnsubscribes.splice(0).forEach((unsubscribe) => unsubscribe());
+    if (mysqlMatchmakingTimer) clearInterval(mysqlMatchmakingTimer);
+    if (mysqlCashierHeartbeatTimer) clearInterval(mysqlCashierHeartbeatTimer);
     server.close(() => {
       console.log("Server shut down.");
       process.exit(0);
