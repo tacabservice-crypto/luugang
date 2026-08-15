@@ -24,6 +24,90 @@ export async function saveMySqlManualRequest(request: any) {
   );
 }
 
+export async function saveMySqlAgent(agent: any) {
+  const now = Date.now();
+  await getMySqlPool().execute(
+    `INSERT INTO agents (id, username, password_hash, phone, location, promo_code, commission_rate, balance, float_balance, business_model, status, created_at, updated_at, agent_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE username=VALUES(username), password_hash=VALUES(password_hash), phone=VALUES(phone), location=VALUES(location), promo_code=VALUES(promo_code), commission_rate=VALUES(commission_rate), balance=VALUES(balance), float_balance=VALUES(float_balance), business_model=VALUES(business_model), status=VALUES(status), updated_at=VALUES(updated_at), agent_json=VALUES(agent_json)`,
+    [agent.id, agent.username, agent.password || null, agent.phone || null, agent.location || null, agent.promoCode || null, Number(agent.commissionRate || 0), Number(agent.balance || 0), Number(agent.floatBalance || 0), agent.businessModel || 'independent', agent.status || 'Active', Number(agent.createdAt || now), now, JSON.stringify(agent)],
+  );
+}
+
+export async function saveMySqlAgentRequest(request: any) {
+  await getMySqlPool().execute(
+    `INSERT INTO agent_requests (id, agent_id, amount, status, created_at, resolved_at, request_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE amount=VALUES(amount), status=VALUES(status), resolved_at=VALUES(resolved_at), request_json=VALUES(request_json)`,
+    [request.id, request.agentId, Number(request.amount || 0), request.status || 'pending', Number(request.createdAt || Date.now()), request.resolvedAt || null, JSON.stringify(request)],
+  );
+}
+
+export async function adjustMySqlAgentFloat(args: { agentId: string; amount: number; transaction: any; player?: any }) {
+  const connection = await getMySqlPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute<any[]>('SELECT agent_json, float_balance FROM agents WHERE id = ? FOR UPDATE', [args.agentId]);
+    if (!rows.length) throw new Error('Agent not found.');
+    const agent = parseJson<any>(rows[0].agent_json);
+    const currentFloat = Number(rows[0].float_balance || 0);
+    const nextFloat = currentFloat + Number(args.amount);
+    if (nextFloat < 0) throw new Error(`Insufficient float balance. Current balance: $${currentFloat.toFixed(2)}.`);
+    agent.floatBalance = nextFloat;
+    agent.updatedAt = Date.now();
+    await connection.execute('UPDATE agents SET float_balance=?, agent_json=?, updated_at=? WHERE id=?', [nextFloat, JSON.stringify(agent), agent.updatedAt, agent.id]);
+    if (args.player) {
+      const [userRows] = await connection.execute<any[]>('SELECT profile_json, balance FROM app_users WHERE id=? FOR UPDATE', [args.player.id]);
+      if (!userRows.length) throw new Error('Player not found.');
+      const player = { ...parseJson<any>(userRows[0].profile_json), ...args.player };
+      player.balance = Number(userRows[0].balance || 0) + Math.abs(Number(args.amount));
+      await connection.execute('UPDATE app_users SET balance=?, profile_json=?, updated_at=?, version=version+1 WHERE id=?', [player.balance, JSON.stringify(player), Date.now(), player.id]);
+      args.player = player;
+    }
+    await connection.execute(
+      `INSERT INTO agent_transactions (id, agent_id, player_id, transaction_type, amount, discount_amount, created_at, transaction_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [args.transaction.id, agent.id, args.transaction.playerId || null, args.transaction.type, Number(args.transaction.amount || 0), Number(args.transaction.discountAmount || 0), Number(args.transaction.timestamp || Date.now()), JSON.stringify(args.transaction)],
+    );
+    await connection.commit();
+    return { agent, player: args.player };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally { connection.release(); }
+}
+
+export async function resolveMySqlAgentRequest(args: { request: any; admin: any; approved: boolean }) {
+  const connection = await getMySqlPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [requestRows] = await connection.execute<any[]>('SELECT request_json, status FROM agent_requests WHERE id=? FOR UPDATE', [args.request.id]);
+    if (!requestRows.length) throw new Error('Request not found.');
+    if (requestRows[0].status !== 'pending') throw new Error('This request has already been processed.');
+    const request = { ...parseJson<any>(requestRows[0].request_json), ...args.request };
+    request.status = args.approved ? 'approved' : 'rejected';
+    request.resolvedAt = Date.now();
+    request.resolvedBy = args.admin.id;
+    request.resolverUsername = args.admin.username || 'Unknown Admin';
+    let agent: any;
+    let transaction: any;
+    if (args.approved) {
+      const [agentRows] = await connection.execute<any[]>('SELECT agent_json, float_balance FROM agents WHERE id=? FOR UPDATE', [request.agentId]);
+      if (!agentRows.length) throw new Error('Agent associated with the request not found.');
+      agent = parseJson<any>(agentRows[0].agent_json);
+      agent.floatBalance = Number(agentRows[0].float_balance || 0) + Number(request.amount || 0);
+      agent.updatedAt = Date.now();
+      const discountAmount = Number((Number(request.amount || 0) * Math.max(0, Math.min(1, Number(agent.commissionRate || 0)))).toFixed(2));
+      transaction = { id: `agent_tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, agentId: agent.id, type: 'FloatPurchase', amount: Number(request.amount), discountAmount, timestamp: Date.now(), description: `Float request for $${Number(request.amount).toFixed(2)} approved; admin cash $${(Number(request.amount) - discountAmount).toFixed(2)}, agent commission $${discountAmount.toFixed(2)}. Request ID: ${request.id}` };
+      await connection.execute('UPDATE agents SET float_balance=?, agent_json=?, updated_at=? WHERE id=?', [agent.floatBalance, JSON.stringify(agent), agent.updatedAt, agent.id]);
+      await connection.execute(`INSERT INTO agent_transactions (id, agent_id, player_id, transaction_type, amount, discount_amount, created_at, transaction_json) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`, [transaction.id, agent.id, transaction.type, transaction.amount, discountAmount, transaction.timestamp, JSON.stringify(transaction)]);
+    }
+    await connection.execute('UPDATE agent_requests SET status=?, resolved_at=?, request_json=? WHERE id=?', [request.status, request.resolvedAt, JSON.stringify(request), request.id]);
+    await connection.commit();
+    return { request, agent, transaction };
+  } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
+}
+
 export async function loadMySqlPrimaryCaches() {
   const pool = getMySqlPool();
   const [admins, agents, requests, transactions, payments] = await Promise.all([

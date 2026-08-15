@@ -411,6 +411,93 @@ async function saveMySqlManualRequest(request) {
     [request.id, request.userId, request.agentId || null, request.managedBy || (request.agentId ? "agent" : "admin"), request.transactionType, Number(request.amount || 0), request.status || "pending", request.assignedCashierId || null, Number(request.createdAt || Date.now()), request.resolvedAt || null, JSON.stringify(request)]
   );
 }
+async function saveMySqlAgent(agent) {
+  const now2 = Date.now();
+  await getMySqlPool().execute(
+    `INSERT INTO agents (id, username, password_hash, phone, location, promo_code, commission_rate, balance, float_balance, business_model, status, created_at, updated_at, agent_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE username=VALUES(username), password_hash=VALUES(password_hash), phone=VALUES(phone), location=VALUES(location), promo_code=VALUES(promo_code), commission_rate=VALUES(commission_rate), balance=VALUES(balance), float_balance=VALUES(float_balance), business_model=VALUES(business_model), status=VALUES(status), updated_at=VALUES(updated_at), agent_json=VALUES(agent_json)`,
+    [agent.id, agent.username, agent.password || null, agent.phone || null, agent.location || null, agent.promoCode || null, Number(agent.commissionRate || 0), Number(agent.balance || 0), Number(agent.floatBalance || 0), agent.businessModel || "independent", agent.status || "Active", Number(agent.createdAt || now2), now2, JSON.stringify(agent)]
+  );
+}
+async function saveMySqlAgentRequest(request) {
+  await getMySqlPool().execute(
+    `INSERT INTO agent_requests (id, agent_id, amount, status, created_at, resolved_at, request_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE amount=VALUES(amount), status=VALUES(status), resolved_at=VALUES(resolved_at), request_json=VALUES(request_json)`,
+    [request.id, request.agentId, Number(request.amount || 0), request.status || "pending", Number(request.createdAt || Date.now()), request.resolvedAt || null, JSON.stringify(request)]
+  );
+}
+async function adjustMySqlAgentFloat(args) {
+  const connection = await getMySqlPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute("SELECT agent_json, float_balance FROM agents WHERE id = ? FOR UPDATE", [args.agentId]);
+    if (!rows.length) throw new Error("Agent not found.");
+    const agent = parseJson(rows[0].agent_json);
+    const currentFloat = Number(rows[0].float_balance || 0);
+    const nextFloat = currentFloat + Number(args.amount);
+    if (nextFloat < 0) throw new Error(`Insufficient float balance. Current balance: $${currentFloat.toFixed(2)}.`);
+    agent.floatBalance = nextFloat;
+    agent.updatedAt = Date.now();
+    await connection.execute("UPDATE agents SET float_balance=?, agent_json=?, updated_at=? WHERE id=?", [nextFloat, JSON.stringify(agent), agent.updatedAt, agent.id]);
+    if (args.player) {
+      const [userRows] = await connection.execute("SELECT profile_json, balance FROM app_users WHERE id=? FOR UPDATE", [args.player.id]);
+      if (!userRows.length) throw new Error("Player not found.");
+      const player = { ...parseJson(userRows[0].profile_json), ...args.player };
+      player.balance = Number(userRows[0].balance || 0) + Math.abs(Number(args.amount));
+      await connection.execute("UPDATE app_users SET balance=?, profile_json=?, updated_at=?, version=version+1 WHERE id=?", [player.balance, JSON.stringify(player), Date.now(), player.id]);
+      args.player = player;
+    }
+    await connection.execute(
+      `INSERT INTO agent_transactions (id, agent_id, player_id, transaction_type, amount, discount_amount, created_at, transaction_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [args.transaction.id, agent.id, args.transaction.playerId || null, args.transaction.type, Number(args.transaction.amount || 0), Number(args.transaction.discountAmount || 0), Number(args.transaction.timestamp || Date.now()), JSON.stringify(args.transaction)]
+    );
+    await connection.commit();
+    return { agent, player: args.player };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+async function resolveMySqlAgentRequest(args) {
+  const connection = await getMySqlPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [requestRows] = await connection.execute("SELECT request_json, status FROM agent_requests WHERE id=? FOR UPDATE", [args.request.id]);
+    if (!requestRows.length) throw new Error("Request not found.");
+    if (requestRows[0].status !== "pending") throw new Error("This request has already been processed.");
+    const request = { ...parseJson(requestRows[0].request_json), ...args.request };
+    request.status = args.approved ? "approved" : "rejected";
+    request.resolvedAt = Date.now();
+    request.resolvedBy = args.admin.id;
+    request.resolverUsername = args.admin.username || "Unknown Admin";
+    let agent;
+    let transaction;
+    if (args.approved) {
+      const [agentRows] = await connection.execute("SELECT agent_json, float_balance FROM agents WHERE id=? FOR UPDATE", [request.agentId]);
+      if (!agentRows.length) throw new Error("Agent associated with the request not found.");
+      agent = parseJson(agentRows[0].agent_json);
+      agent.floatBalance = Number(agentRows[0].float_balance || 0) + Number(request.amount || 0);
+      agent.updatedAt = Date.now();
+      const discountAmount = Number((Number(request.amount || 0) * Math.max(0, Math.min(1, Number(agent.commissionRate || 0)))).toFixed(2));
+      transaction = { id: `agent_tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, agentId: agent.id, type: "FloatPurchase", amount: Number(request.amount), discountAmount, timestamp: Date.now(), description: `Float request for $${Number(request.amount).toFixed(2)} approved; admin cash $${(Number(request.amount) - discountAmount).toFixed(2)}, agent commission $${discountAmount.toFixed(2)}. Request ID: ${request.id}` };
+      await connection.execute("UPDATE agents SET float_balance=?, agent_json=?, updated_at=? WHERE id=?", [agent.floatBalance, JSON.stringify(agent), agent.updatedAt, agent.id]);
+      await connection.execute(`INSERT INTO agent_transactions (id, agent_id, player_id, transaction_type, amount, discount_amount, created_at, transaction_json) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`, [transaction.id, agent.id, transaction.type, transaction.amount, discountAmount, transaction.timestamp, JSON.stringify(transaction)]);
+    }
+    await connection.execute("UPDATE agent_requests SET status=?, resolved_at=?, request_json=? WHERE id=?", [request.status, request.resolvedAt, JSON.stringify(request), request.id]);
+    await connection.commit();
+    return { request, agent, transaction };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
 async function loadMySqlPrimaryCaches() {
   const pool2 = getMySqlPool();
   const [admins, agents, requests, transactions, payments] = await Promise.all([
@@ -2721,15 +2808,22 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
       return res.status(503).json({ error: "The payment service is temporarily unavailable." });
     }
     try {
-      const agentDoc = await db.collection("agents").doc(assignedAgentId).get();
-      if (!agentDoc.exists) {
-        return res.status(404).json({ error: "The selected agent does not exist." });
+      if (isMySqlRuntimePrimary()) {
+        const selectedAgent = await cachedAgent(assignedAgentId);
+        if (!selectedAgent) return res.status(404).json({ error: "The selected agent does not exist." });
+        if (selectedAgent.status !== "Active") return res.status(400).json({ error: "The selected agent is not active." });
+        assignedAgentUsername = selectedAgent.username;
+      } else {
+        const agentDoc = await db.collection("agents").doc(assignedAgentId).get();
+        if (!agentDoc.exists) {
+          return res.status(404).json({ error: "The selected agent does not exist." });
+        }
+        const selectedAgent = agentDoc.data();
+        if (selectedAgent.status !== "Active") {
+          return res.status(400).json({ error: "The selected agent is not active." });
+        }
+        assignedAgentUsername = selectedAgent.username;
       }
-      const selectedAgent = agentDoc.data();
-      if (selectedAgent.status !== "Active") {
-        return res.status(400).json({ error: "The selected agent is not active." });
-      }
-      assignedAgentUsername = selectedAgent.username;
     } catch (err) {
       console.error("Failed to verify agent for manual transaction request:", err);
       return res.status(500).json({ error: "Could not verify the selected agent." });
@@ -3414,6 +3508,30 @@ app.post("/api/request-to-agent", authMiddleware, async (req, res) => {
     if (eligibilityError) return res.status(400).json({ error: eligibilityError });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      const selectedAgent2 = await cachedAgent(agentId);
+      if (!selectedAgent2) return res.status(404).json({ error: "The selected agent does not exist." });
+      if (selectedAgent2.status !== "Active") return res.status(400).json({ error: "The selected agent is not active." });
+      const newRequest2 = {
+        id: `req_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+        userId: player.id,
+        username: player.username,
+        agentId,
+        agentUsername: selectedAgent2.username,
+        managedBy: "agent",
+        amount: requestAmount,
+        phone: playerPhone,
+        provider,
+        transactionType: type === "withdrawal" ? "withdraw" : "deposit",
+        status: "pending",
+        createdAt: Date.now(),
+        ...type === "withdrawal" ? getWithdrawalQuote(player.id, requestAmount) : {}
+      };
+      store.pendingManualTransactions.unshift(newRequest2);
+      await saveManualRequestToFirestore(newRequest2);
+      await saveStoreAndWait();
+      return res.status(201).json({ success: true, message: "Your request has been sent to the agent.", request: newRequest2 });
+    }
     const agentDoc = await db.collection("agents").doc(agentId).get();
     if (!agentDoc.exists) {
       return res.status(404).json({ error: "The selected agent does not exist." });
@@ -5302,6 +5420,23 @@ app.post("/api/admin/agents/:agentId/credit", hasPermission("agents"), async (re
   }
   const safeDiscountAmount = creditAmount > 0 ? Math.max(0, discountAmount) : 0;
   try {
+    if (isMySqlRuntimePrimary()) {
+      const transactionData2 = {
+        id: `agent_tx_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+        agentId,
+        type: "FloatPurchase",
+        amount: creditAmount,
+        discountAmount: safeDiscountAmount,
+        timestamp: Date.now(),
+        description: creditAmount > 0 ? `Admin added $${creditAmount.toFixed(2)} to agent float with a $${safeDiscountAmount.toFixed(2)} commission discount.` : `Admin deducted $${Math.abs(creditAmount).toFixed(2)} from agent float as a balance correction.`
+      };
+      const result = await adjustMySqlAgentFloat({ agentId, amount: creditAmount, transaction: transactionData2 });
+      store.agents[agentId] = result.agent;
+      agentCache.set(agentId, result.agent);
+      agentTransactionsCache.set(transactionData2.id, transactionData2);
+      await saveStoreAndWait();
+      return res.json({ success: true, agent: result.agent, transaction: transactionData2 });
+    }
     const agentRef = db.collection("agents").doc(agentId);
     const transactionRef = db.collection("agentTransactions").doc();
     const transactionData = {
@@ -5353,6 +5488,20 @@ app.post("/api/admin/agent-requests/:requestId/approve", hasPermission("agents")
   const requestId = req.params.requestId;
   const adminId = req.query.userId;
   try {
+    if (isMySqlRuntimePrimary()) {
+      const request = agentRequestsCache.get(requestId);
+      if (!request) return res.status(404).json({ error: "Request not found." });
+      const admin = adminUsersCache.get(adminId) || { id: adminId, username: "Unknown Admin" };
+      const result = await resolveMySqlAgentRequest({ request, admin, approved: true });
+      agentRequestsCache.set(requestId, result.request);
+      if (result.agent) {
+        store.agents[result.agent.id] = result.agent;
+        agentCache.set(result.agent.id, result.agent);
+      }
+      if (result.transaction) agentTransactionsCache.set(result.transaction.id, result.transaction);
+      await saveStoreAndWait();
+      return res.json({ success: true, message: "Agent float request approved." });
+    }
     const requestRef = db.collection("agentRequests").doc(requestId);
     await db.runTransaction(async (t) => {
       const requestDoc = await t.get(requestRef);
@@ -5406,6 +5555,14 @@ app.post("/api/admin/agent-requests/:requestId/reject", hasPermission("agents"),
   const adminId = req.query.userId;
   try {
     const reqId = Array.isArray(requestId) ? requestId[0] : requestId;
+    if (isMySqlRuntimePrimary()) {
+      const request2 = agentRequestsCache.get(reqId);
+      if (!request2) return res.status(404).json({ error: "Request not found." });
+      const admin = adminUsersCache.get(adminId) || { id: adminId, username: "Unknown Admin" };
+      const result = await resolveMySqlAgentRequest({ request: request2, admin, approved: false });
+      agentRequestsCache.set(reqId, result.request);
+      return res.json({ success: true, message: "Agent float request rejected." });
+    }
     const requestRef = db.collection("agentRequests").doc(reqId);
     const requestDoc = await requestRef.get();
     if (!requestDoc.exists) {
@@ -5511,6 +5668,13 @@ app.post("/api/agent/login", async (req, res) => {
     return res.status(400).json({ error: "Username and password are required." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      const agent2 = [...agentCache.values()].find((item) => item.username === username) || Object.values(store.agents).find((item) => item.username === username);
+      if (!agent2 || agent2.password !== password) return res.status(401).json({ error: "Invalid credentials." });
+      if (agent2.status !== "Active") return res.status(403).json({ error: "This agent account is not active." });
+      const { password: _2, ...safeAgent2 } = agent2;
+      return res.json({ success: true, agent: safeAgent2 });
+    }
     const agentsRef = db.collection("agents");
     const snapshot = await agentsRef.where("username", "==", username).limit(1).get();
     if (snapshot.empty) {
@@ -5571,6 +5735,14 @@ app.put("/api/agent/location", isAgent, async (req, res) => {
     const result = await response.json();
     const location = formatGeocodedLocation(result.address);
     if (!location) return res.status(422).json({ error: "Could not identify a city for this location." });
+    if (isMySqlRuntimePrimary()) {
+      agent.location = location;
+      await saveMySqlAgent(agent);
+      store.agents[agent.id] = agent;
+      agentCache.set(agent.id, agent);
+      const { password: _2, ...safeAgent2 } = agent;
+      return res.json({ success: true, agent: safeAgent2 });
+    }
     await db.collection("agents").doc(agent.id).update({ location });
     const { password: _, ...safeAgent } = { ...agent, location };
     res.json({ success: true, agent: safeAgent });
@@ -5604,6 +5776,17 @@ app.put("/api/agent/profile", isAgent, async (req, res) => {
     }
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      if (username.toLowerCase() !== String(agent.username).toLowerCase() && [...agentCache.values()].some((item) => item.id !== agentId && item.username.toLowerCase() === username.toLowerCase())) {
+        return res.status(409).json({ error: "That agent username is already in use." });
+      }
+      Object.assign(agent, { username, phone, location }, newPassword ? { password: newPassword } : {});
+      await saveMySqlAgent(agent);
+      store.agents[agent.id] = agent;
+      agentCache.set(agent.id, agent);
+      const { password: _2, ...safeAgent2 } = agent;
+      return res.json({ success: true, agent: safeAgent2, message: "Profile updated successfully." });
+    }
     if (username.toLowerCase() !== String(agent.username).toLowerCase()) {
       const usernameSnapshot = await db.collection("agents").where("username", "==", username).get();
       if (usernameSnapshot.docs.some((doc) => doc.id !== agentId)) {
@@ -5658,6 +5841,19 @@ app.post("/api/agent/deposit", isAgent, async (req, res) => {
     return res.status(400).json({ error: "This player is linked to a different agent via promo code." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      const agentTx = { id: `agent_tx_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`, agentId: agent.id, type: "PlayerDeposit", amount: depositAmount, playerId, timestamp: Date.now(), description: `Deposited ${depositAmount} into ${player.username}'s account.` };
+      const result = await adjustMySqlAgentFloat({ agentId: agent.id, amount: -depositAmount, transaction: agentTx, player });
+      Object.assign(agent, result.agent);
+      Object.assign(player, result.player);
+      store.agents[agent.id] = agent;
+      agentCache.set(agent.id, agent);
+      agentTransactionsCache.set(agentTx.id, agentTx);
+      addTransaction(playerId, "deposit", depositAmount, void 0, `Deposit received from agent ${agent.id}.`);
+      await saveStoreAndWait();
+      broadcastUserUpdate(player.id);
+      return res.json({ success: true, newAgentBalance: agent.floatBalance, newPlayerBalance: player.balance });
+    }
     const agentRef = db.collection("agents").doc(agent.id);
     const agentTxRef = db.collection("agentTransactions").doc();
     await db.runTransaction(async (t) => {
@@ -5711,6 +5907,12 @@ app.post("/api/agent/request-float", isAgent, async (req, res) => {
     return res.status(400).json({ error: "A positive amount is required." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      const newRequest2 = { id: `agent_req_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`, agentId: agent.id, agentUsername: agent.username, amount: requestAmount, status: "pending", createdAt: Date.now() };
+      await saveMySqlAgentRequest(newRequest2);
+      agentRequestsCache.set(newRequest2.id, newRequest2);
+      return res.status(201).json({ success: true, message: "Your float request has been submitted for review.", request: newRequest2 });
+    }
     const requestRef = db.collection("agentRequests").doc();
     const newRequest = {
       id: requestRef.id,
