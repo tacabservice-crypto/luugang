@@ -389,6 +389,30 @@ async function deleteMySqlEmailOtp(subjectId) {
   await getMySqlPool().execute("DELETE FROM email_otp_challenges WHERE subject_id = ?", [subjectId]);
 }
 
+// src/server/mysql-primary-data.ts
+function parseJson(value) {
+  if (typeof value === "string") return JSON.parse(value);
+  return value;
+}
+async function loadMySqlPrimaryCaches() {
+  const pool2 = getMySqlPool();
+  const [admins, agents, requests, transactions, payments] = await Promise.all([
+    pool2.query("SELECT admin_json AS value_json FROM admin_users"),
+    pool2.query("SELECT agent_json AS value_json FROM agents"),
+    pool2.query("SELECT request_json AS value_json FROM agent_requests"),
+    pool2.query("SELECT transaction_json AS value_json FROM agent_transactions"),
+    pool2.query("SELECT payment_json AS value_json FROM cashier_payments")
+  ]);
+  const values = (result) => result[0].map((row) => parseJson(row.value_json));
+  return {
+    admins: values(admins),
+    agents: values(agents),
+    requests: values(requests),
+    transactions: values(transactions),
+    payments: values(payments)
+  };
+}
+
 // server.ts
 import { getAuth } from "firebase-admin/auth";
 dotenv.config();
@@ -575,7 +599,11 @@ async function findAgentDocsByPromoCode(agentsRef, promoCode) {
 }
 async function resolveActiveAgentByPromoCode(promoCode) {
   const normalizedPromoCode = normalizePromoCode(promoCode);
-  if (!normalizedPromoCode || !db) return null;
+  if (!normalizedPromoCode) return null;
+  if (isMySqlRuntimePrimary()) {
+    return Object.values(store.agents).find((agent2) => normalizePromoCode(agent2.promoCode) === normalizedPromoCode && agent2.status === "Active") || null;
+  }
+  if (!db) return null;
   const matchingAgentDocs = await findAgentDocsByPromoCode(db.collection("agents"), normalizedPromoCode);
   if (!matchingAgentDocs.length) return null;
   const agentDoc = matchingAgentDocs[0];
@@ -826,6 +854,7 @@ function removeUserFromMatchmakingQueues(userId) {
   if (store.users[userId]) delete store.users[userId].seekingJoinedAt;
 }
 async function startFirestoreLiveCaches() {
+  if (isMySqlRuntimePrimary()) return;
   if (!db || firestoreLiveUnsubscribes.length) return;
   const watch = (collectionName, cache, onChange) => new Promise((resolve) => {
     let initialized = false;
@@ -881,9 +910,36 @@ async function startFirestoreLiveCaches() {
   await Promise.all(watchers);
   console.log(`Firestore live caches initialized for admins and agents${isMySqlRuntimePrimary() ? "; matchmaking uses MySQL" : " and matchmaking"}.`);
 }
+var mySqlPrimaryCacheTimer = null;
+async function refreshMySqlPrimaryCaches() {
+  if (!isMySqlRuntimePrimary()) return;
+  const data = await loadMySqlPrimaryCaches();
+  adminUsersCache.clear();
+  data.admins.forEach((admin) => adminUsersCache.set(admin.id, admin));
+  agentCache.clear();
+  data.agents.forEach((agent) => {
+    agentCache.set(agent.id, agent);
+    store.agents[agent.id] = agent;
+  });
+  agentRequestsCache.clear();
+  data.requests.forEach((request) => agentRequestsCache.set(request.id, request));
+  agentTransactionsCache.clear();
+  data.transactions.forEach((transaction) => agentTransactionsCache.set(transaction.id, transaction));
+  cashierPaymentsCache.clear();
+  data.payments.forEach((payment) => cashierPaymentsCache.set(payment.id, payment));
+}
+async function startMySqlPrimaryCaches() {
+  if (!isMySqlRuntimePrimary() || mySqlPrimaryCacheTimer) return;
+  await refreshMySqlPrimaryCaches();
+  mySqlPrimaryCacheTimer = setInterval(() => {
+    void refreshMySqlPrimaryCaches().catch((error) => console.error("MySQL primary cache refresh failed:", error));
+  }, 15e3);
+  mySqlPrimaryCacheTimer.unref?.();
+  console.log("MySQL primary caches initialized; Firestore live listeners are disabled.");
+}
 async function cachedAdminUser(adminId) {
   const cached = adminUsersCache.get(adminId);
-  if (cached || !db) return cached;
+  if (cached || !db || isMySqlRuntimePrimary()) return cached;
   const snapshot = await db.collection("adminUsers").doc(adminId).get();
   if (!snapshot.exists) return void 0;
   const admin = { id: snapshot.id, ...snapshot.data() };
@@ -892,7 +948,7 @@ async function cachedAdminUser(adminId) {
 }
 async function cachedAgent(agentId) {
   const cached = agentCache.get(agentId) || store.agents[agentId];
-  if (cached || !db) return cached;
+  if (cached || !db || isMySqlRuntimePrimary()) return cached;
   const snapshot = await db.collection("agents").doc(agentId).get();
   if (!snapshot.exists) return void 0;
   const agent = { id: snapshot.id, ...snapshot.data() };
@@ -1089,7 +1145,7 @@ function serializeUserProfile(user) {
 }
 var isMySqlRuntimePrimary = () => mysqlRuntimeStoreMode() === "primary";
 async function loadUserProfilesFromFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   const snapshot = await db.collection("users").get();
   snapshot.forEach((userDoc) => {
     const profile = userDoc.data();
@@ -1100,7 +1156,7 @@ async function loadUserProfilesFromFirestore() {
   });
 }
 async function syncUserProfilesToFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   const users = Object.values(store.users).filter((user) => {
     if (user.id.startsWith("user_sim_") || user.id.startsWith("bot_")) return false;
     const documentId = user.firebaseUid || user.id;
@@ -1124,18 +1180,19 @@ function queueUserProfileSync() {
   return userProfileSyncQueue;
 }
 async function saveUserProfileToFirestore(user) {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   const documentId = user.firebaseUid || user.id;
   const cleanProfile = JSON.parse(JSON.stringify(user));
   await db.collection("users").doc(documentId).set(cleanProfile, { merge: true });
   persistedUserProfiles.set(documentId, serializeUserProfile(user));
 }
 async function saveManualRequestToFirestore(request) {
+  if (isMySqlRuntimePrimary()) return;
   if (!db) throw new Error("Database not initialized");
   await db.collection("manualTransactionRequests").doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
 }
 async function loadManualRequestsFromFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   const snapshot = await db.collection("manualTransactionRequests").get();
   const requests = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   const merged = new Map(store.pendingManualTransactions.map((request) => [request.id, request]));
@@ -1144,7 +1201,7 @@ async function loadManualRequestsFromFirestore() {
 }
 async function findManualRequest(requestId) {
   const localRequest = store.pendingManualTransactions.find((request2) => request2.id === requestId);
-  if (localRequest || !db) return localRequest;
+  if (localRequest || !db || isMySqlRuntimePrimary()) return localRequest;
   const document = await db.collection("manualTransactionRequests").doc(requestId).get();
   if (!document.exists) return void 0;
   const request = { id: document.id, ...document.data() };
@@ -1224,6 +1281,9 @@ var cashierAssignmentTimer = setInterval(() => {
 }, 15 * 1e3);
 cashierAssignmentTimer.unref?.();
 async function findUserProfileInFirestore(firebaseUid, email) {
+  if (isMySqlRuntimePrimary()) {
+    return Object.values(store.users).find((user) => user.firebaseUid === firebaseUid || Boolean(email && user.email?.trim().toLowerCase() === email.trim().toLowerCase())) || null;
+  }
   if (!db) return null;
   const uidDoc = await db.collection("users").doc(firebaseUid).get();
   if (uidDoc.exists) {
@@ -1242,6 +1302,7 @@ async function findUserProfileInFirestore(firebaseUid, email) {
   return null;
 }
 async function refreshUserProfileById(userId) {
+  if (isMySqlRuntimePrimary()) return store.users[userId] || null;
   if (!db) return store.users[userId] || null;
   const knownUser = store.users[userId];
   if (knownUser?.firebaseUid) {
@@ -5844,6 +5905,7 @@ async function startServer() {
     }
     if (!migrationMode) {
       await startFirestoreLiveCaches();
+      await startMySqlPrimaryCaches();
       await startMySqlMatchmakingSync();
       await startMySqlCashierHeartbeatSync();
       console.log("Application state initialization completed.");

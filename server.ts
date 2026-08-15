@@ -46,6 +46,7 @@ import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
+import { loadMySqlPrimaryCaches } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -294,7 +295,12 @@ async function findAgentDocsByPromoCode(agentsRef: FirebaseFirestore.CollectionR
 
 async function resolveActiveAgentByPromoCode(promoCode: unknown): Promise<Agent | null> {
   const normalizedPromoCode = normalizePromoCode(promoCode);
-  if (!normalizedPromoCode || !db) return null;
+  if (!normalizedPromoCode) return null;
+  if (isMySqlRuntimePrimary()) {
+    return Object.values(store.agents).find(agent =>
+      normalizePromoCode(agent.promoCode) === normalizedPromoCode && agent.status === 'Active') || null;
+  }
+  if (!db) return null;
   const matchingAgentDocs = await findAgentDocsByPromoCode(db.collection('agents'), normalizedPromoCode);
   if (!matchingAgentDocs.length) return null;
   const agentDoc = matchingAgentDocs[0];
@@ -653,6 +659,7 @@ function removeUserFromMatchmakingQueues(userId: string) {
 }
 
 async function startFirestoreLiveCaches() {
+  if (isMySqlRuntimePrimary()) return;
   if (!db || firestoreLiveUnsubscribes.length) return;
   const watch = <T>(collectionName: string, cache: Map<string, T>, onChange?: (id: string, value: T | null) => void) => new Promise<void>((resolve) => {
     let initialized = false;
@@ -704,9 +711,35 @@ async function startFirestoreLiveCaches() {
   console.log(`Firestore live caches initialized for admins and agents${isMySqlRuntimePrimary() ? '; matchmaking uses MySQL' : ' and matchmaking'}.`);
 }
 
+let mySqlPrimaryCacheTimer: NodeJS.Timeout | null = null;
+async function refreshMySqlPrimaryCaches() {
+  if (!isMySqlRuntimePrimary()) return;
+  const data = await loadMySqlPrimaryCaches();
+  adminUsersCache.clear();
+  data.admins.forEach(admin => adminUsersCache.set(admin.id, admin));
+  agentCache.clear();
+  data.agents.forEach(agent => { agentCache.set(agent.id, agent); store.agents[agent.id] = agent; });
+  agentRequestsCache.clear();
+  data.requests.forEach(request => agentRequestsCache.set(request.id, request));
+  agentTransactionsCache.clear();
+  data.transactions.forEach(transaction => agentTransactionsCache.set(transaction.id, transaction));
+  cashierPaymentsCache.clear();
+  data.payments.forEach(payment => cashierPaymentsCache.set(payment.id, payment));
+}
+
+async function startMySqlPrimaryCaches() {
+  if (!isMySqlRuntimePrimary() || mySqlPrimaryCacheTimer) return;
+  await refreshMySqlPrimaryCaches();
+  mySqlPrimaryCacheTimer = setInterval(() => {
+    void refreshMySqlPrimaryCaches().catch(error => console.error('MySQL primary cache refresh failed:', error));
+  }, 15_000);
+  mySqlPrimaryCacheTimer.unref?.();
+  console.log('MySQL primary caches initialized; Firestore live listeners are disabled.');
+}
+
 async function cachedAdminUser(adminId: string) {
   const cached = adminUsersCache.get(adminId);
-  if (cached || !db) return cached;
+  if (cached || !db || isMySqlRuntimePrimary()) return cached;
   const snapshot = await db.collection('adminUsers').doc(adminId).get();
   if (!snapshot.exists) return undefined;
   const admin = { id: snapshot.id, ...snapshot.data() } as AdminUser;
@@ -716,7 +749,7 @@ async function cachedAdminUser(adminId: string) {
 
 async function cachedAgent(agentId: string) {
   const cached = agentCache.get(agentId) || store.agents[agentId];
-  if (cached || !db) return cached;
+  if (cached || !db || isMySqlRuntimePrimary()) return cached;
   const snapshot = await db.collection('agents').doc(agentId).get();
   if (!snapshot.exists) return undefined;
   const agent = { id: snapshot.id, ...snapshot.data() } as Agent;
@@ -926,7 +959,7 @@ function serializeUserProfile(user: UserProfile) {
 const isMySqlRuntimePrimary = () => mysqlRuntimeStoreMode() === 'primary';
 
 async function loadUserProfilesFromFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
 
   const snapshot = await db.collection('users').get();
   snapshot.forEach((userDoc) => {
@@ -939,7 +972,7 @@ async function loadUserProfilesFromFirestore() {
 }
 
 async function syncUserProfilesToFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
 
   const users = Object.values(store.users).filter((user) => {
     if (user.id.startsWith('user_sim_') || user.id.startsWith('bot_')) return false;
@@ -969,7 +1002,7 @@ function queueUserProfileSync() {
 }
 
 async function saveUserProfileToFirestore(user: UserProfile) {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   const documentId = user.firebaseUid || user.id;
   const cleanProfile = JSON.parse(JSON.stringify(user));
   await db.collection('users').doc(documentId).set(cleanProfile, { merge: true });
@@ -977,12 +1010,13 @@ async function saveUserProfileToFirestore(user: UserProfile) {
 }
 
 async function saveManualRequestToFirestore(request: ManualTransactionRequest) {
+  if (isMySqlRuntimePrimary()) return;
   if (!db) throw new Error('Database not initialized');
   await db.collection('manualTransactionRequests').doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
 }
 
 async function loadManualRequestsFromFirestore() {
-  if (!db) return;
+  if (!db || isMySqlRuntimePrimary()) return;
   const snapshot = await db.collection('manualTransactionRequests').get();
   const requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ManualTransactionRequest));
   const merged = new Map(store.pendingManualTransactions.map(request => [request.id, request]));
@@ -992,7 +1026,7 @@ async function loadManualRequestsFromFirestore() {
 
 async function findManualRequest(requestId: string) {
   const localRequest = store.pendingManualTransactions.find(request => request.id === requestId);
-  if (localRequest || !db) return localRequest;
+  if (localRequest || !db || isMySqlRuntimePrimary()) return localRequest;
   const document = await db.collection('manualTransactionRequests').doc(requestId).get();
   if (!document.exists) return undefined;
   const request = { id: document.id, ...document.data() } as ManualTransactionRequest;
@@ -1090,6 +1124,10 @@ const cashierAssignmentTimer = setInterval(() => {
 cashierAssignmentTimer.unref?.();
 
 async function findUserProfileInFirestore(firebaseUid: string, email?: string) {
+  if (isMySqlRuntimePrimary()) {
+    return Object.values(store.users).find(user => user.firebaseUid === firebaseUid
+      || Boolean(email && user.email?.trim().toLowerCase() === email.trim().toLowerCase())) || null;
+  }
   if (!db) return null;
 
   const uidDoc = await db.collection('users').doc(firebaseUid).get();
@@ -1119,6 +1157,7 @@ async function findUserProfileInFirestore(firebaseUid: string, email?: string) {
 }
 
 async function refreshUserProfileById(userId: string): Promise<UserProfile | null> {
+  if (isMySqlRuntimePrimary()) return store.users[userId] || null;
   if (!db) return store.users[userId] || null;
   const knownUser = store.users[userId];
   if (knownUser?.firebaseUid) {
@@ -7074,6 +7113,7 @@ async function startServer() {
     }
     if (!migrationMode) {
       await startFirestoreLiveCaches();
+      await startMySqlPrimaryCaches();
       await startMySqlMatchmakingSync();
       await startMySqlCashierHeartbeatSync();
       console.log('Application state initialization completed.');
