@@ -441,6 +441,30 @@ async function saveMySqlAgent(agent) {
     [agent.id, agent.username, agent.password || null, agent.phone || null, agent.location || null, agent.promoCode || null, Number(agent.commissionRate || 0), Number(agent.balance || 0), Number(agent.floatBalance || 0), agent.businessModel || "independent", agent.status || "Active", Number(agent.createdAt || now2), now2, JSON.stringify(agent)]
   );
 }
+async function deleteMySqlAgent(agentId) {
+  await getMySqlPool().execute("DELETE FROM agents WHERE id=?", [agentId]);
+}
+async function saveMySqlAdmin(admin) {
+  const now2 = Date.now();
+  await getMySqlPool().execute(
+    `INSERT INTO admin_users (id, username, password_hash, name, permissions_json, status, location, cashier_locations_json, cashier_online_at, admin_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE username=VALUES(username), password_hash=VALUES(password_hash), name=VALUES(name), permissions_json=VALUES(permissions_json), status=VALUES(status), location=VALUES(location), cashier_locations_json=VALUES(cashier_locations_json), cashier_online_at=VALUES(cashier_online_at), admin_json=VALUES(admin_json), updated_at=VALUES(updated_at)`,
+    [admin.id, admin.username, admin.password || null, admin.name || null, JSON.stringify(admin.permissions || []), admin.status || "active", admin.location || null, JSON.stringify(admin.cashierLocations || []), admin.cashierOnlineAt || null, JSON.stringify(admin), Number(admin.createdAt || now2), now2]
+  );
+}
+async function deleteMySqlAdmin(adminId) {
+  await getMySqlPool().execute("DELETE FROM admin_users WHERE id=?", [adminId]);
+}
+async function saveMySqlCashierPayment(payment) {
+  const id = `${payment.cashierId}_${payment.period}`;
+  await getMySqlPool().execute(
+    `INSERT INTO cashier_payments (id, cashier_id, period_key, salary, bonus, total, paid_at, paid_by, payment_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, payment.cashierId, payment.period, Number(payment.salary || 0), Number(payment.bonus || 0), Number(payment.total || 0), Number(payment.paidAt), payment.paidBy, JSON.stringify({ ...payment, id })]
+  );
+  return { ...payment, id };
+}
 async function saveMySqlAgentRequest(request) {
   await getMySqlPool().execute(
     `INSERT INTO agent_requests (id, agent_id, amount, status, created_at, resolved_at, request_json)
@@ -4326,6 +4350,19 @@ app.post("/api/admin/login", async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   const { username, password } = req.body;
   try {
+    if (isMySqlRuntimePrimary()) {
+      let adminUser2 = [...adminUsersCache.values()].find((admin) => admin.username === username);
+      if (!adminUser2 && adminUsersCache.size === 0) {
+        adminUser2 = { id: `admin_${Date.now()}`, username, password, permissions: ["all"], status: "active" };
+        await saveMySqlAdmin(adminUser2);
+        adminUsersCache.set(adminUser2.id, adminUser2);
+      }
+      if (!adminUser2 || adminUser2.password !== password) return res.status(401).json({ success: false, error: "Invalid admin credentials." });
+      if (adminUser2.status === "suspended") return res.status(403).json({ error: "Access denied. This admin account is suspended." });
+      adminUser2.permissions = normalizeAdminPermissions(adminUser2.permissions);
+      const { password: _, ...userToReturn } = adminUser2;
+      return res.json({ success: true, user: userToReturn });
+    }
     const adminUsersRef = db.collection("adminUsers");
     const allAdminsSnapshot = await adminUsersRef.limit(1).get();
     if (allAdminsSnapshot.empty) {
@@ -4425,6 +4462,14 @@ app.post("/api/admin/admins/create", hasPermission("all"), async (req, res) => {
     return res.status(400).json({ error: "Username, password, and a list of permissions are required." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      if ([...adminUsersCache.values()].some((admin) => admin.username === username)) return res.status(409).json({ error: "An admin with this username already exists." });
+      const newAdmin2 = { id: `admin_${Date.now()}`, username, password, permissions: normalizeAdminPermissions(permissions), status: "active" };
+      await saveMySqlAdmin(newAdmin2);
+      adminUsersCache.set(newAdmin2.id, newAdmin2);
+      const { password: _2, ...userToReturn2 } = newAdmin2;
+      return res.status(201).json({ success: true, user: userToReturn2 });
+    }
     const adminUsersRef = db.collection("adminUsers");
     const existingAdmin = await adminUsersRef.where("username", "==", username).get();
     if (!existingAdmin.empty) {
@@ -4629,6 +4674,13 @@ app.post("/api/admin/vip-tiers", hasPermission("settings"), saveVipTiersFromAdmi
 app.get("/api/admin/settings", hasPermission("settings"), async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   try {
+    if (isMySqlRuntimePrimary()) {
+      const roles2 = [...adminUsersCache.values()].map((admin) => {
+        const { password, ...role } = admin;
+        return { ...role, permissions: normalizeAdminPermissions(admin.permissions), status: admin.status === "suspended" ? "suspended" : "active" };
+      });
+      return res.json({ username: store.adminSettings?.username || process.env.ADMIN_USERNAME || "admin", passwordConfigured: Boolean(store.adminSettings?.password), roles: roles2, vipTiers: store.vipTiers, adSettings: store.adSettings, adCampaigns: store.adCampaigns || [], otpEnabled: isOtpEnabled(), phoneAuthEnabled: isPhoneAuthEnabled() });
+    }
     const adminUsersSnapshot = await db.collection("adminUsers").get();
     const roles = await Promise.all(adminUsersSnapshot.docs.map(async (doc) => {
       const data = doc.data();
@@ -4684,6 +4736,15 @@ app.post("/api/admin/settings", isAdmin, async (req, res) => {
     return res.status(400).json({ error: "Password must be at least 6 characters long." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      const adminUser2 = adminUsersCache.get(adminId);
+      if (!adminUser2) return res.status(404).json({ error: "Admin user not found." });
+      if (adminUser2.password !== currentPassword) return res.status(400).json({ error: "Current password is incorrect." });
+      adminUser2.password = newPassword;
+      await saveMySqlAdmin(adminUser2);
+      adminUsersCache.set(adminId, adminUser2);
+      return res.json({ success: true, message: "Password updated successfully." });
+    }
     const adminRef = db.collection("adminUsers").doc(adminId);
     const adminDoc = await adminRef.get();
     if (!adminDoc.exists) {
@@ -4720,6 +4781,14 @@ app.post("/api/admin/roles/create", hasPermission("all"), async (req, res) => {
     return res.status(400).json({ error: "Cashier location/city is required." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      if ([...adminUsersCache.values()].some((admin) => admin.username.toLowerCase() === String(username).trim().toLowerCase())) return res.status(409).json({ error: "An admin with this username already exists." });
+      const newAdmin2 = { id: `admin_${Date.now()}`, username: String(username).trim(), password, permissions: normalizedPermissions, name: String(name).trim(), status: "active", location: normalizedPermissions.includes("cashier") ? submittedCashierLocations[0] : "", cashierLocations: normalizedPermissions.includes("cashier") ? submittedCashierLocations : [], cashierMonthlySalary: normalizedPermissions.includes("cashier") ? Math.max(0, Number(cashierMonthlySalary || 0)) : 0, cashierMonthlyTarget: normalizedPermissions.includes("cashier") ? Math.max(0, Math.floor(Number(cashierMonthlyTarget || 0))) : 0, cashierTargetBonus: normalizedPermissions.includes("cashier") ? Math.max(0, Number(cashierTargetBonus || 0)) : 0, cashierNextSalaryDate: normalizedPermissions.includes("cashier") ? Date.now() + 30 * 24 * 60 * 60 * 1e3 : void 0 };
+      await saveMySqlAdmin(newAdmin2);
+      adminUsersCache.set(newAdmin2.id, newAdmin2);
+      const { password: _2, ...userToReturn2 } = newAdmin2;
+      return res.status(201).json({ success: true, user: userToReturn2 });
+    }
     const adminUsersRef = db.collection("adminUsers");
     const existingAdmin = await adminUsersRef.where("username", "==", username).get();
     if (!existingAdmin.empty) {
@@ -4757,12 +4826,10 @@ app.post("/api/admin/roles/:roleId/update", hasPermission("all"), async (req, re
     return res.status(400).json({ error: "Role ID is required." });
   }
   try {
-    const adminRef = db.collection("adminUsers").doc(roleId);
-    const doc = await adminRef.get();
-    if (!doc.exists) {
-      return res.status(404).json({ error: "Admin role not found." });
-    }
-    const adminData = doc.data();
+    const adminRef = isMySqlRuntimePrimary() ? null : db.collection("adminUsers").doc(roleId);
+    const doc = adminRef ? await adminRef.get() : null;
+    const adminData = isMySqlRuntimePrimary() ? adminUsersCache.get(roleId) : doc?.data();
+    if (!adminData) return res.status(404).json({ error: "Admin role not found." });
     const targetUsername = String(adminData.username || "").toLowerCase();
     const targetName = String(adminData.name || "").toLowerCase();
     const isFullAdminTarget = adminData.permissions?.includes("all") || targetUsername === "admin" || targetName.includes("super admin") || targetName.includes("full admin");
@@ -4801,9 +4868,13 @@ app.post("/api/admin/roles/:roleId/update", hasPermission("all"), async (req, re
     }
     if (updatedData.name !== void 0) updatedData.name = String(updatedData.name).trim();
     if (updatedData.username !== void 0) updatedData.username = String(updatedData.username).trim();
-    await adminRef.update(updatedData);
-    const updatedDoc = await adminRef.get();
-    const { password, ...returnData } = updatedDoc.data();
+    const updatedAdmin = { ...adminData, ...updatedData };
+    if (isMySqlRuntimePrimary()) {
+      await saveMySqlAdmin(updatedAdmin);
+      adminUsersCache.set(roleId, updatedAdmin);
+    } else await adminRef.update(updatedData);
+    const finalAdmin = isMySqlRuntimePrimary() ? updatedAdmin : (await adminRef.get()).data();
+    const { password, ...returnData } = finalAdmin;
     res.json({ success: true, role: returnData });
   } catch (error) {
     console.error("Failed to update admin role:", error);
@@ -4817,12 +4888,10 @@ app.delete("/api/admin/roles/:roleId/delete", hasPermission("all"), async (req, 
     return res.status(400).json({ error: "Admin user ID is required." });
   }
   try {
-    const adminRef = db.collection("adminUsers").doc(roleId);
-    const doc = await adminRef.get();
-    if (!doc.exists) {
-      return res.status(404).json({ error: "Admin user not found." });
-    }
-    const adminData = doc.data();
+    const adminRef = isMySqlRuntimePrimary() ? null : db.collection("adminUsers").doc(roleId);
+    const doc = adminRef ? await adminRef.get() : null;
+    const adminData = isMySqlRuntimePrimary() ? adminUsersCache.get(roleId) : doc?.data();
+    if (!adminData) return res.status(404).json({ error: "Admin user not found." });
     const targetUsername = String(adminData.username || "").toLowerCase();
     const targetName = String(adminData.name || "").toLowerCase();
     const isFullAdminTarget = adminData.permissions?.includes("all") || targetUsername === "admin" || targetName.includes("super admin") || targetName.includes("full admin");
@@ -4835,7 +4904,10 @@ app.delete("/api/admin/roles/:roleId/delete", hasPermission("all"), async (req, 
         return res.status(400).json({ error: "Cannot delete the last super administrator." });
       }
     }
-    await adminRef.delete();
+    if (isMySqlRuntimePrimary()) {
+      await deleteMySqlAdmin(roleId);
+      adminUsersCache.delete(roleId);
+    } else await adminRef.delete();
     res.json({ success: true, message: "Admin user deleted successfully." });
   } catch (error) {
     console.error("Failed to delete admin user:", error);
@@ -5054,6 +5126,22 @@ app.post("/api/admin/cashiers/:cashierId/pay", hasPermission("settings"), async 
   const cashierRef = db.collection("adminUsers").doc(cashierId);
   const paymentRef = db.collection("cashierPayments").doc(`${cashierId}_${period.key}`);
   try {
+    if (isMySqlRuntimePrimary()) {
+      const cashier = adminUsersCache.get(cashierId);
+      if (!cashier) throw new Error("Cashier not found.");
+      if (!normalizeAdminPermissions(cashier.permissions).includes("cashier")) throw new Error("Selected account is not a cashier.");
+      if ([...cashierPaymentsCache.values()].some((payment2) => payment2.cashierId === cashierId && payment2.period === period.key)) throw new Error("This cashier has already been paid for the current period.");
+      const approved = store.pendingManualTransactions.filter((request) => request.managedBy !== "agent" && request.resolvedBy === cashierId && request.status === "approved" && request.createdAt >= period.start && request.createdAt < period.end).length;
+      const target = Math.max(0, Number(cashier.cashierMonthlyTarget || 0));
+      const salary = Math.max(0, Number(cashier.cashierMonthlySalary || 0));
+      const bonus = target > 0 && approved >= target ? Math.max(0, Number(cashier.cashierTargetBonus || 0)) : 0;
+      const payment = await saveMySqlCashierPayment({ cashierId, cashierName: cashier.name || cashier.username, period: period.key, salary, bonus, total: Number((salary + bonus).toFixed(2)), approvedCount: approved, paidAt: Date.now(), paidBy: adminId });
+      cashier.cashierNextSalaryDate = period.end;
+      await saveMySqlAdmin(cashier);
+      adminUsersCache.set(cashierId, cashier);
+      cashierPaymentsCache.set(payment.id, payment);
+      return res.json({ success: true, payment });
+    }
     const result = await db.runTransaction(async (transaction) => {
       const [cashierDoc, paymentDoc] = await Promise.all([transaction.get(cashierRef), transaction.get(paymentRef)]);
       if (!cashierDoc.exists) throw new Error("Cashier not found.");
@@ -5286,6 +5374,17 @@ app.post("/api/admin/agents/create", hasPermission("agents"), async (req, res) =
     return res.status(400).json({ error: "Commission rate must be a number between 0 and 1." });
   }
   try {
+    if (isMySqlRuntimePrimary()) {
+      if (Object.values(store.agents).some((agent) => agent.username.toLowerCase() === username.toLowerCase())) return res.status(409).json({ error: "Agent with this username already exists." });
+      if (Object.values(store.agents).some((agent) => normalizePromoCode(agent.promoCode) === normalizedPromoCode)) return res.status(400).json({ error: "Promo code is already in use." });
+      const agentId2 = `agent_${Date.now()}`;
+      const newAgent2 = { id: agentId2, username, password, phone, location, commissionRate: rate, promoCode: normalizedPromoCode, balance: 0, floatBalance: 0, status: "Active", createdAt: Date.now(), businessModel: businessModel === "monthly" ? "monthly" : "independent", monthlySalary: businessModel === "monthly" ? Math.max(0, Number(monthlySalary || 0)) : 0, monthlyTarget: businessModel === "monthly" ? Math.max(0, Number(monthlyTarget || 0)) : 0, dailyTransactionLimit: businessModel === "monthly" ? Math.max(0, Number(dailyTransactionLimit || 0)) : 0, salaryStatus: businessModel === "monthly" ? "current" : void 0, nextSalaryDate: businessModel === "monthly" ? Date.now() + 30 * 24 * 60 * 60 * 1e3 : void 0 };
+      await saveMySqlAgent(newAgent2);
+      store.agents[agentId2] = newAgent2;
+      agentCache.set(agentId2, newAgent2);
+      await saveStoreAndWait();
+      return res.status(201).json(newAgent2);
+    }
     const agentsRef = db.collection("agents");
     const existingAgentSnapshot = await agentsRef.where("username", "==", username).get();
     if (!existingAgentSnapshot.empty) {
@@ -5328,12 +5427,10 @@ app.post("/api/admin/agents/:agentId/update", hasPermission("agents"), async (re
   const agentId = req.params.agentId;
   const { username, password, commissionRate, status, location, phone, promoCode, businessModel, monthlySalary, monthlyTarget, dailyTransactionLimit, salaryStatus, nextSalaryDate } = req.body;
   try {
-    const agentRef = db.collection("agents").doc(agentId);
-    const agentDoc = await agentRef.get();
-    if (!agentDoc.exists) {
-      return res.status(404).json({ error: "Agent not found." });
-    }
-    const agentData = agentDoc.data();
+    const agentRef = isMySqlRuntimePrimary() ? null : db.collection("agents").doc(agentId);
+    const agentDoc = agentRef ? await agentRef.get() : null;
+    const agentData = isMySqlRuntimePrimary() ? store.agents[agentId] : agentDoc?.data();
+    if (!agentData) return res.status(404).json({ error: "Agent not found." });
     const targetUsername = String(agentData.username || "").toLowerCase();
     const targetRole = String(agentData.role || "").toLowerCase();
     const isFullAdminAgent = targetUsername === "admin" || targetUsername === "superadmin" || targetRole.includes("admin") || targetRole.includes("super");
@@ -5394,9 +5491,14 @@ app.post("/api/admin/agents/:agentId/update", hasPermission("agents"), async (re
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ error: "No valid fields to update." });
     }
-    await agentRef.update(updateData);
-    const updatedAgentDoc = await agentRef.get();
-    res.json({ success: true, agent: updatedAgentDoc.data() });
+    const updatedAgent = { ...agentData, ...updateData };
+    if (isMySqlRuntimePrimary()) {
+      await saveMySqlAgent(updatedAgent);
+      store.agents[agentId] = updatedAgent;
+      agentCache.set(agentId, updatedAgent);
+      await saveStoreAndWait();
+    } else await agentRef.update(updateData);
+    res.json({ success: true, agent: isMySqlRuntimePrimary() ? updatedAgent : (await agentRef.get()).data() });
   } catch (error) {
     console.error(`Failed to update agent ${agentId}:`, error);
     res.status(500).json({ error: "Failed to update agent in database." });
@@ -5406,12 +5508,10 @@ app.delete("/api/admin/agents/:agentId/delete", hasPermission("agents"), async (
   if (!db) return res.status(500).json({ error: "Database not initialized" });
   const agentId = req.params.agentId;
   try {
-    const agentRef = db.collection("agents").doc(agentId);
-    const agentDoc = await agentRef.get();
-    if (!agentDoc.exists) {
-      return res.status(404).json({ error: "Agent not found." });
-    }
-    const agentData = agentDoc.data();
+    const agentRef = isMySqlRuntimePrimary() ? null : db.collection("agents").doc(agentId);
+    const agentDoc = agentRef ? await agentRef.get() : null;
+    const agentData = isMySqlRuntimePrimary() ? store.agents[agentId] : agentDoc?.data();
+    if (!agentData) return res.status(404).json({ error: "Agent not found." });
     const targetUsername = String(agentData.username || "").toLowerCase();
     const targetRole = String(agentData.role || "").toLowerCase();
     const isFullAdminAgent = targetUsername === "admin" || targetUsername === "superadmin" || targetRole.includes("admin") || targetRole.includes("super");
@@ -5424,7 +5524,12 @@ app.delete("/api/admin/agents/:agentId/delete", hasPermission("agents"), async (
         error: `This agent has ${linkedPlayers.length} linked player(s). Reassign or unlink them before deleting the agent.`
       });
     }
-    await agentRef.delete();
+    if (isMySqlRuntimePrimary()) {
+      await deleteMySqlAgent(agentId);
+      delete store.agents[agentId];
+      agentCache.delete(agentId);
+      await saveStoreAndWait();
+    } else await agentRef.delete();
     res.json({ success: true, message: "Agent deleted successfully." });
   } catch (error) {
     console.error(`Failed to delete agent ${agentId}:`, error);

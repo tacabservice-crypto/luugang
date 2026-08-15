@@ -34,6 +34,34 @@ export async function saveMySqlAgent(agent: any) {
   );
 }
 
+export async function deleteMySqlAgent(agentId: string) {
+  await getMySqlPool().execute('DELETE FROM agents WHERE id=?', [agentId]);
+}
+
+export async function saveMySqlAdmin(admin: any) {
+  const now = Date.now();
+  await getMySqlPool().execute(
+    `INSERT INTO admin_users (id, username, password_hash, name, permissions_json, status, location, cashier_locations_json, cashier_online_at, admin_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE username=VALUES(username), password_hash=VALUES(password_hash), name=VALUES(name), permissions_json=VALUES(permissions_json), status=VALUES(status), location=VALUES(location), cashier_locations_json=VALUES(cashier_locations_json), cashier_online_at=VALUES(cashier_online_at), admin_json=VALUES(admin_json), updated_at=VALUES(updated_at)`,
+    [admin.id, admin.username, admin.password || null, admin.name || null, JSON.stringify(admin.permissions || []), admin.status || 'active', admin.location || null, JSON.stringify(admin.cashierLocations || []), admin.cashierOnlineAt || null, JSON.stringify(admin), Number(admin.createdAt || now), now],
+  );
+}
+
+export async function deleteMySqlAdmin(adminId: string) {
+  await getMySqlPool().execute('DELETE FROM admin_users WHERE id=?', [adminId]);
+}
+
+export async function saveMySqlCashierPayment(payment: any) {
+  const id = `${payment.cashierId}_${payment.period}`;
+  await getMySqlPool().execute(
+    `INSERT INTO cashier_payments (id, cashier_id, period_key, salary, bonus, total, paid_at, paid_by, payment_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, payment.cashierId, payment.period, Number(payment.salary || 0), Number(payment.bonus || 0), Number(payment.total || 0), Number(payment.paidAt), payment.paidBy, JSON.stringify({ ...payment, id })],
+  );
+  return { ...payment, id };
+}
+
 export async function saveMySqlAgentRequest(request: any) {
   await getMySqlPool().execute(
     `INSERT INTO agent_requests (id, agent_id, amount, status, created_at, resolved_at, request_json)
