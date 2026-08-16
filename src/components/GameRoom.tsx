@@ -14,6 +14,7 @@ import LiveAdBanner from './LiveAdBanner';
 
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Bot,
   Copy, // Added for copy functionality
   Edit,
@@ -127,7 +128,6 @@ export default function GameRoomView({
   const [isRollRequestPending, setIsRollRequestPending] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
-  const [selectedTeamPlayerId, setSelectedTeamPlayerId] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
@@ -281,30 +281,11 @@ export default function GameRoomView({
   const getLobbyTeam = (color: PlayerColor): 'A' | 'B' => color === 'red' || color === 'yellow' ? 'A' : 'B';
   const teamACount = room.players.filter(player => getLobbyTeam(player.color) === 'A').length;
   const teamBCount = room.players.filter(player => getLobbyTeam(player.color) === 'B').length;
+  const teamAPlayers = room.players.filter(player => getLobbyTeam(player.color) === 'A');
+  const teamBPlayers = room.players.filter(player => getLobbyTeam(player.color) === 'B');
   const teamsAreBalanced = room.gameMode !== 'team' || (teamACount === 2 && teamBCount === 2);
   const canStartLobby = room.players.length === lobbyCapacity && room.players.every(player => player.isReady) && teamsAreBalanced;
 
-  const handleLobbyPlayerTeamClick = (playerId: string) => {
-    if (room.gameMode !== 'team' || !myPlayer?.isHost) return;
-    if (!selectedTeamPlayerId) {
-      setSelectedTeamPlayerId(playerId);
-      return;
-    }
-    if (selectedTeamPlayerId === playerId) {
-      setSelectedTeamPlayerId(null);
-      return;
-    }
-    const first = room.players.find(player => player.userId === selectedTeamPlayerId);
-    const second = room.players.find(player => player.userId === playerId);
-    if (!first || !second) return setSelectedTeamPlayerId(null);
-    if (getLobbyTeam(first.color) === getLobbyTeam(second.color)) {
-      setSelectedTeamPlayerId(playerId);
-      toast.error('Dooro ciyaaryahan kooxda kale ku jira.');
-      return;
-    }
-    onChangeTeam(first.userId, getLobbyTeam(second.color), second.userId);
-    setSelectedTeamPlayerId(null);
-  };
 
   // Auto-scroll chats/logs
   useEffect(() => {
@@ -999,7 +980,7 @@ export default function GameRoomView({
           </div>
         )}
         {/* 3. GAMEPLAY LUDO BOARD BOARD */}
-        <div className="flex justify-center py-2 relative transition-transform duration-500">
+        <div className={`flex justify-center py-2 relative transition-transform duration-500 ${room.status === 'waiting' ? 'order-2' : ''}`}>
           <LudoBoard
             tokens={room.gameState.tokens}
             players={room.players}
@@ -1117,7 +1098,7 @@ export default function GameRoomView({
           /* ==========================================
               LOBBY / WAITING SCREEN SETUP
              ========================================== */
-          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 space-y-4">
+          <div className="order-1 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 space-y-4">
             {/* Host Player Approvals List */}
             {myPlayer?.isHost && room.pendingPlayers && room.pendingPlayers.length > 0 && (
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 space-y-2 mb-2">
@@ -1235,12 +1216,38 @@ export default function GameRoomView({
             </div>
 
             {/* List Joined Players */}
+            {room.gameMode === 'team' ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+                <div className="grid grid-cols-[1fr_38px_1fr] gap-1 pb-2 text-center text-[10px] font-black">
+                  <span className="text-rose-400">TEAM A ({teamACount}/2)</span><span /><span className="text-emerald-400">TEAM B ({teamBCount}/2)</span>
+                </div>
+                {[0, 1].map(index => {
+                  const left = teamAPlayers[index];
+                  const right = teamBPlayers[index];
+                  const onlyPlayer = left || right;
+                  const enabled = Boolean(onlyPlayer && (myPlayer?.isHost || ((!left || !right) && onlyPlayer.userId === userId)));
+                  const playerCard = (pl?: typeof left, side?: 'A' | 'B') => (
+                    <div className={`min-h-14 rounded-lg border p-2 flex items-center gap-1.5 overflow-hidden ${side === 'A' ? 'border-rose-500/20 bg-rose-500/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}>
+                      {pl ? <><PlayerAvatar avatar={pl.avatar} className="h-7 w-7 text-lg" /><div className="min-w-0"><p className="truncate text-[10px] font-black">{pl.userId === userId ? 'You' : pl.username}</p><p className="text-[7px] font-bold text-slate-500">{pl.isHost ? 'HOST' : pl.isReady ? 'READY' : 'WAITING'}</p></div></> : <span className="m-auto text-[8px] font-bold text-slate-600">OPEN</span>}
+                    </div>
+                  );
+                  return (
+                    <div key={index} className="grid grid-cols-[1fr_38px_1fr] items-stretch gap-1 mb-1 last:mb-0">
+                      {playerCard(left, 'A')}
+                      <button type="button" disabled={!enabled} onClick={() => left && right ? onChangeTeam(left.userId, 'B', right.userId) : onlyPlayer && onChangeTeam(onlyPlayer.userId, left ? 'B' : 'A')} className="my-auto mx-auto h-8 w-8 rounded-full border border-cyan-400/30 bg-cyan-500/10 text-cyan-300 flex items-center justify-center active:scale-90 disabled:opacity-25 disabled:cursor-not-allowed" title="Beddel kooxda">
+                        <ArrowLeftRight className="h-4 w-4" />
+                      </button>
+                      {playerCard(right, 'B')}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
             <div className="grid grid-cols-2 gap-2">
               {room.players.map((pl) => (
                 <div 
                   key={pl.userId} 
-                  onClick={() => handleLobbyPlayerTeamClick(pl.userId)}
-                  className={`bg-black/30 border p-3 rounded-xl flex items-center justify-between ${room.gameMode === 'team' && myPlayer?.isHost ? 'cursor-pointer' : ''} ${selectedTeamPlayerId === pl.userId ? 'border-cyan-400 ring-2 ring-cyan-400/30' : pl.status === 'left' ? 'opacity-45 border-red-500/20' : 'border-white/5'}`}
+                  className={`bg-black/30 border p-3 rounded-xl flex items-center justify-between ${pl.status === 'left' ? 'opacity-45 border-red-500/20' : 'border-white/5'}`}
                 >
                   <div className="flex items-center gap-2">
                     <PlayerAvatar avatar={pl.avatar} />
@@ -1254,20 +1261,6 @@ export default function GameRoomView({
                           {room.gameMode === 'team' ? `Team ${getLobbyTeam(pl.color)} · ${pl.color}` : pl.color}
                         </span>
                       </div>
-                      {room.gameMode === 'team' && pl.userId === userId && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            const targetTeam = getLobbyTeam(pl.color) === 'A' ? 'B' : 'A';
-                            onChangeTeam(pl.userId, targetTeam);
-                          }}
-                          disabled={(getLobbyTeam(pl.color) === 'A' ? teamBCount : teamACount) >= 2}
-                          className="mt-1 text-[7px] font-black uppercase text-cyan-400 disabled:text-slate-600 disabled:cursor-not-allowed"
-                        >
-                          Move to Team {getLobbyTeam(pl.color) === 'A' ? 'B' : 'A'}
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -1295,19 +1288,6 @@ export default function GameRoomView({
                 </div>
               ))}
             </div>
-
-            {room.gameMode === 'team' && (
-              <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 px-3 py-2 text-[9px] font-bold text-slate-300">
-                <div className="flex justify-between">
-                  <span>Team A: Cas + Jaalle ({teamACount}/2)</span>
-                  <span>Team B: Cagaar + Buluug ({teamBCount}/2)</span>
-                </div>
-                {myPlayer?.isHost && (
-                  <p className="mt-1 text-center text-purple-300">
-                    {selectedTeamPlayerId ? 'Hadda dooro ciyaaryahan kooxda kale si labada boos loo kala beddelo.' : 'Host: dooro laba ciyaaryahan oo kooxo kala duwan ku jira si aad isu beddesho.'}
-                  </p>
-                )}
-              </div>
             )}
 
             {/* Add Bot Lobby controls */}
