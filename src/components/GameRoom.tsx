@@ -35,6 +35,7 @@ import {
   Users,
   Volume2,
   VolumeX,
+  X,
   Zap
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -123,7 +124,7 @@ export default function GameRoomView({
   onRetryJoin,
 }: GameRoomProps) {
   const [chatInput, setChatInput] = useState('');
-  const [activePanel, setActivePanel] = useState<'chat' | 'logs'>('logs');
+  const [activePanel, setActivePanel] = useState<'chat' | 'logs' | null>(null);
   const [isRolling, setIsRolling] = useState(false);
   const [isRollRequestPending, setIsRollRequestPending] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
@@ -848,6 +849,22 @@ export default function GameRoomView({
         </div>
         {/* Spectators */}
         <div className="flex items-center justify-end gap-1.5 font-bold text-slate-400">
+            <button
+              onClick={() => setActivePanel(activePanel === 'logs' ? null : 'logs')}
+              className={`relative h-7 w-7 rounded-lg border flex items-center justify-center transition active:scale-90 ${activePanel === 'logs' ? 'bg-blue-600 border-blue-300 text-white' : 'bg-white/5 border-white/10 text-blue-300'}`}
+              title="Game Logs"
+            >
+              <Scroll className="h-3.5 w-3.5" />
+              {room.gameState.logs.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-0.5 rounded-full bg-amber-500 text-[7px] font-black text-black flex items-center justify-center">{room.gameState.logs.length > 99 ? '99+' : room.gameState.logs.length}</span>}
+            </button>
+            <button
+              onClick={() => setActivePanel(activePanel === 'chat' ? null : 'chat')}
+              className={`relative h-7 w-7 rounded-lg border flex items-center justify-center transition active:scale-90 ${activePanel === 'chat' ? 'bg-cyan-600 border-cyan-300 text-white' : 'bg-white/5 border-white/10 text-cyan-300'}`}
+              title="Chat Lobby"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              {room.gameState.chat.length > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-0.5 rounded-full bg-red-500 text-[7px] font-black text-white flex items-center justify-center">{room.gameState.chat.length > 99 ? '99+' : room.gameState.chat.length}</span>}
+            </button>
             <Eye className="w-4 h-4 text-yellow-300" />
             <span className="text-white">{room.spectators?.length || 0}</span>
         </div>
@@ -1330,9 +1347,10 @@ export default function GameRoomView({
         {/* ==========================================
             5. UTILITY TABS (CHAT & LOGS PANEL)
            ========================================== */}
-        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl overflow-hidden flex flex-col h-48 shadow-xl shadow-blue-500/5">
+        {activePanel && (
+        <div className="fixed top-24 right-3 z-40 w-[min(22rem,calc(100vw-1.5rem))] h-64 bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60">
           {/* Tabs Selector */}
-          <div className="grid grid-cols-2 text-xs font-bold border-b border-white/10 bg-white/5">
+          <div className="grid grid-cols-[1fr_1fr_38px] text-xs font-bold border-b border-white/10 bg-white/5">
             <button
               onClick={() => setActivePanel('logs')}
               className={`py-2 text-center flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
@@ -1352,6 +1370,9 @@ export default function GameRoomView({
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" /> Chat Lobby ({room.gameState.chat.length})
+            </button>
+            <button onClick={() => setActivePanel(null)} className="flex items-center justify-center text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Close panel">
+              <X className="h-4 w-4" />
             </button>
           </div>
 
@@ -1416,6 +1437,8 @@ export default function GameRoomView({
             </form>
           )}
         </div>
+        )}
+
       </main>
 
       {isEditProfileModalOpen && user && (
