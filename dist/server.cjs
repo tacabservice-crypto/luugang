@@ -4578,6 +4578,9 @@ app.post("/api/rooms/leave", (req, res) => {
     }
   }
   saveStore();
+  if (!res.headersSent) {
+    return res.json({ success: true, room: store.rooms[roomId] || null });
+  }
 });
 app.post("/api/admin/login", async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not initialized" });

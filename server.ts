@@ -5114,6 +5114,9 @@ app.post('/api/rooms/leave', (req, res) => {
   }
 
   saveStore();
+  if (!res.headersSent) {
+    return res.json({ success: true, room: store.rooms[roomId] || null });
+  }
 });
 
 
