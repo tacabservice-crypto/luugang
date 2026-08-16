@@ -133,6 +133,7 @@ export default function GameRoomView({
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
   const panelContainerRef = useRef<HTMLDivElement>(null);
+  const panelTouchStartYRef = useRef<number | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const voiceControlsRef = useRef<HTMLDivElement>(null); // New ref for voice controls popover
   const diceAudioRef = useRef<HTMLAudioElement>(null);
@@ -1348,12 +1349,22 @@ export default function GameRoomView({
             5. UTILITY TABS (CHAT & LOGS PANEL)
            ========================================== */}
         {activePanel && (
-        <div className="fixed top-24 right-3 z-40 w-[min(22rem,calc(100vw-1.5rem))] h-64 bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60">
+        <div className="fixed inset-0 z-50 h-[100dvh] w-screen bg-[#091225]/98 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl">
           {/* Tabs Selector */}
-          <div className="grid grid-cols-[1fr_1fr_38px] text-xs font-bold border-b border-white/10 bg-white/5">
+          <div
+            className="relative grid grid-cols-[1fr_1fr_44px] pt-3 text-xs font-bold border-b border-white/10 bg-white/5 touch-none"
+            onTouchStart={(event) => { panelTouchStartYRef.current = event.touches[0]?.clientY ?? null; }}
+            onTouchEnd={(event) => {
+              const startY = panelTouchStartYRef.current;
+              const endY = event.changedTouches[0]?.clientY;
+              panelTouchStartYRef.current = null;
+              if (startY !== null && endY !== undefined && startY - endY > 55) setActivePanel(null);
+            }}
+          >
+            <div className="absolute top-1 left-1/2 -translate-x-1/2 h-1 w-10 rounded-full bg-white/30" />
             <button
               onClick={() => setActivePanel('logs')}
-              className={`py-2 text-center flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+              className={`py-3 text-center flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
                 activePanel === 'logs' 
                   ? 'border-blue-400 text-blue-400 bg-black/20' 
                   : 'border-transparent text-slate-500'
@@ -1363,7 +1374,7 @@ export default function GameRoomView({
             </button>
             <button
               onClick={() => setActivePanel('chat')}
-              className={`py-2 text-center flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+              className={`py-3 text-center flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
                 activePanel === 'chat' 
                   ? 'border-blue-400 text-blue-400 bg-black/20' 
                   : 'border-transparent text-slate-500'
