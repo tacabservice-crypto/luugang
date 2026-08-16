@@ -1,5 +1,5 @@
 
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, GameRoom } from './types/game';
 import AuthScreen from './components/AuthScreen';
@@ -21,6 +21,7 @@ import { userErrorMessage } from './utils/userError';
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const { language } = useLanguage();
   const API_BASE_URL = (() => {
     if (typeof window === 'undefined') {
@@ -35,6 +36,8 @@ export default function App() {
   const [activeRoom, setActiveRoom] = useState<GameRoom | null>(null);
   const [rejoinableRoom, setRejoinableRoom] = useState<GameRoom | null>(null);
   const rejoinableRoomRef = useRef<GameRoom | null>(rejoinableRoom);
+  const routedRoomIdRef = useRef<string | null>(roomId || null);
+  const suppressNextRoomRestoreRef = useRef(false);
   useEffect(() => {
     rejoinableRoomRef.current = rejoinableRoom;
   }, [rejoinableRoom]);
@@ -87,6 +90,29 @@ export default function App() {
       }
     }
   }, [roomId, user, location.search]); // This effect depends on the roomId from the URL and the user's login state.
+
+  // Keep game state and browser history aligned. Opening a room creates a real
+  // history entry, while browser/mobile Back hides the room without forfeiting.
+  useEffect(() => {
+    if (activeRoom) {
+      if (roomId === activeRoom.id) {
+        routedRoomIdRef.current = activeRoom.id;
+        return;
+      }
+      if (routedRoomIdRef.current !== activeRoom.id) {
+        routedRoomIdRef.current = activeRoom.id;
+        navigate(`/room/${encodeURIComponent(activeRoom.id)}`);
+        return;
+      }
+
+      // The URL moved away from an already-routed room via browser/mobile Back.
+      suppressNextRoomRestoreRef.current = true;
+      setActiveRoom(null);
+      return;
+    }
+
+    if (!roomId) routedRoomIdRef.current = null;
+  }, [activeRoom, roomId, navigate]);
 
   // Clear matchmaking timeout on unmount
   useEffect(() => {
@@ -191,6 +217,10 @@ export default function App() {
       // This is handled more explicitly in handleLeaveRoom, but this is a good safeguard.
       const storedRoomId = localStorage.getItem('ludo_active_room_id');
       if (storedRoomId) {
+        if (suppressNextRoomRestoreRef.current) {
+          suppressNextRoomRestoreRef.current = false;
+          return;
+        }
         // We have a stored room ID but no active room in the app state.
         // This can happen on page load/re-login. Let's try to rejoin.
         if (user?.id) {
@@ -198,7 +228,7 @@ export default function App() {
         }
       }
     }
-  }, [activeRoom]);
+  }, [activeRoom, user?.id]);
 
 
   const userIdRef = useRef(user?.id);
@@ -430,7 +460,12 @@ export default function App() {
           // Game is over or user not in it, so clean up.
           localStorage.removeItem('ludo_active_room_id');
         } else {
-          setRejoinableRoom(roomData);
+          if (roomId === roomData.id) {
+            setActiveRoom(roomData);
+            setRejoinableRoom(null);
+          } else {
+            setRejoinableRoom(roomData);
+          }
         }
       } else {
         // If status is not OK (e.g., 404, 403), the room is not accessible. Clean up.
@@ -485,6 +520,7 @@ export default function App() {
     setMatchmakingState({ isQueued: false, betAmount: 0 });
     localStorage.removeItem('ludo_active_room_id');
     localStorage.removeItem('ludosom_cached_profile');
+    navigate('/', { replace: true });
   };
 
   const handleRefreshBalance = async () => {
@@ -790,6 +826,7 @@ export default function App() {
         }
         setActiveRoom(null);
         localStorage.removeItem('ludo_active_room_id');
+        navigate('/', { replace: true });
         return;
     }
     
@@ -802,6 +839,7 @@ export default function App() {
     if (activeRoom.status === 'completed') {
       setActiveRoom(null);
       localStorage.removeItem('ludo_active_room_id');
+      navigate('/', { replace: true });
       handleRefreshBalance();
       return;
     }
@@ -829,6 +867,7 @@ export default function App() {
         setActiveRoom(data.room);
       } else {
         setActiveRoom(null);
+        navigate('/', { replace: true });
       }
       localStorage.removeItem('ludo_active_room_id');
       handleRefreshBalance();

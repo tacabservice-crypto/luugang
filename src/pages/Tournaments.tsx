@@ -7,6 +7,7 @@ import WalletModal from '../components/WalletModal';
 import LanguageToggle from '../components/LanguageToggle';
 import AvatarDisplay from '../components/AvatarDisplay';
 import { userErrorMessage } from '../utils/userError';
+import { useNavigate } from 'react-router-dom';
 import {
   Trophy,
   ArrowLeft,
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react';
 
 const Tournaments: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { t } = useLanguage();
 
@@ -223,7 +225,7 @@ const Tournaments: React.FC = () => {
           {/* Back Button & Logo */}
           <div className="flex items-center gap-3">
             <button
-              onClick={() => window.location.assign('/')}
+              onClick={() => navigate(-1)}
               className="p-2.5 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/10 transition-all cursor-pointer text-gray-300 hover:text-white flex items-center gap-2"
               title="Return to Dashboard"
             >

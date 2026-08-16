@@ -36,6 +36,7 @@ import ActiveGamesList from './ActiveGamesList';
 import UserEditModal from './UserEditModal';
 import AvatarDisplay from './AvatarDisplay';
 import LiveAdBanner from './LiveAdBanner';
+import { useNavigate } from 'react-router-dom';
 
 interface DashboardProps {
   user: UserProfile;
@@ -71,6 +72,7 @@ export default function Dashboard({
   onDismissRejoin,
   onProfileUpdate
 }: DashboardProps) {
+  const navigate = useNavigate();
   const { t, language } = useLanguage();
   const [selectedStake, setSelectedStake] = useState<number>(0.30); // Default to $0.30 Micro stake
   const [isStakeDropdownOpen, setIsStakeDropdownOpen] = useState<boolean>(false);
@@ -737,7 +739,7 @@ export default function Dashboard({
                   </button>
                   <button
                     onClick={() => {
-                      window.location.assign('/vip'); // Navigate to the BecomeVip page
+                      navigate('/vip');
                       setIsSettingsDropdownOpen(false);
                     }}
                     className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-yellow-400 hover:bg-yellow-500/20 hover:text-yellow-300 rounded-md"
@@ -747,7 +749,7 @@ export default function Dashboard({
                   </button>
                   <button
                     onClick={() => {
-                      window.location.assign('/tournaments'); // Navigate to the Tournaments page
+                      navigate('/tournaments');
                       setIsSettingsDropdownOpen(false);
                     }}
                     className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-green-400 hover:bg-green-500/20 hover:text-green-300 rounded-md"

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, Crown, ShieldCheck, Sparkles, Trophy, Wallet } from 'lucide-react';
 import { useAuth } from '../firebase-client';
 import { userErrorMessage } from '../utils/userError';
+import { useNavigate } from 'react-router-dom';
 
 interface VipTier {
   name: string;
@@ -26,6 +27,7 @@ const fallbackVipTiers: Record<string, VipTier> = {
 };
 
 const BecomeVip: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [vipTiers, setVipTiers] = useState<Record<string, VipTier>>({});
   const [loadingTiers, setLoadingTiers] = useState(true);
@@ -73,7 +75,7 @@ const BecomeVip: React.FC = () => {
     <main className="min-h-screen bg-[#09051d] text-white overflow-hidden relative">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#4c1d9560,transparent_42%),radial-gradient(circle_at_bottom_right,#0369a140,transparent_35%)]" />
       <div className="relative max-w-6xl mx-auto px-4 py-6 sm:px-6 sm:py-10">
-        <button onClick={() => window.history.back()} className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-white">
+        <button onClick={() => navigate(-1)} className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-white">
           <ArrowLeft className="w-4 h-4" /> Back to dashboard
         </button>
 

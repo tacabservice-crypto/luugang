@@ -129,6 +129,8 @@ export default function GameRoomView({
   const [isRollRequestPending, setIsRollRequestPending] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
+  const [panelDragY, setPanelDragY] = useState(0);
+  const [isPanelDragging, setIsPanelDragging] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
@@ -1350,13 +1352,31 @@ export default function GameRoomView({
            ========================================== */}
         {activePanel && (
         <div
-          className="fixed top-24 left-3 right-3 z-40 h-64 max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60"
-          onTouchStart={(event) => { panelTouchStartYRef.current = event.touches[0]?.clientY ?? null; }}
+          className={`fixed top-24 left-3 right-3 z-40 h-64 max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60 touch-none ${isPanelDragging ? '' : 'transition-transform duration-200'}`}
+          style={{ transform: `translateY(${panelDragY}px)` }}
+          onTouchStart={(event) => {
+            panelTouchStartYRef.current = event.touches[0]?.clientY ?? null;
+            setIsPanelDragging(true);
+          }}
+          onTouchMove={(event) => {
+            const startY = panelTouchStartYRef.current;
+            const currentY = event.touches[0]?.clientY;
+            if (startY === null || currentY === undefined) return;
+            if (event.cancelable) event.preventDefault();
+            setPanelDragY(Math.min(0, currentY - startY));
+          }}
           onTouchEnd={(event) => {
             const startY = panelTouchStartYRef.current;
             const endY = event.changedTouches[0]?.clientY;
             panelTouchStartYRef.current = null;
+            setIsPanelDragging(false);
             if (startY !== null && endY !== undefined && startY - endY > 55) setActivePanel(null);
+            setPanelDragY(0);
+          }}
+          onTouchCancel={() => {
+            panelTouchStartYRef.current = null;
+            setIsPanelDragging(false);
+            setPanelDragY(0);
           }}
         >
           {/* Tabs Selector */}
