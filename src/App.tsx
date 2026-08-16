@@ -798,7 +798,16 @@ export default function App() {
       });
       if (response.ok) {
         const data = await response.json();
-        setActiveRoom(data);
+        setActiveRoom(previousRoom => {
+          if (!previousRoom || previousRoom.id !== data.id) return data;
+          const mergedChat = Array.from(new Map([
+            ...previousRoom.gameState.chat,
+            ...data.gameState.chat,
+          ].map(message => [message.id, message])).values())
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-30);
+          return { ...data, gameState: { ...data.gameState, chat: mergedChat } };
+        });
       }
     } catch (err) {
       console.error(err);

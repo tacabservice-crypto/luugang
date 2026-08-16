@@ -125,6 +125,7 @@ export default function GameRoomView({
 }: GameRoomProps) {
   const [chatInput, setChatInput] = useState('');
   const [activePanel, setActivePanel] = useState<'chat' | 'logs' | null>(null);
+  const isUtilityPanelOpen = activePanel !== null;
   const [isRolling, setIsRolling] = useState(false);
   const [isRollRequestPending, setIsRollRequestPending] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
@@ -157,6 +158,45 @@ export default function GameRoomView({
     isSpeakerOn, 
     toggleSpeaker 
   } = useVoiceChat();
+
+  // Freeze the page behind the floating chat/log panel. Touch gestures may
+  // move the panel itself, but the game board must remain at the exact same
+  // scroll position until the panel closes.
+  useEffect(() => {
+    if (!isUtilityPanelOpen) return;
+
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const root = document.documentElement;
+    const previousBodyStyles = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    const previousOverscrollBehavior = root.style.overscrollBehavior;
+
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    root.style.overscrollBehavior = 'none';
+
+    return () => {
+      body.style.position = previousBodyStyles.position;
+      body.style.top = previousBodyStyles.top;
+      body.style.left = previousBodyStyles.left;
+      body.style.right = previousBodyStyles.right;
+      body.style.width = previousBodyStyles.width;
+      body.style.overflow = previousBodyStyles.overflow;
+      root.style.overscrollBehavior = previousOverscrollBehavior;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isUtilityPanelOpen]);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -294,7 +334,10 @@ export default function GameRoomView({
   // Auto-scroll chats/logs
   useEffect(() => {
     if (panelContainerRef.current) {
-      panelContainerRef.current.scrollTop = panelContainerRef.current.scrollHeight;
+      const container = panelContainerRef.current;
+      window.requestAnimationFrame(() => {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      });
     }
   }, [room.gameState.chat.length, room.gameState.logs.length, activePanel]);
 
@@ -1352,9 +1395,13 @@ export default function GameRoomView({
            ========================================== */}
         {activePanel && (
         <div
-          className={`fixed top-24 left-3 right-3 z-40 h-64 max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60 touch-none ${isPanelDragging ? '' : 'transition-transform duration-200'}`}
+          className={`fixed top-24 left-3 right-3 z-40 h-[min(24rem,60dvh)] max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60 ${isPanelDragging ? '' : 'transition-transform duration-200'}`}
           style={{ transform: `translateY(${panelDragY}px)` }}
           onTouchStart={(event) => {
+            if ((event.target as HTMLElement).closest('[data-panel-scroll], form, input, button')) {
+              panelTouchStartYRef.current = null;
+              return;
+            }
             panelTouchStartYRef.current = event.touches[0]?.clientY ?? null;
             setIsPanelDragging(true);
           }}
@@ -1408,7 +1455,7 @@ export default function GameRoomView({
           </div>
 
           {/* Panel Display */}
-          <div ref={panelContainerRef} className="p-3 flex-1 overflow-y-auto text-xs font-medium space-y-1.5 bg-black/20">
+          <div data-panel-scroll ref={panelContainerRef} className="p-3 min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y text-xs font-medium space-y-2 bg-black/20">
             {activePanel === 'logs' ? (
               /* GAMEPLAY LAUNCH LOGS */
               room.gameState.logs.map((log) => (
@@ -1433,7 +1480,7 @@ export default function GameRoomView({
                       <span>•</span>
                       <span>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <p className={`px-2.5 py-1.5 rounded-xl max-w-[80%] leading-relaxed ${
+                    <p className={`px-3 py-2 rounded-2xl max-w-[82%] break-words whitespace-pre-wrap leading-relaxed shadow-sm ${
                       isMe 
                         ? 'bg-blue-600 text-white font-semibold' 
                         : isSpectatorMsg
@@ -1450,14 +1497,15 @@ export default function GameRoomView({
 
           {/* Chat text box input */}
           {activePanel === 'chat' && (
-            <form onSubmit={handleSendChat} className="p-2 border-t border-white/10 bg-white/5 flex gap-1">
+            <form onSubmit={handleSendChat} className="shrink-0 p-2 border-t border-white/10 bg-[#101a30] flex gap-2">
               <input
                 type="text"
                 required
                 placeholder="Say hello in lobby..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                className="bg-black/30 border border-white/10 text-xs font-semibold rounded-xl px-3 outline-none flex-1 focus:border-blue-400 text-white"
+                maxLength={300}
+                className="min-w-0 h-10 bg-black/30 border border-white/10 text-xs font-semibold rounded-xl px-3 outline-none flex-1 focus:border-blue-400 text-white"
               />
               <button
                 type="submit"
