@@ -1349,7 +1349,7 @@ export default function GameRoomView({
             5. UTILITY TABS (CHAT & LOGS PANEL)
            ========================================== */}
         {activePanel && (
-        <div className="fixed inset-0 z-50 h-[100dvh] w-screen bg-[#091225]/98 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl">
+        <div className="fixed top-24 left-3 right-3 z-40 h-64 max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60">
           {/* Tabs Selector */}
           <div
             className="relative grid grid-cols-[1fr_1fr_44px] pt-3 text-xs font-bold border-b border-white/10 bg-white/5 touch-none"
