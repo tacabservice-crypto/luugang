@@ -57,6 +57,7 @@ interface GameRoomProps {
   onLogout: () => void;
   onToggleReady: () => void;
   onAddBot: () => void;
+  onChangeTeam: (playerId: string, targetTeam: 'A' | 'B', swapWithUserId?: string) => void;
   onStartMatch: () => void;
   onRollDice: () => void | Promise<void>;
   onMoveToken: (tokenId: string) => void;
@@ -78,6 +79,17 @@ const COLOR_TEXT_MAP: Record<PlayerColor, string> = {
   yellow: 'text-[#F2C94C]',
   blue: 'text-[#0090FF]'
 };
+
+function PlayerAvatar({ avatar, className = 'h-8 w-8 text-2xl' }: { avatar?: string; className?: string }) {
+  const value = avatar || '🎮';
+  const isImage = value.startsWith('/') || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:image/');
+
+  return isImage ? (
+    <img src={value} alt="Player avatar" className={`${className} shrink-0 rounded-full object-cover`} />
+  ) : (
+    <span className={`${className} shrink-0 items-center justify-center`} aria-hidden="true">{value}</span>
+  );
+}
 
 // Custom hook to get window size
 function useWindowSize() {
@@ -101,6 +113,7 @@ export default function GameRoomView({
   onLogout,
   onToggleReady,
   onAddBot,
+  onChangeTeam,
   onStartMatch,
   onRollDice,
   onMoveToken,
@@ -114,6 +127,7 @@ export default function GameRoomView({
   const [isRollRequestPending, setIsRollRequestPending] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
+  const [selectedTeamPlayerId, setSelectedTeamPlayerId] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
@@ -263,6 +277,34 @@ export default function GameRoomView({
   const isActiveTurn = canPlay && room.status === 'playing' && room.players[room.gameState.turn]?.userId === userId;
   const activePlayer = room.status === 'playing' ? room.players[room.gameState.turn] : null;
   const host = room.players.find(p => p.isHost);
+  const lobbyCapacity = room.capacity || 2;
+  const getLobbyTeam = (color: PlayerColor): 'A' | 'B' => color === 'red' || color === 'yellow' ? 'A' : 'B';
+  const teamACount = room.players.filter(player => getLobbyTeam(player.color) === 'A').length;
+  const teamBCount = room.players.filter(player => getLobbyTeam(player.color) === 'B').length;
+  const teamsAreBalanced = room.gameMode !== 'team' || (teamACount === 2 && teamBCount === 2);
+  const canStartLobby = room.players.length === lobbyCapacity && room.players.every(player => player.isReady) && teamsAreBalanced;
+
+  const handleLobbyPlayerTeamClick = (playerId: string) => {
+    if (room.gameMode !== 'team' || !myPlayer?.isHost) return;
+    if (!selectedTeamPlayerId) {
+      setSelectedTeamPlayerId(playerId);
+      return;
+    }
+    if (selectedTeamPlayerId === playerId) {
+      setSelectedTeamPlayerId(null);
+      return;
+    }
+    const first = room.players.find(player => player.userId === selectedTeamPlayerId);
+    const second = room.players.find(player => player.userId === playerId);
+    if (!first || !second) return setSelectedTeamPlayerId(null);
+    if (getLobbyTeam(first.color) === getLobbyTeam(second.color)) {
+      setSelectedTeamPlayerId(playerId);
+      toast.error('Dooro ciyaaryahan kooxda kale ku jira.');
+      return;
+    }
+    onChangeTeam(first.userId, getLobbyTeam(second.color), second.userId);
+    setSelectedTeamPlayerId(null);
+  };
 
   // Auto-scroll chats/logs
   useEffect(() => {
@@ -291,7 +333,8 @@ export default function GameRoomView({
   // Win/Loss sound effect
   useEffect(() => {
     if (room.status === 'completed' && room.gameState.winnerId && isSpeakerOn) {
-      if (room.gameState.winnerId === userId) {
+      const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : [room.gameState.winnerId];
+      if (winnerIds.includes(userId)) {
         // I am the winner
         if (winAudioRef.current) {
           winAudioRef.current.volume = 0.7;
@@ -305,7 +348,7 @@ export default function GameRoomView({
         }
       }
     }
-  }, [room.status, room.gameState.winnerId, userId, isSpeakerOn]);
+  }, [room.status, room.gameState.winnerId, room.gameState.winnerIds, userId, isSpeakerOn]);
 
   // Sound effects based on token state changes (Capture, Token Out)
   useEffect(() => {
@@ -514,7 +557,10 @@ export default function GameRoomView({
       return [];
     }
     const d = room.gameState.diceRoll;
-    const playerTokens = room.gameState.tokens.filter(t => t.ownerId === userId);
+    const playableColor = room.gameMode === 'team' && myPlayer?.teamAssistUnlocked
+      ? (myPlayer.color === 'red' ? 'yellow' : myPlayer.color === 'yellow' ? 'red' : myPlayer.color === 'green' ? 'blue' : 'green')
+      : myPlayer?.color;
+    const playerTokens = room.gameState.tokens.filter(t => t.color === playableColor);
     
     // Check which tokens have valid moves
     return playerTokens
@@ -556,9 +602,10 @@ export default function GameRoomView({
 
   if (room.status === 'completed') {
     const winnerId = room.gameState.winnerId;
-    const isMeWinner = winnerId === userId;
+    const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : (winnerId ? [winnerId] : []);
+    const isMeWinner = winnerIds.includes(userId);
     const winnerPlayer = room.players.find(p => p.userId === winnerId) || room.players[0];
-    const losers = room.players.filter(p => p.userId !== winnerId);
+    const losers = room.players.filter(p => !winnerIds.includes(p.userId));
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-between p-4 selection:bg-purple-500 selection:text-white relative overflow-hidden">
@@ -606,7 +653,7 @@ export default function GameRoomView({
           {/* Winner Profile Card */}
           <div className="relative bg-[#1A0C40] border-4 border-yellow-400 rounded-2xl p-6 text-center w-52 shadow-2xl shadow-yellow-500/20">
             <div className="text-5xl bg-black/40 border border-white/5 w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-inner">
-              {winnerPlayer?.avatar}
+              <PlayerAvatar avatar={winnerPlayer?.avatar} className="h-16 w-16 text-5xl" />
             </div>
             <h3 className="font-black text-sm text-yellow-300 truncate max-w-[150px] mx-auto">
               {winnerPlayer?.userId === userId ? 'Adiga (You)' : winnerPlayer?.username}
@@ -641,7 +688,7 @@ export default function GameRoomView({
               className="bg-black/30 border border-white/5 p-3 rounded-xl flex items-center justify-between"
             >
               <div className="flex items-center gap-3">
-                <span className="text-2xl">{player.avatar}</span>
+                <PlayerAvatar avatar={player.avatar} />
                 <div>
                   <h4 className="font-extrabold text-xs text-slate-200">
                     {player.userId === userId ? 'You' : player.username}
@@ -766,7 +813,7 @@ export default function GameRoomView({
                 className="flex items-center gap-2 cursor-pointer"
                 onClick={() => setIsUserMenuOpen(prev => !prev)}
               >
-                <span className="text-2xl bg-black/20 p-1 rounded-full">{user.avatar}</span>
+                <PlayerAvatar avatar={user.avatar} className="h-9 w-9 text-2xl" />
                 <div className="text-xs hidden sm:block"> {/* Hide on small screens */}
                   <span className="font-bold text-white block">{user.username}</span>
                   <span className="text-slate-400">{formatCurrency(user?.balance)}</span>
@@ -851,7 +898,7 @@ export default function GameRoomView({
                   <div className="space-y-1.5">
                     <div className={`flex items-center justify-between p-1 rounded-lg transition-all ${activePlayer?.color === pl.color ? 'bg-white/5 border border-blue-500/30 shadow-md shadow-blue-500/5' : 'bg-black/30 border border-transparent'}`}>
                       <div className="flex items-center gap-1 text-[10px] truncate">
-                        <span className="text-sm shrink-0">{pl.avatar}</span>
+                        <PlayerAvatar avatar={pl.avatar} className="h-5 w-5 text-sm" />
                         <span className="font-semibold text-white text-[10px] truncate max-w-[70px]">{pl.userId === userId ? 'You' : pl.username}</span>
                       </div>
                       <span className={`w-2.5 h-2.5 rounded-full ${COLOR_MAP[pl.color]} ${isCurrent ? 'animate-pulse ring-2 ring-white shadow-[0_0_8px_currentColor]' : ''}`} />
@@ -873,7 +920,9 @@ export default function GameRoomView({
                 : 'bg-black/20 border-white/5'
             }`}>
               <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider mb-2">
-                <span className="text-red-400 tracking-widest font-black text-[9px]">TEAM CAS & JAALLE</span>
+                <span className="text-red-400 tracking-widest font-black text-[9px]">
+                  {room.gameMode === 'team' ? 'TEAM CAS & JAALLE' : 'CAS & JAALLE'}
+                </span>
                 {room.gameMode === 'team' && <span className="text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded text-[8px] font-bold">XULAFA</span>}
               </div>
               <div className="space-y-1.5">
@@ -889,12 +938,16 @@ export default function GameRoomView({
                   );
                 }
                 return (
-                  <div key={pl.color} className={`flex items-center justify-between p-1 rounded-lg transition-all ${activePlayer?.color === pl.color ? 'bg-white/5 border border-blue-500/30 shadow-md shadow-blue-500/5' : 'bg-black/30 border border-transparent'}`}>
+                  <div key={pl.color} className={`flex items-center justify-between p-1 rounded-lg transition-all ${pl.status === 'left' ? 'bg-red-500/5 border border-red-500/20 opacity-45' : activePlayer?.color === pl.color ? 'bg-white/5 border border-blue-500/30 shadow-md shadow-blue-500/5' : 'bg-black/30 border border-transparent'}`}>
                     <div className="flex items-center gap-1 text-[10px] truncate">
-                      <span className="text-sm shrink-0">{pl.avatar}</span>
+                      <PlayerAvatar avatar={pl.avatar} className="h-5 w-5 text-sm" />
                       <span className="font-semibold text-white text-[10px] truncate max-w-[70px]">{pl.userId === userId ? 'You' : pl.username}</span>
                     </div>
-                    <span className={`w-2.5 h-2.5 rounded-full ${pl.color === 'red' ? 'bg-red-500' : 'bg-yellow-500'} ${isCurrent ? 'animate-pulse ring-2 ring-white shadow-[0_0_8px_currentColor]' : ''}`} />
+                    {pl.status === 'left' ? (
+                      <span className="text-[7px] font-black uppercase text-red-400">Inactive</span>
+                    ) : (
+                      <span className={`w-2.5 h-2.5 rounded-full ${pl.color === 'red' ? 'bg-red-500' : 'bg-yellow-500'} ${isCurrent ? 'animate-pulse ring-2 ring-white shadow-[0_0_8px_currentColor]' : ''}`} />
+                    )}
                   </div>
                 );
               })}
@@ -909,7 +962,7 @@ export default function GameRoomView({
             }`}>
               <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider mb-2">
                 <span className="text-green-400 tracking-widest font-black text-[9px]">
-                  {room.gameMode === 'team' ? 'TEAM CAGAAR & BULUUG' : 'TEAM CAGAAR & BULUUG'}
+                  {room.gameMode === 'team' ? 'TEAM CAGAAR & BULUUG' : 'CAGAAR & BULUUG'}
                 </span>
                 {room.gameMode === 'team' && (
                   <span className="text-blue-400 bg-blue-400/10 px-1.5 py-0.5 rounded text-[8px] font-bold">🤝 XULAFA</span>
@@ -928,12 +981,16 @@ export default function GameRoomView({
                     );
                   }
                   return (
-                    <div key={pl.color} className={`flex items-center justify-between p-1 rounded-lg transition-all ${activePlayer?.color === pl.color ? 'bg-white/5 border border-blue-500/30 shadow-md shadow-blue-500/5' : 'bg-black/30 border border-transparent'}`}>
+                    <div key={pl.color} className={`flex items-center justify-between p-1 rounded-lg transition-all ${pl.status === 'left' ? 'bg-red-500/5 border border-red-500/20 opacity-45' : activePlayer?.color === pl.color ? 'bg-white/5 border border-blue-500/30 shadow-md shadow-blue-500/5' : 'bg-black/30 border border-transparent'}`}>
                       <div className="flex items-center gap-1 text-[10px] truncate">
-                        <span className="text-sm shrink-0">{pl.avatar}</span>
+                        <PlayerAvatar avatar={pl.avatar} className="h-5 w-5 text-sm" />
                         <span className="font-semibold text-white text-[10px] truncate max-w-[70px]">{pl.userId === userId ? 'You' : pl.username}</span>
                       </div>
-                      <span className={`w-2.5 h-2.5 rounded-full ${COLOR_MAP[pl.color]} ${isCurrent ? 'animate-pulse ring-2 ring-white shadow-[0_0_8px_currentColor]' : ''}`} />
+                      {pl.status === 'left' ? (
+                        <span className="text-[7px] font-black uppercase text-red-400">Inactive</span>
+                      ) : (
+                        <span className={`w-2.5 h-2.5 rounded-full ${COLOR_MAP[pl.color]} ${isCurrent ? 'animate-pulse ring-2 ring-white shadow-[0_0_8px_currentColor]' : ''}`} />
+                      )}
                     </div>
                   );
                 })}
@@ -1071,7 +1128,7 @@ export default function GameRoomView({
                   {room.pendingPlayers.map((p) => (
                     <div key={p.userId} className="bg-black/30 border border-white/5 p-2 rounded-lg flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xl">{p.avatar}</span>
+                        <PlayerAvatar avatar={p.avatar} className="h-8 w-8 text-xl" />
                         <div>
                           <p className="font-extrabold text-[11px] text-white truncate max-w-[120px]">{p.username}</p>
                           <p className="text-[8px] text-slate-500 font-bold">
@@ -1083,13 +1140,18 @@ export default function GameRoomView({
                         <button
                           onClick={async () => {
                             try {
-                              await fetch('/api/rooms/accept-player', {
+                              const response = await fetch('/api/rooms/accept-player', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ userId, roomId: room.id, challengerId: p.userId })
                               });
+                              if (!response.ok) {
+                                const data = await response.json().catch(() => null);
+                                throw new Error(data?.error || 'Player could not be accepted.');
+                              }
                             } catch (err) {
                               console.error(err);
+                              toast.error(err instanceof Error ? err.message : 'Player could not be accepted.');
                             }
                           }}
                           className="bg-green-600 hover:bg-green-500 text-white font-extrabold text-[9px] py-1 px-2.5 rounded-md active:scale-95 transition-all cursor-pointer"
@@ -1099,14 +1161,19 @@ export default function GameRoomView({
                         <button
                           onClick={async () => {
                             try {
-                              await fetch('/api/rooms/decline-player', {
+                              const response = await fetch('/api/rooms/decline-player', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ userId, roomId: room.id, challengerId: p.userId })
                               });
+                              if (!response.ok) {
+                                const data = await response.json().catch(() => null);
+                                throw new Error(data?.error || 'Request could not be declined.');
+                              }
                               toast.success(`${p.username} Codsigaaga waa la diiday!`);
                             } catch (err) {
                               console.error(err);
+                              toast.error(err instanceof Error ? err.message : 'Request could not be declined.');
                             }
                           }}
                           className="bg-red-600/20 hover:bg-red-600 text-red-400 border border-red-500/20 font-extrabold text-[9px] py-1 px-2.5 rounded-md active:scale-95 transition-all cursor-pointer"
@@ -1163,7 +1230,7 @@ export default function GameRoomView({
                 </button>
               </div>
               <span className="text-[10px] text-slate-400 font-bold flex items-center justify-center gap-1">
-                <Users className="w-3.5 h-3.5 text-blue-400" /> {room.players.length}/4 Joined
+                <Users className="w-3.5 h-3.5 text-blue-400" /> {room.players.length}/{room.capacity || 2} Joined
               </span>
             </div>
 
@@ -1172,23 +1239,42 @@ export default function GameRoomView({
               {room.players.map((pl) => (
                 <div 
                   key={pl.userId} 
-                  className="bg-black/30 border border-white/5 p-3 rounded-xl flex items-center justify-between"
+                  onClick={() => handleLobbyPlayerTeamClick(pl.userId)}
+                  className={`bg-black/30 border p-3 rounded-xl flex items-center justify-between ${room.gameMode === 'team' && myPlayer?.isHost ? 'cursor-pointer' : ''} ${selectedTeamPlayerId === pl.userId ? 'border-cyan-400 ring-2 ring-cyan-400/30' : pl.status === 'left' ? 'opacity-45 border-red-500/20' : 'border-white/5'}`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl">{pl.avatar}</span>
+                    <PlayerAvatar avatar={pl.avatar} />
                     <div className="space-y-0.5">
                       <p className="font-extrabold text-xs text-slate-200 truncate max-w-[80px]">
                         {pl.userId === userId ? 'You' : pl.username}
                       </p>
                       <div className="flex items-center gap-1">
                         <span className={`w-2 h-2 rounded-full ${COLOR_MAP[pl.color]}`} />
-                        <span className="text-[8px] text-slate-500 font-bold capitalize">{pl.color}</span>
+                        <span className="text-[8px] text-slate-500 font-bold capitalize">
+                          {room.gameMode === 'team' ? `Team ${getLobbyTeam(pl.color)} · ${pl.color}` : pl.color}
+                        </span>
                       </div>
+                      {room.gameMode === 'team' && pl.userId === userId && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const targetTeam = getLobbyTeam(pl.color) === 'A' ? 'B' : 'A';
+                            onChangeTeam(pl.userId, targetTeam);
+                          }}
+                          disabled={(getLobbyTeam(pl.color) === 'A' ? teamBCount : teamACount) >= 2}
+                          className="mt-1 text-[7px] font-black uppercase text-cyan-400 disabled:text-slate-600 disabled:cursor-not-allowed"
+                        >
+                          Move to Team {getLobbyTeam(pl.color) === 'A' ? 'B' : 'A'}
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   <div>
-                    {pl.isHost ? (
+                    {pl.status === 'left' ? (
+                      <span className="text-[8px] bg-red-500/10 text-red-400 border border-red-500/20 px-1 py-0.5 rounded uppercase font-black">Inactive</span>
+                    ) : pl.isHost ? (
                       <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 py-0.5 rounded uppercase font-black">Host</span>
                     ) : pl.isReady ? (
                       <span className="text-[8px] bg-green-500/10 text-green-400 border border-green-500/20 px-1 py-0.5 rounded uppercase font-black">Ready</span>
@@ -1200,7 +1286,7 @@ export default function GameRoomView({
               ))}
 
               {/* Empty slot indicators */}
-              {[...Array(4 - room.players.length)].map((_, idx) => (
+              {[...Array(Math.max(0, (room.capacity || 2) - room.players.length))].map((_, idx) => (
                 <div 
                   key={idx} 
                   className="bg-black/20 border border-dashed border-white/10 p-2 rounded-xl flex items-center justify-center text-slate-500 text-[9px] font-semibold"
@@ -1210,9 +1296,23 @@ export default function GameRoomView({
               ))}
             </div>
 
+            {room.gameMode === 'team' && (
+              <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 px-3 py-2 text-[9px] font-bold text-slate-300">
+                <div className="flex justify-between">
+                  <span>Team A: Cas + Jaalle ({teamACount}/2)</span>
+                  <span>Team B: Cagaar + Buluug ({teamBCount}/2)</span>
+                </div>
+                {myPlayer?.isHost && (
+                  <p className="mt-1 text-center text-purple-300">
+                    {selectedTeamPlayerId ? 'Hadda dooro ciyaaryahan kooxda kale si labada boos loo kala beddelo.' : 'Host: dooro laba ciyaaryahan oo kooxo kala duwan ku jira si aad isu beddesho.'}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Add Bot Lobby controls */}
             <div className="flex gap-2">
-              {canPlay && room.players.length < 4 && myPlayer?.isHost && (
+              {canPlay && room.players.length < (room.capacity || 2) && myPlayer?.isHost && (
                 <button
                   onClick={onAddBot}
                   className="flex-1 bg-black/30 hover:bg-white/5 border border-white/10 text-slate-200 font-bold text-xs py-2 px-2 rounded-xl flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer"
@@ -1225,9 +1325,10 @@ export default function GameRoomView({
                 myPlayer?.isHost ? (
                   <button
                     onClick={onStartMatch}
-                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
+                    disabled={!canStartLobby}
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-extrabold text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
                   >
-                    <Play className="w-3.5 h-3.5" /> Start Match ⚔️
+                    <Play className="w-3.5 h-3.5" /> {canStartLobby ? 'Start Match ⚔️' : `Waiting ${room.players.length}/${lobbyCapacity}`}
                   </button>
                 ) : (
                   <button

@@ -668,7 +668,7 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/api/rooms/add-bot`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId: activeRoom.id })
+        body: JSON.stringify({ userId: user?.id, roomId: activeRoom.id })
       });
       if (response.ok) {
         const data = await response.json();
@@ -676,6 +676,22 @@ export default function App() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleChangeTeam = async (playerId: string, targetTeam: 'A' | 'B', swapWithUserId?: string) => {
+    if (!user || !activeRoom) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/rooms/change-team`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, roomId: activeRoom.id, playerId, targetTeam, swapWithUserId })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || 'Team-ka lama beddeli karin.');
+      setActiveRoom(data);
+    } catch (err) {
+      setErrorToast(userErrorMessage(err, 'Team-ka lama beddeli karin.'));
     }
   };
 
@@ -760,6 +776,18 @@ export default function App() {
 
     // A spectator is leaving. Just clear the room and let the GameRoom's cleanup effect handle the API call.
     if (!isPlayer) {
+        const isPendingPlayer = activeRoom.pendingPlayers?.some(p => p.userId === user.id);
+        if (isPendingPlayer) {
+          try {
+            await fetch(`${API_BASE_URL}/api/rooms/leave`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: user.id, roomId: activeRoom.id })
+            });
+          } catch (err) {
+            console.error('Failed to remove pending room request:', err);
+          }
+        }
         setActiveRoom(null);
         localStorage.removeItem('ludo_active_room_id');
         return;
@@ -1042,6 +1070,7 @@ export default function App() {
             onLogout={handleLogout}
             onToggleReady={handleToggleReady}
             onAddBot={handleAddBot}
+            onChangeTeam={handleChangeTeam}
             onStartMatch={handleStartMatch}
             onRollDice={handleRollDice}
             onMoveToken={handleMoveToken}
@@ -1081,6 +1110,7 @@ export default function App() {
             onLogout={handleLogout}
             onToggleReady={handleToggleReady}
             onAddBot={handleAddBot}
+            onChangeTeam={handleChangeTeam}
             onStartMatch={handleStartMatch}
             onRollDice={handleRollDice}
             onMoveToken={handleMoveToken}

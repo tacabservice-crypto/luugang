@@ -933,6 +933,7 @@ const AdminDashboard: React.FC = () => {
                             onLogout={handleLogout}
                             onToggleReady={() => {}}
                             onAddBot={() => {}}
+                            onChangeTeam={() => {}}
                             onStartMatch={() => {}}
                             onRollDice={() => {}}
                             onMoveToken={() => {}}

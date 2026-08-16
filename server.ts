@@ -1521,6 +1521,19 @@ const START_OFFSETS: Record<PlayerColor, number> = {
 const SAFE_GLOBAL_SQUARES = [0, 8, 13, 21, 26, 34, 39, 47];
 const PLAYER_INACTIVITY_SECONDS = 300;
 
+function getTeamColors(color: PlayerColor): PlayerColor[] {
+  return color === 'red' || color === 'yellow' ? ['red', 'yellow'] : ['green', 'blue'];
+}
+
+function getPartnerColor(color: PlayerColor): PlayerColor {
+  return color === 'red' ? 'yellow' : color === 'yellow' ? 'red' : color === 'green' ? 'blue' : 'green';
+}
+
+function getPlayableColor(room: GameRoom, player: LudoPlayer): PlayerColor {
+  if (room.gameMode !== 'team' || !player.teamAssistUnlocked) return player.color;
+  return getPartnerColor(player.color);
+}
+
 function resetPlayerInactivity(player?: LudoPlayer) {
   if (!player || isBotPlayer(player.userId)) return;
   player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
@@ -1578,10 +1591,18 @@ function advanceTurn(room: GameRoom) {
   // Find next active player
   let found = false;
   let nextTurn = oldTurn;
-  for (let i = 1; i <= numPlayers; i++) {
+  // Two passes allow us to consume a partnership finish-skip and still select
+  // the following active player in the same call.
+  for (let i = 1; i <= numPlayers * 2; i++) {
     const checkIdx = (oldTurn + i) % numPlayers;
     const p = room.players[checkIdx];
     if (p && p.status !== 'left') {
+      if (room.gameMode === 'team' && p.teamFinishSkipPending) {
+        p.teamFinishSkipPending = false;
+        p.teamAssistUnlocked = true;
+        addLog(room, `${p.username} skips one turn after bringing all 4 tokens home. Future rolls will move their partner's tokens.`);
+        continue;
+      }
       nextTurn = checkIdx;
       found = true;
       break;
@@ -1717,7 +1738,8 @@ function executeBotTurnIfActive(room: GameRoom) {
       addLog(room, `🤖 Bot ${activePlayer.username} rolled a ${d}!`);
 
       // Determine valid moves for bot
-      const playerTokens = room.gameState.tokens.filter(t => t.color === activePlayer.color);
+      const playableColor = getPlayableColor(room, activePlayer);
+      const playerTokens = room.gameState.tokens.filter(t => t.color === playableColor);
       const validTokens = playerTokens.filter(t => isMoveValid(t, d));
 
       if (validTokens.length === 0) {
@@ -1777,6 +1799,8 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
   if (!token) return;
 
   const activePlayer = room.players[gs.turn];
+  const playableColor = getPlayableColor(room, activePlayer);
+  if (token.color !== playableColor || !isMoveValid(token, diceValue)) return;
   const oldPos = token.position;
   let newPos = oldPos;
 
@@ -1867,11 +1891,17 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
     bonusTurn = true; // Completing token grants bonus turn
   }
 
-  // Check if active player won
+  // In partnership mode a player who has brought all four of their own tokens
+  // home skips their next scheduled turn, then plays their partner's tokens.
   const playerTokens = gs.tokens.filter(t => t.color === token.color);
   const allFinished = playerTokens.every(t => t.position === 56);
+  const teamColors = getTeamColors(token.color);
+  const teamAllFinished = room.gameMode === 'team' && gs.tokens
+    .filter(t => teamColors.includes(t.color))
+    .every(t => t.position === 56);
+  const hasWon = room.gameMode === 'team' ? teamAllFinished : allFinished;
 
-  if (allFinished) {
+  if (hasWon) {
     // WINNER DETECTED!
     room.status = 'completed';
     gs.winnerId = activePlayer.userId;
@@ -1885,9 +1915,9 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
     }
 
     if (room.gameMode === 'team') {
-      const isRedYellow = token.color === 'red' || token.color === 'yellow';
-      const winningColors = isRedYellow ? ['red', 'yellow'] : ['green', 'blue'];
-      const winningTeammates = room.players.filter(p => winningColors.includes(p.color));
+      const winningColors = teamColors;
+      const winningTeammates = room.players.filter(p => winningColors.includes(p.color) && p.status !== 'left');
+      gs.winnerIds = winningTeammates.map(p => p.userId);
       const winningNames = winningTeammates.map(p => p.username).join(' & ');
       
       addLog(room, `🏆 CHAMPIONS! Team ${winningNames} has finished all tokens and WON the game!`);
@@ -1918,7 +1948,7 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
 
         // Record losses for other real players
         room.players.forEach(p => {
-          if (!winningColors.includes(p.color) && !isBotPlayer(p.userId)) {
+          if (p.status !== 'left' && !winningColors.includes(p.color) && !isBotPlayer(p.userId)) {
             const user = store.users[p.userId];
             if (user) {
               user.lossCount += 1;
@@ -1960,7 +1990,7 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
 
         // Record losses for other real players
         room.players.forEach(p => {
-          if (p.userId !== activePlayer.userId && !isBotPlayer(p.userId)) {
+          if (p.status !== 'left' && p.userId !== activePlayer.userId && !isBotPlayer(p.userId)) {
             const user = store.users[p.userId];
             if (user) {
               user.lossCount += 1;
@@ -1976,7 +2006,17 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
     gs.diceRoll = null;
     gs.hasRolled = false;
     
-    if (bonusTurn) {
+    const ownTokensFinished = room.gameMode === 'team'
+      && token.color === activePlayer.color
+      && gs.tokens.filter(t => t.color === activePlayer.color).every(t => t.position === 56)
+      && !activePlayer.teamAssistUnlocked
+      && !activePlayer.teamFinishSkipPending;
+
+    if (ownTokensFinished) {
+      activePlayer.teamFinishSkipPending = true;
+      addLog(room, `${activePlayer.username} has brought all 4 tokens home and must skip one turn before helping their partner.`);
+      advanceTurn(room);
+    } else if (bonusTurn) {
       addLog(room, `🎲 Bonus roll! ${activePlayer.username} gets to roll again.`);
       gs.turnTimer = 30;
     } else {
@@ -1987,12 +2027,77 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
   saveStore();
 }
 
+function completeTeamForfeit(room: GameRoom, forfeitingPlayer: LudoPlayer, reason: 'forfeit' | 'inactivity') {
+  const losingColors = getTeamColors(forfeitingPlayer.color);
+  const winningColors = getTeamColors(losingColors.includes('red') ? 'green' : 'red');
+  const winners = room.players.filter(player => winningColors.includes(player.color) && player.status !== 'left');
+
+  room.status = 'completed';
+  room.gameState.completionReason = reason;
+  room.gameState.winnerId = winners[0]?.userId || null;
+  room.gameState.winnerIds = winners.map(player => player.userId);
+  addLog(room, `Team ${winners.map(player => player.username).join(' & ')} wins by forfeit after ${forfeitingPlayer.username} left the partnership match.`);
+
+  const totalPayout = room.gameState.escrowBalance;
+  if (room.betAmount > 0 && totalPayout > 0) {
+    const realWinners = winners.filter(player => !isBotPlayer(player.userId) && store.users[player.userId]);
+    if (realWinners.length) {
+      const rakeRate = effectiveRakeForUsers(realWinners.map(player => player.userId));
+      const rakeAmount = Number((totalPayout * rakeRate).toFixed(2));
+      const payoutPool = Number((totalPayout - rakeAmount).toFixed(2));
+      const baseShare = Math.floor((payoutPool * 100) / realWinners.length) / 100;
+      let distributed = 0;
+      realWinners.forEach((player, index) => {
+        const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
+        distributed += share;
+        const profile = store.users[player.userId]!;
+        profile.balance += share;
+        profile.winCount = (profile.winCount || 0) + 1;
+        addTransaction(player.userId, 'win_payout', share, room.id, `Team win by ${reason} forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+        broadcastUserUpdate(player.userId);
+      });
+      room.gameState.rakeAmount = rakeAmount;
+      room.gameState.winnerPayout = payoutPool;
+      recordHouseRevenue('forfeit_rake', rakeAmount, room.id, `Rake from partnership ${reason} forfeit ${room.id}.`);
+    } else {
+      room.gameState.rakeAmount = totalPayout;
+      room.gameState.winnerPayout = 0;
+      recordHouseRevenue('bot_result', totalPayout, room.id, `Real-player stakes retained after bot team won partnership forfeit ${room.id}.`);
+    }
+  }
+
+  room.players.forEach(player => {
+    if (!losingColors.includes(player.color) || player.userId === forfeitingPlayer.userId || isBotPlayer(player.userId)) return;
+    const profile = store.users[player.userId];
+    if (profile) {
+      profile.lossCount = (profile.lossCount || 0) + 1;
+      broadcastUserUpdate(player.userId);
+    }
+  });
+  room.gameState.escrowBalance = 0;
+}
+
 // Helper to handle inactivity forfeit
 function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
   if (room.status !== 'playing') return;
 
   addLog(room, `⏱️ ${inactivePlayer.username} has been forfeited due to inactivity.`);
   inactivePlayer.status = 'left';
+  inactivePlayer.inactivityDeadline = undefined;
+  inactivePlayer.inactivityTimer = 0;
+
+  const inactiveProfile = store.users[inactivePlayer.userId];
+  if (inactiveProfile && !isBotPlayer(inactivePlayer.userId)) {
+    inactiveProfile.lossCount = (inactiveProfile.lossCount || 0) + 1;
+    broadcastUserUpdate(inactivePlayer.userId);
+  }
+
+  if (room.gameMode === 'team') {
+    completeTeamForfeit(room, inactivePlayer, 'inactivity');
+    saveStore();
+    broadcastToRoom(room.id, 'game_update', room);
+    return;
+  }
 
   // Check if only 1 active player remains
   const activePlayers = room.players.filter(pl => pl.status !== 'left');
@@ -3870,6 +3975,8 @@ function startMatchedRoom(matchedUsers: Array<{ id: string; username: string; av
   if (cap === 2 && mode === 'solo') {
     // For 2-player games, use Green (Host) and Blue (Challenger)
     colors = ['green', 'blue'];
+  } else if (mode === 'team') {
+    colors = ['red', 'yellow', 'green', 'blue'];
   } else {
     colors = ['red', 'green', 'yellow', 'blue'];
   }
@@ -3885,7 +3992,9 @@ function startMatchedRoom(matchedUsers: Array<{ id: string; username: string; av
     winCount: u.winCount || 0,
     lossCount: u.lossCount || 0,
     balance: u.balance || 0,
-    inactivityTimer: isBotPlayer(u.id) ? undefined : PLAYER_INACTIVITY_SECONDS
+    inactivityTimer: isBotPlayer(u.id) ? undefined : PLAYER_INACTIVITY_SECONDS,
+    teamFinishSkipPending: false,
+    teamAssistUnlocked: false
   }));
 
   resetPlayerInactivity(players[0]);
@@ -4316,7 +4425,9 @@ app.post('/api/rooms/challenge/accept', (req, res) => {
     return res.status(400).json({ error: `Insufficient wallet balance to accept this $${room.betAmount} match.` });
   }
 
-  const colors: PlayerColor[] = ['red', 'green', 'yellow', 'blue'];
+  const colors: PlayerColor[] = room.gameMode === 'team'
+    ? ['red', 'yellow', 'green', 'blue']
+    : ['red', 'green', 'yellow', 'blue'];
   const occupiedColors = room.players.map(p => p.color);
   const assignedColor = colors.find(c => !occupiedColors.includes(c)) || 'green';
 
@@ -4383,10 +4494,13 @@ app.post('/api/rooms/ready', (req, res) => {
 
 // Add Bot to Private Room (To start match immediately)
 app.post('/api/rooms/add-bot', (req, res) => {
-  const { roomId } = req.body;
+  const { userId, roomId } = req.body;
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: 'Room not found' });
-  if (room.players.length >= 4) {
+  if (room.status !== 'waiting') return res.status(400).json({ error: 'Bots can only be added before the match starts.' });
+  const requester = room.players.find(player => player.userId === userId);
+  if (!requester?.isHost) return res.status(403).json({ error: 'Only the host can add a bot.' });
+  if (room.players.length >= (room.capacity || 2)) {
     return res.status(400).json({ error: 'Room is already full.' });
   }
 
@@ -4394,7 +4508,9 @@ app.post('/api/rooms/add-bot', (req, res) => {
   const name = botNames[Math.floor(Math.random() * botNames.length)] + `_${Math.floor(Math.random() * 100)}`;
   const botId = `bot_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
   
-  const colors: PlayerColor[] = ['red', 'green', 'yellow', 'blue'];
+  const colors: PlayerColor[] = room.gameMode === 'team'
+    ? ['red', 'yellow', 'green', 'blue']
+    : ['red', 'green', 'yellow', 'blue'];
   const occupiedColors = room.players.map(p => p.color);
   const color = colors.find(c => !occupiedColors.includes(c)) || 'green';
 
@@ -4416,6 +4532,55 @@ app.post('/api/rooms/add-bot', (req, res) => {
   res.json(room);
 });
 
+// Choose an open partnership team or atomically swap two occupied team seats.
+app.post('/api/rooms/change-team', (req, res) => {
+  const { userId, roomId, playerId, targetTeam, swapWithUserId } = req.body;
+  const room = store.rooms[roomId];
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (room.status !== 'waiting' || room.gameMode !== 'team') {
+    return res.status(400).json({ error: 'Teams can only be changed in a waiting partnership lobby.' });
+  }
+
+  const requester = room.players.find(player => player.userId === userId);
+  const movingPlayer = room.players.find(player => player.userId === (playerId || userId));
+  if (!requester || !movingPlayer) return res.status(404).json({ error: 'Player not found in this lobby.' });
+  if (movingPlayer.userId !== requester.userId && !requester.isHost) {
+    return res.status(403).json({ error: 'Only the host can move another player.' });
+  }
+
+  const targetColors: PlayerColor[] = targetTeam === 'A' ? ['red', 'yellow'] : targetTeam === 'B' ? ['green', 'blue'] : [];
+  if (!targetColors.length) return res.status(400).json({ error: 'Invalid team selected.' });
+  if (targetColors.includes(movingPlayer.color)) return res.json(room);
+
+  const occupiedTargetColors = room.players.filter(player => player.userId !== movingPlayer.userId).map(player => player.color);
+  const openColor = targetColors.find(color => !occupiedTargetColors.includes(color));
+
+  if (openColor) {
+    movingPlayer.color = openColor;
+    if (!movingPlayer.isHost && !isBotPlayer(movingPlayer.userId)) movingPlayer.isReady = false;
+    addLog(room, `${movingPlayer.username} moved to Team ${targetTeam}.`);
+  } else {
+    if (!requester.isHost || !swapWithUserId) {
+      return res.status(409).json({ error: `Team ${targetTeam} is full. The host must select one player from each team to swap.` });
+    }
+    const swapPlayer = room.players.find(player => player.userId === swapWithUserId);
+    if (!swapPlayer || !targetColors.includes(swapPlayer.color)) {
+      return res.status(400).json({ error: 'Select a player from the destination team to swap with.' });
+    }
+    const oldColor = movingPlayer.color;
+    movingPlayer.color = swapPlayer.color;
+    swapPlayer.color = oldColor;
+    [movingPlayer, swapPlayer].forEach(player => {
+      if (!player.isHost && !isBotPlayer(player.userId)) player.isReady = false;
+    });
+    addLog(room, `${movingPlayer.username} and ${swapPlayer.username} swapped partnership teams.`);
+  }
+
+  saveStore();
+  broadcastToRoom(room.id, 'game_update', room);
+  res.json(room);
+});
+
 // Start Match (Host only)
 app.post('/api/rooms/start', (req, res) => {
   const { userId, roomId } = req.body;
@@ -4427,12 +4592,14 @@ app.post('/api/rooms/start', (req, res) => {
     return res.status(403).json({ error: 'Only the host can start the match.' });
   }
 
-  if (room.players.length < 2) {
-    return res.status(400).json({ error: 'Ugu yaraan 2 ciyaartoy ayaa loo baahan yahay si ciyaartu u bilaabato.' });
+  const requiredPlayers = room.capacity || 2;
+  if (room.players.length !== requiredPlayers) {
+    return res.status(400).json({ error: `Qolkan wuxuu u baahan yahay ${requiredPlayers} ciyaartoy ka hor inta aan ciyaarta la bilaabin.` });
   }
 
-  // Adjust capacity to joined players if host starts with present players
-  room.capacity = room.players.length;
+  if (room.players.some(player => !player.isReady)) {
+    return res.status(400).json({ error: 'Dhammaan ciyaartoydu waa inay Ready noqdaan ka hor bilowga.' });
+  }
 
   // Ensure all players are ready and assigned distinct colors
   let colorsToAssign: PlayerColor[];
@@ -4446,6 +4613,14 @@ app.post('/api/rooms/start', (req, res) => {
     if (host) host.color = 'red';
     if (guest) guest.color = 'yellow';
 
+  } else if (room.gameMode === 'team') {
+    colorsToAssign = ['red', 'yellow', 'green', 'blue'];
+    const colorsInUse = room.players.map(player => player.color);
+    const teamACount = room.players.filter(player => getTeamColors(player.color).includes('red')).length;
+    const teamBCount = room.players.length - teamACount;
+    if (new Set(colorsInUse).size !== 4 || teamACount !== 2 || teamBCount !== 2) {
+      return res.status(400).json({ error: 'Partnership-ku waa inuu yeeshaa laba ciyaaryahan Team A iyo laba ciyaaryahan Team B.' });
+    }
   } else {
     // If there are more than 2 players, use the full color set
     colorsToAssign = ['red', 'green', 'yellow', 'blue'];
@@ -4455,7 +4630,6 @@ app.post('/api/rooms/start', (req, res) => {
   }
 
   room.players.forEach((pl, idx) => {
-    pl.isReady = true;
     // Ensure pl.color is only assigned once based on the determined colorsToAssign,
     // or if already assigned (for 2-player case), just keep it.
     // This assumes the `pl.color` set in the if block (for host/guest) should take precedence.
@@ -4505,6 +4679,8 @@ app.post('/api/rooms/start', (req, res) => {
   room.gameState.turn = 0;
   room.gameState.turnTimer = 30;
   room.players.forEach(player => {
+    player.teamFinishSkipPending = false;
+    player.teamAssistUnlocked = false;
     if (!isBotPlayer(player.userId)) {
       player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
       player.inactivityDeadline = undefined;
@@ -4574,7 +4750,8 @@ app.post('/api/rooms/roll-dice', (req, res) => {
   }
 
   // Analyze if there are valid moves
-  const playerTokens = gs.tokens.filter(t => t.color === activePlayer.color);
+  const playableColor = getPlayableColor(room, activePlayer);
+  const playerTokens = gs.tokens.filter(t => t.color === playableColor);
   const validTokens = playerTokens.filter(t => isMoveValid(t, d));
 
   if (validTokens.length === 0) {
@@ -4623,7 +4800,8 @@ app.post('/api/rooms/move-token', (req, res) => {
   }
 
   const token = gs.tokens.find(t => t.id === tokenId);
-  if (!token || token.color !== activePlayer.color) {
+  const playableColor = getPlayableColor(room, activePlayer);
+  if (!token || token.color !== playableColor) {
     return res.status(400).json({ error: "Invalid token selected." });
   }
 
@@ -4692,6 +4870,14 @@ app.post('/api/rooms/accept-player', (req, res) => {
     return res.status(403).json({ error: 'Only the host can accept players.' });
   }
 
+  if (room.status !== 'waiting') {
+    return res.status(409).json({ error: 'Players can only be accepted while the room is waiting.' });
+  }
+
+  if (room.players.length >= (room.capacity || 2)) {
+    return res.status(409).json({ error: 'The room is already full.' });
+  }
+
   if (!room.pendingPlayers) room.pendingPlayers = [];
   const idx = room.pendingPlayers.findIndex(p => p.userId === challengerId);
   if (idx === -1) {
@@ -4700,17 +4886,15 @@ app.post('/api/rooms/accept-player', (req, res) => {
 
   const challenger = room.pendingPlayers.splice(idx, 1)[0];
   
-  // Assign color
-  const colors: PlayerColor[] = ['red', 'green', 'yellow', 'blue'];
-  const occupiedColors = room.players.map(p => p.color);
-  const color = colors.find(c => !occupiedColors.includes(c)) || 'green';
   let assignedColor: PlayerColor;
   if (room.capacity === 2 && room.gameMode === 'solo') {
     // For 2-player solo games, if host is 'red', the joiner (challenger) should be 'yellow'.
     assignedColor = 'yellow'; // Align with red/yellow diagonal for 2-player solo
   } else {
     // For other modes/capacities, assign the first available color.
-    const colors: PlayerColor[] = ['red', 'green', 'yellow', 'blue'];
+    const colors: PlayerColor[] = room.gameMode === 'team'
+      ? ['red', 'yellow', 'green', 'blue']
+      : ['red', 'green', 'yellow', 'blue'];
     const occupiedColors = room.players.map(p => p.color);
     // Find the first color not yet occupied, default to 'red' if somehow no color is found
     assignedColor = colors.find(c => !occupiedColors.includes(c)) || 'red';
@@ -4820,7 +5004,17 @@ app.post('/api/rooms/leave', (req, res) => {
   if (!room) return res.status(404).json({ error: 'Room not found' });
 
   const p = room.players.find(pl => pl.userId === userId);
-  if (!p) return res.status(404).json({ error: 'Player not in room' });
+  if (!p) {
+    const pendingIndex = room.pendingPlayers?.findIndex(player => player.userId === userId) ?? -1;
+    if (room.status === 'waiting' && pendingIndex >= 0) {
+      const [pendingPlayer] = room.pendingPlayers!.splice(pendingIndex, 1);
+      addLog(room, `${pendingPlayer.username} cancelled their request to join the room.`);
+      saveStore();
+      broadcastToRoom(room.id, 'game_update', room);
+      return res.json({ success: true, room });
+    }
+    return res.status(404).json({ error: 'Player not in room' });
+  }
 
   addLog(room, `${p.username} has left the game.`);
 
@@ -4838,29 +5032,51 @@ app.post('/api/rooms/leave', (req, res) => {
       broadcastToRoom(room.id, 'game_update', room);
     }
   } else if (room.status === 'playing') {
-    // Mark the player as 'left'
+    const leavingTurn = room.gameState.turn;
     p.status = 'left';
+    p.inactivityDeadline = undefined;
+    p.inactivityTimer = 0;
 
-    // Find the opponent
-    const opponent = room.players.find(pl => pl.userId !== userId && pl.status !== 'left');
+    const leavingPlayerProfile = store.users[userId];
+    if (leavingPlayerProfile && !isBotPlayer(userId)) {
+      leavingPlayerProfile.lossCount = (leavingPlayerProfile.lossCount || 0) + 1;
+      broadcastUserUpdate(userId);
+    }
 
-    if (opponent) {
-      // End the game immediately. The opponent wins by forfeit.
+    if (room.gameMode === 'team') {
+      completeTeamForfeit(room, p, 'forfeit');
+      saveStore();
+      broadcastToRoom(room.id, 'game_update', room);
+      return res.json({ success: true, room });
+    }
+
+    const activePlayers = room.players.filter(player => player.status !== 'left');
+
+    if (activePlayers.length > 1) {
+      // Solo 3/4-player matches continue after one player leaves. Keep the
+      // departed player in the room as an inactive seat for board/history UI.
+      if (room.players[leavingTurn]?.userId === userId) {
+        advanceTurn(room);
+      }
+      addLog(room, `⏭️ ${p.username} is inactive. ${activePlayers.length} players remain and the game continues.`);
+      saveStore();
+      broadcastToRoom(room.id, 'game_update', room);
+      return res.json({ success: true, room, gameContinues: true });
+    }
+
+    if (activePlayers.length === 1) {
+      const opponent = activePlayers[0];
       room.status = 'completed';
       room.gameState.winnerId = opponent.userId;
       room.gameState.completionReason = 'forfeit';
-      const leavingPlayerProfile = store.users[userId];
-      if (leavingPlayerProfile) {
-        leavingPlayerProfile.lossCount = (leavingPlayerProfile.lossCount || 0) + 1;
-        addLog(room, `😭 ${p.username} waa lagu helay ciyaarta!`); // Explicit log for the losing player
-        broadcastUserUpdate(userId);
-      }
 
       const totalPayout = room.gameState.escrowBalance;
       addLog(room, `🏆 ${p.username} has left the game. ${opponent.username} wins by forfeit and takes the pot of $${totalPayout.toFixed(2)}!`);
 
-      // Settle the forfeit through the same rake path used by other paid wins.
-      if (room.betAmount > 0 && totalPayout > 0) {
+      if (room.tournamentDetails) {
+        handleTournamentMatchWin(room.tournamentDetails.tournamentId, room.tournamentDetails.matchId, opponent.userId);
+        room.gameState.escrowBalance = 0;
+      } else if (room.betAmount > 0 && totalPayout > 0) {
         const winnerProfile = store.users[opponent.userId];
         if (winnerProfile && !isBotPlayer(winnerProfile.id)) {
           const effectiveRakePercentage = effectiveRakeForUsers([winnerProfile.id]);
@@ -4888,12 +5104,12 @@ app.post('/api/rooms/leave', (req, res) => {
       res.json({ success: true, room }); // Respond with the final room state
 
     } else {
-      // This case handles if somehow the last player leaves, or a player leaves a game with only bots.
-      // We can just mark the game as completed.
       room.status = 'completed';
-      // No winner is declared if no one is left.
+      room.gameState.winnerId = null;
+      room.gameState.completionReason = 'forfeit';
+      addLog(room, 'The game ended because no active players remained.');
       broadcastToRoom(room.id, 'game_update', room);
-      res.json({ success: true, room }); // Also respond with room state here
+      res.json({ success: true, room });
     }
   }
 

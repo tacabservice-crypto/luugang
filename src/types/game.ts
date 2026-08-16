@@ -86,6 +86,8 @@ export interface LudoPlayer {
   inactivityTimer?: number;
   inactivityDeadline?: number;
   lastInactivityWarningMinute?: number;
+  teamFinishSkipPending?: boolean;
+  teamAssistUnlocked?: boolean;
 }
 
 export interface LudoToken {
@@ -118,6 +120,7 @@ export interface GameState {
   turnTimer: number; // Seconds remaining for current player to make a move
   tokens: LudoToken[];
   winnerId: string | null;
+  winnerIds?: string[]; // Both winners in partnership mode
   completionReason?: 'forfeit' | 'inactivity' | 'all_tokens_home';
   endReasonText?: string;
   winnerPayout?: number; // Net amount credited to the displayed winner after rake
