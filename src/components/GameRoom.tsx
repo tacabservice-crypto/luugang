@@ -1349,18 +1349,18 @@ export default function GameRoomView({
             5. UTILITY TABS (CHAT & LOGS PANEL)
            ========================================== */}
         {activePanel && (
-        <div className="fixed top-24 left-3 right-3 z-40 h-64 max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60">
+        <div
+          className="fixed top-24 left-3 right-3 z-40 h-64 max-w-md ml-auto bg-[#091225]/95 backdrop-blur-xl border border-white/15 rounded-2xl overflow-hidden flex flex-col shadow-2xl shadow-black/60"
+          onTouchStart={(event) => { panelTouchStartYRef.current = event.touches[0]?.clientY ?? null; }}
+          onTouchEnd={(event) => {
+            const startY = panelTouchStartYRef.current;
+            const endY = event.changedTouches[0]?.clientY;
+            panelTouchStartYRef.current = null;
+            if (startY !== null && endY !== undefined && startY - endY > 55) setActivePanel(null);
+          }}
+        >
           {/* Tabs Selector */}
-          <div
-            className="relative grid grid-cols-[1fr_1fr_44px] pt-3 text-xs font-bold border-b border-white/10 bg-white/5 touch-none"
-            onTouchStart={(event) => { panelTouchStartYRef.current = event.touches[0]?.clientY ?? null; }}
-            onTouchEnd={(event) => {
-              const startY = panelTouchStartYRef.current;
-              const endY = event.changedTouches[0]?.clientY;
-              panelTouchStartYRef.current = null;
-              if (startY !== null && endY !== undefined && startY - endY > 55) setActivePanel(null);
-            }}
-          >
+          <div className="relative grid grid-cols-[1fr_1fr_44px] pt-3 text-xs font-bold border-b border-white/10 bg-white/5">
             <div className="absolute top-1 left-1/2 -translate-x-1/2 h-1 w-10 rounded-full bg-white/30" />
             <button
               onClick={() => setActivePanel('logs')}
