@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Confetti from 'react-confetti';
 import { GameRoom, PlayerColor, ChatMessage, GameLog, LudoToken, UserProfile } from '../types/game';
 import LudoBoard from './LudoBoard';
@@ -58,7 +58,7 @@ interface GameRoomProps {
   onToggleReady: () => void;
   onAddBot: () => void;
   onStartMatch: () => void;
-  onRollDice: () => void;
+  onRollDice: () => void | Promise<void>;
   onMoveToken: (tokenId: string) => void;
   onSendChat: (text: string) => void;
   onProfileUpdate: (updatedData: Partial<UserProfile>) => Promise<void>;
@@ -111,6 +111,7 @@ export default function GameRoomView({
   const [chatInput, setChatInput] = useState('');
   const [activePanel, setActivePanel] = useState<'chat' | 'logs'>('logs');
   const [isRolling, setIsRolling] = useState(false);
+  const [isRollRequestPending, setIsRollRequestPending] = useState(false);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -124,6 +125,8 @@ export default function GameRoomView({
   const forfeitAudioRef = useRef<HTMLAudioElement>(null);
   const captureAudioRef = useRef<HTMLAudioElement>(null);
   const tokenOutAudioRef = useRef<HTMLAudioElement>(null);
+  const onRollDiceRef = useRef(onRollDice);
+  const rollRequestInFlightRef = useRef(false);
   const prevTokensRef = useRef<LudoToken[]>(room.gameState.tokens);
   const hasPlayedFirstTokenOutSound = useRef<string[]>([]);
   const { width, height } = useWindowSize();
@@ -141,6 +144,20 @@ export default function GameRoomView({
   const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
   const isSpectator = queryParams.get('spectate') === 'true';
+
+  onRollDiceRef.current = onRollDice;
+
+  const requestDiceRoll = useCallback(async () => {
+    if (rollRequestInFlightRef.current) return;
+    rollRequestInFlightRef.current = true;
+    setIsRollRequestPending(true);
+    try {
+      await onRollDiceRef.current();
+    } finally {
+      rollRequestInFlightRef.current = false;
+      setIsRollRequestPending(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (isSpectator) {
@@ -266,6 +283,9 @@ export default function GameRoomView({
       const timer = setTimeout(() => setIsRolling(false), 800);
       return () => clearTimeout(timer);
     }
+    // A fast token move can change the turn before the animation timer ends.
+    // Always unlock the dice as soon as the new turn is unrolled.
+    setIsRolling(false);
   }, [room.gameState.diceRoll, room.gameState.hasRolled, room.gameState.turn, activePlayer?.userId, isSpeakerOn]);
 
   // Win/Loss sound effect
@@ -344,11 +364,11 @@ export default function GameRoomView({
   useEffect(() => {
     if (autoRoll && isActiveTurn && !room.gameState.hasRolled && !isRolling) {
       const delay = setTimeout(() => {
-        onRollDice();
+        void requestDiceRoll();
       }, 1000);
       return () => clearTimeout(delay);
     }
-  }, [autoRoll, isActiveTurn, room.gameState.hasRolled, isRolling, onRollDice]);
+  }, [autoRoll, isActiveTurn, room.gameState.hasRolled, isRolling, requestDiceRoll]);
 
   // Remind the active player to roll after five seconds of inactivity.
   useEffect(() => {
@@ -598,7 +618,9 @@ export default function GameRoomView({
           <div className="mt-4 bg-black/40 border border-yellow-500/30 px-6 py-2 rounded-xl text-center shadow-lg">
             <span className="text-[9px] text-yellow-400 font-black uppercase tracking-widest block">Dakhliga Guusha (Winnings)</span>
             <span className="text-2xl font-mono font-black text-green-400 block mt-0.5">
-              +{room.betAmount > 0 ? `${formatCurrency((room?.betAmount || 0) * (room?.players?.length || 0))}` : 'FREE DEMO'}
+              +{room.betAmount > 0
+                ? formatCurrency(room.gameState.winnerPayout ?? ((room.betAmount || 0) * (room.players?.length || 0)))
+                : 'FREE DEMO'}
             </span>
           </div>
         </div>
@@ -966,8 +988,8 @@ export default function GameRoomView({
               <PhysicalDice
                 value={room.gameState.diceRoll ?? room.gameState.lastDiceRoll}
                 isRolling={isRolling}
-                onClick={canPlay ? onRollDice : () => {}}
-                disabled={!canPlay || !isActiveTurn || room.gameState.hasRolled}
+                onClick={canPlay ? requestDiceRoll : () => {}}
+                disabled={!canPlay || !isActiveTurn || room.gameState.hasRolled || isRollRequestPending}
                 color={
                   activePlayer?.color === 'red' ? '#E53170' :
                   activePlayer?.color === 'green' ? '#00B074' :

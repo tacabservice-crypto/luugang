@@ -706,12 +706,16 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, roomId: activeRoom.id })
       });
-      if (response.ok) {
-        const data = await response.json();
-        setActiveRoom(data);
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'The dice could not be rolled.');
       }
+
+      const data = await response.json();
+      setActiveRoom(data);
     } catch (err) {
       console.error(err);
+      setErrorToast(userErrorMessage(err, 'The dice could not be rolled. Please try again.'));
     }
   };
 

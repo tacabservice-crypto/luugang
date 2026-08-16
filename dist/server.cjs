@@ -1799,6 +1799,13 @@ var START_OFFSETS = {
   red: 39
 };
 var SAFE_GLOBAL_SQUARES = [0, 8, 13, 21, 26, 34, 39, 47];
+var PLAYER_INACTIVITY_SECONDS = 300;
+function resetPlayerInactivity(player) {
+  if (!player || isBotPlayer(player.userId)) return;
+  player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
+  player.inactivityDeadline = Date.now() + PLAYER_INACTIVITY_SECONDS * 1e3;
+  player.lastInactivityWarningMinute = void 0;
+}
 function getGlobalPosition(color, relativePos) {
   if (relativePos < 0 || relativePos > 50) return null;
   const offset = START_OFFSETS[color];
@@ -1824,8 +1831,6 @@ function advanceTurn(room) {
   const gs = room.gameState;
   const oldTurn = gs.turn;
   const numPlayers = room.players.length;
-  const newPlayer = room.players[gs.turn];
-  if (newPlayer) newPlayer.inactivityTimer = 300;
   gs.diceRoll = null;
   gs.hasRolled = false;
   gs.turnTimer = 30;
@@ -1843,6 +1848,7 @@ function advanceTurn(room) {
   if (found) {
     gs.turn = nextTurn;
     const nextPlayer = room.players[nextTurn];
+    resetPlayerInactivity(nextPlayer);
     addLog(room, `It is now ${nextPlayer.username}'s turn. Please roll the dice!`);
   }
 }
@@ -2036,6 +2042,7 @@ function moveTokenLogic(room, tokenId, diceValue) {
   if (allFinished) {
     room.status = "completed";
     gs.winnerId = activePlayer.userId;
+    gs.completionReason = "all_tokens_home";
     if (room.tournamentDetails) {
       addLog(room, `\u{1F3C6} ${activePlayer.username} has won the tournament match!`);
       handleTournamentMatchWin(room.tournamentDetails.tournamentId, room.tournamentDetails.matchId, activePlayer.userId);
@@ -2054,12 +2061,14 @@ function moveTokenLogic(room, tokenId, diceValue) {
           const effectiveRakePercentage = effectiveRakeForUsers(realWinners.map((p) => p.userId));
           const rakeAmount = Number((gs.escrowBalance * effectiveRakePercentage).toFixed(2));
           const payoutPool = Number((gs.escrowBalance - rakeAmount).toFixed(2));
+          gs.rakeAmount = rakeAmount;
           const baseShare = Math.floor(payoutPool * 100 / realWinners.length) / 100;
           let distributed = 0;
           realWinners.forEach((p, index) => {
             const user = store.users[p.userId];
             const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
             distributed += share;
+            if (p.userId === gs.winnerId) gs.winnerPayout = share;
             user.balance += share;
             user.winCount += 1;
             addTransaction(p.userId, "win_payout", share, room.id, `Team win payout for match ${room.id} (Rake: $${rakeAmount.toFixed(2)}).`);
@@ -2086,7 +2095,9 @@ function moveTokenLogic(room, tokenId, diceValue) {
         if (winnerProfile) {
           const effectiveRakePercentage = effectiveRakeForUsers([winnerProfile.id]);
           const rakeAmount = gs.escrowBalance * effectiveRakePercentage;
-          const payoutAmount = gs.escrowBalance - rakeAmount;
+          const payoutAmount = Number((gs.escrowBalance - rakeAmount).toFixed(2));
+          gs.rakeAmount = Number(rakeAmount.toFixed(2));
+          gs.winnerPayout = payoutAmount;
           winnerProfile.balance += payoutAmount;
           winnerProfile.winCount += 1;
           addTransaction(
@@ -2134,6 +2145,7 @@ function handleInactivityForfeit(room, inactivePlayer) {
     const winner = activePlayers[0];
     room.status = "completed";
     room.gameState.winnerId = winner.userId;
+    room.gameState.completionReason = "inactivity";
     if (room.tournamentDetails) {
       addLog(room, `\u{1F3C6} ${winner.username} has won the tournament match by forfeit!`);
       handleTournamentMatchWin(room.tournamentDetails.tournamentId, room.tournamentDetails.matchId, winner.userId);
@@ -2146,7 +2158,9 @@ function handleInactivityForfeit(room, inactivePlayer) {
         if (winnerProfile && !isBotPlayer(winnerProfile.id)) {
           const effectiveRakePercentage = effectiveRakeForUsers([winnerProfile.id]);
           const rakeAmount = totalPayout * effectiveRakePercentage;
-          const payoutAmount = totalPayout - rakeAmount;
+          const payoutAmount = Number((totalPayout - rakeAmount).toFixed(2));
+          room.gameState.rakeAmount = Number(rakeAmount.toFixed(2));
+          room.gameState.winnerPayout = payoutAmount;
           winnerProfile.balance += payoutAmount;
           winnerProfile.winCount += 1;
           addTransaction(winner.userId, "win_payout", payoutAmount, room.id, `Win by opponent inactivity forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
@@ -2158,6 +2172,8 @@ function handleInactivityForfeit(room, inactivePlayer) {
       }
       room.gameState.escrowBalance = 0;
     }
+  } else if (activePlayers.length > 1) {
+    advanceTurn(room);
   }
   saveStore();
   broadcastToRoom(room.id, "game_update", room);
@@ -2169,14 +2185,25 @@ setInterval(() => {
     if (room.status === "playing") {
       const gs = room.gameState;
       const activePlayer = room.players[gs.turn];
-      if (activePlayer && activePlayer.inactivityTimer && !isBotPlayer(activePlayer.userId)) {
-        activePlayer.inactivityTimer -= 1;
+      if (activePlayer && !isBotPlayer(activePlayer.userId)) {
+        if (!activePlayer.inactivityDeadline) {
+          const remainingSeconds = Number.isFinite(activePlayer.inactivityTimer) ? Math.max(0, Number(activePlayer.inactivityTimer)) : PLAYER_INACTIVITY_SECONDS;
+          activePlayer.inactivityDeadline = Date.now() + remainingSeconds * 1e3;
+          activePlayer.lastInactivityWarningMinute = void 0;
+          saveStore();
+        }
+        activePlayer.inactivityTimer = Math.max(
+          0,
+          Math.ceil((activePlayer.inactivityDeadline - Date.now()) / 1e3)
+        );
         changed = true;
-        if (activePlayer.inactivityTimer > 0 && activePlayer.inactivityTimer % 60 === 0) {
-          const minutesLeft = activePlayer.inactivityTimer / 60;
+        const minutesLeft = Math.ceil(activePlayer.inactivityTimer / 60);
+        if (minutesLeft >= 1 && minutesLeft <= 4 && activePlayer.lastInactivityWarningMinute !== minutesLeft) {
+          activePlayer.lastInactivityWarningMinute = minutesLeft;
           const warningMsg = `Waqtigaagu wuu sii dhamaanayaa! Waxaa kuu harsan ${minutesLeft} daqiiqo. (Your time is running out! ${minutesLeft} minutes left.)`;
           sendEventToUser(activePlayer.userId, "inactivity_warning", { message: warningMsg });
           addLog(room, `\u23F1\uFE0F Digniin: ${activePlayer.username} waxaa u harsan ${minutesLeft} daqiiqo. (Warning: ${activePlayer.username} has ${minutesLeft} minutes left.)`);
+          saveStore();
         }
         if (activePlayer.inactivityTimer <= 0) {
           handleInactivityForfeit(room, activePlayer);
@@ -2496,7 +2523,7 @@ app.get("/api/updates", (req, res) => {
     const player = activeRoom.players.find((p) => p.userId === userId);
     if (player) {
       player.status = "online";
-      player.inactivityTimer = 300;
+      resetPlayerInactivity(player);
       addLog(activeRoom, `\u{1F7E2} ${player.username} has reconnected! Welcome back.`);
       broadcastToRoom(activeRoom.id, "game_update", activeRoom);
       saveStore();
@@ -3626,8 +3653,9 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
     winCount: u.winCount || 0,
     lossCount: u.lossCount || 0,
     balance: u.balance || 0,
-    inactivityTimer: isBotPlayer(u.id) ? void 0 : 300
+    inactivityTimer: isBotPlayer(u.id) ? void 0 : PLAYER_INACTIVITY_SECONDS
   }));
+  resetPlayerInactivity(players[0]);
   let totalEscrow = 0;
   players.forEach((p) => {
     if (!isBotPlayer(p.userId)) {
@@ -4083,6 +4111,14 @@ app.post("/api/rooms/start", (req, res) => {
   room.gameState.escrowBalance = totalEscrow;
   room.gameState.turn = 0;
   room.gameState.turnTimer = 30;
+  room.players.forEach((player) => {
+    if (!isBotPlayer(player.userId)) {
+      player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
+      player.inactivityDeadline = void 0;
+      player.lastInactivityWarningMinute = void 0;
+    }
+  });
+  resetPlayerInactivity(room.players[0]);
   addLog(room, `\u2694\uFE0F Ciyaartu waa ay bilaabatay! Ciyaartoyda: ${room.players.length}. Bet: $${bet}. Escrow Locked: $${totalEscrow}`);
   saveStore();
   broadcastToRoom(room.id, "game_update", room);
@@ -4095,14 +4131,14 @@ app.post("/api/rooms/roll-dice", (req, res) => {
   if (room.status !== "playing") return res.status(400).json({ error: "Game is not in playing state." });
   const gs = room.gameState;
   const activePlayer = room.players[gs.turn];
-  if (activePlayer) activePlayer.inactivityTimer = 300;
-  gs.turnTimer = 30;
   if (!activePlayer || activePlayer.userId !== userId) {
     return res.status(403).json({ error: "It is not your turn to roll!" });
   }
   if (gs.hasRolled) {
     return res.status(400).json({ error: "You have already rolled the dice!" });
   }
+  resetPlayerInactivity(activePlayer);
+  gs.turnTimer = 30;
   const d = Math.floor(Math.random() * 6) + 1;
   gs.diceRoll = d;
   gs.lastDiceRoll = d;
@@ -4153,8 +4189,6 @@ app.post("/api/rooms/move-token", (req, res) => {
   if (room.status !== "playing") return res.status(400).json({ error: "Game is not playing." });
   const gs = room.gameState;
   const activePlayer = room.players[gs.turn];
-  if (activePlayer) activePlayer.inactivityTimer = 300;
-  gs.turnTimer = 30;
   if (!activePlayer || activePlayer.userId !== userId) {
     return res.status(403).json({ error: "It is not your turn!" });
   }
@@ -4168,6 +4202,8 @@ app.post("/api/rooms/move-token", (req, res) => {
   if (!isMoveValid(token, gs.diceRoll)) {
     return res.status(400).json({ error: "This token cannot make a valid move with the current roll." });
   }
+  resetPlayerInactivity(activePlayer);
+  gs.turnTimer = 30;
   moveTokenLogic(room, tokenId, gs.diceRoll);
   broadcastToRoom(room.id, "game_update", room);
   executeBotTurnIfActive(room);
@@ -4318,6 +4354,7 @@ app.post("/api/rooms/leave", (req, res) => {
     if (opponent) {
       room.status = "completed";
       room.gameState.winnerId = opponent.userId;
+      room.gameState.completionReason = "forfeit";
       const leavingPlayerProfile = store.users[userId];
       if (leavingPlayerProfile) {
         leavingPlayerProfile.lossCount = (leavingPlayerProfile.lossCount || 0) + 1;
@@ -4329,10 +4366,20 @@ app.post("/api/rooms/leave", (req, res) => {
       if (room.betAmount > 0 && totalPayout > 0) {
         const winnerProfile = store.users[opponent.userId];
         if (winnerProfile && !isBotPlayer(winnerProfile.id)) {
-          winnerProfile.balance += totalPayout;
+          const effectiveRakePercentage = effectiveRakeForUsers([winnerProfile.id]);
+          const rakeAmount = Number((totalPayout * effectiveRakePercentage).toFixed(2));
+          const payoutAmount = Number((totalPayout - rakeAmount).toFixed(2));
+          room.gameState.rakeAmount = rakeAmount;
+          room.gameState.winnerPayout = payoutAmount;
+          winnerProfile.balance += payoutAmount;
           winnerProfile.winCount = (winnerProfile.winCount || 0) + 1;
-          addTransaction(opponent.userId, "win_payout", totalPayout, room.id, `Win by opponent forfeit.`);
+          addTransaction(opponent.userId, "win_payout", payoutAmount, room.id, `Win by opponent forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
           broadcastUserUpdate(opponent.userId);
+          recordHouseRevenue("forfeit_rake", rakeAmount, room.id, `Rake from manual forfeit match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
+        } else if (totalPayout > 0) {
+          room.gameState.winnerPayout = 0;
+          room.gameState.rakeAmount = totalPayout;
+          recordHouseRevenue("bot_result", totalPayout, room.id, `Real-player stakes retained after a bot won manual forfeit match ${room.id}.`);
         }
       }
       room.gameState.escrowBalance = 0;

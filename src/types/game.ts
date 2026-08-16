@@ -84,6 +84,8 @@ export interface LudoPlayer {
   lossCount?: number;
   balance?: number;
   inactivityTimer?: number;
+  inactivityDeadline?: number;
+  lastInactivityWarningMinute?: number;
 }
 
 export interface LudoToken {
@@ -118,6 +120,8 @@ export interface GameState {
   winnerId: string | null;
   completionReason?: 'forfeit' | 'inactivity' | 'all_tokens_home';
   endReasonText?: string;
+  winnerPayout?: number; // Net amount credited to the displayed winner after rake
+  rakeAmount?: number; // Platform commission retained from the escrow pot
   escrowBalance: number;
   logs: GameLog[];
   chat: ChatMessage[];
