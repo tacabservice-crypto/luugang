@@ -6,26 +6,38 @@ const INSTALL_DISMISSED_KEY = 'dhili-ludo-install-dismissed';
 const DISMISS_DURATION_MS = 24 * 60 * 60 * 1000;
 const APK_DOWNLOAD_URL = '/downloads/LudoSom.apk';
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 const InstallPwaPrompt = () => {
   const [shouldRender, setShouldRender] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     const isNativeApp = Capacitor.isNativePlatform();
-    const isAndroidBrowser = /Android/i.test(navigator.userAgent || '');
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches
       || Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
     const dismissedUntil = Number(window.localStorage.getItem(INSTALL_DISMISSED_KEY) || '0');
 
     setShouldRender(
-      isAndroidBrowser
-      && !isNativeApp
+      !isNativeApp
       && !isStandalone
       && dismissedUntil <= Date.now(),
     );
 
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
     const handleAppInstalled = () => setShouldRender(false);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
-    return () => window.removeEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
   }, []);
 
   const dismiss = () => {
@@ -36,14 +48,33 @@ const InstallPwaPrompt = () => {
     setShouldRender(false);
   };
 
-  const installApk = () => {
-    const link = document.createElement('a');
-    link.href = APK_DOWNLOAD_URL;
-    link.download = 'LudoSom.apk';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    dismiss();
+  const installApp = async () => {
+    const userAgent = navigator.userAgent || '';
+    if (/Android/i.test(userAgent)) {
+      const link = document.createElement('a');
+      link.href = APK_DOWNLOAD_URL;
+      link.download = 'LudoSom.apk';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      dismiss();
+      return;
+    }
+
+    if (installPrompt) {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') dismiss();
+      setInstallPrompt(null);
+      return;
+    }
+
+    if (/iPad|iPhone|iPod/i.test(userAgent)) {
+      window.alert('Tap Share, then choose “Add to Home Screen”.');
+      return;
+    }
+
+    window.alert('Open your browser menu and choose “Install app”.');
   };
 
   if (!shouldRender) return null;
@@ -74,7 +105,7 @@ const InstallPwaPrompt = () => {
         </p>
         <button
           type="button"
-          onClick={installApk}
+          onClick={installApp}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 active:scale-[0.98]"
         >
           <Download className="h-4 w-4" />
