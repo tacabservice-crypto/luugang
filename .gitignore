@@ -7,3 +7,15 @@ coverage/
 !.env.example
 firebase-admin-key.json
 db_store.json
+.local-run/
+
+# Android local/build/signing files
+android/.gradle/
+android/.idea/
+android/local.properties
+android/app/build/
+android/build/
+android/*.jks
+android/*.keystore
+android/keystore.properties
+android/app/google-services.json

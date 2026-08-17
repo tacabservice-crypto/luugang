@@ -1,4 +1,5 @@
 import { StrictMode } from 'react';
+import './api-runtime';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import App from './App.tsx';
@@ -44,4 +45,3 @@ createRoot(document.getElementById('root')!).render(
     </LanguageProvider>
   </StrictMode>,
 );
-

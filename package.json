@@ -9,12 +9,18 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);\" --sourcemap --outfile=server.js && esbuild server.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);\" --sourcemap --outfile=dist/server.js",
     "start": "node server.js",
     "preview": "vite preview",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "db:migrate": "tsx scripts/migrate-mysql.ts",
     "db:migrate:firebase": "tsx scripts/run-firestore-to-mysql-migration.ts --execute",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@capacitor-firebase/authentication": "^8.4.0",
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@google/genai": "^2.16.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/recharts": "^1.8.29",
@@ -39,6 +45,7 @@
     "vite": "^6.2.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",

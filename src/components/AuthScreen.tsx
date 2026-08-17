@@ -11,11 +11,14 @@ import TurnstileWidget from './TurnstileWidget';
 import { UserProfile } from '../types/game';
 import { auth } from '../firebase-client'; // Import client-side auth
 import { userErrorMessage } from '../utils/userError';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   GoogleAuthProvider,
+  signInWithCredential,
   signInWithPopup,
   User,
 } from 'firebase/auth';
@@ -375,10 +378,22 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
     setLoading(true);
     setError('');
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
       sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
-      const credential = await signInWithPopup(auth, provider);
+      let credential;
+      if (Capacitor.isNativePlatform()) {
+        const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+        const idToken = nativeResult.credential?.idToken;
+        if (!idToken) throw new Error('Google did not return an ID token. Please try again.');
+        const googleCredential = GoogleAuthProvider.credential(
+          idToken,
+          nativeResult.credential?.accessToken,
+        );
+        credential = await signInWithCredential(auth, googleCredential);
+      } else {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        credential = await signInWithPopup(auth, provider);
+      }
       const token = await credential.user.getIdToken();
       const statusResponse = await fetch(`${API_BASE_URL}/api/auth/profile-status`, { headers: { Authorization: `Bearer ${token}` } });
       const status = await readApiJson(statusResponse);
