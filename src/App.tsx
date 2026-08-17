@@ -2,14 +2,6 @@
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, GameRoom } from './types/game';
-import AuthScreen from './components/AuthScreen';
-import Dashboard from './components/Dashboard';
-import GameRoomView from './components/GameRoom';
-import WalletModal from './components/WalletModal';
-import RejoinPrompt from './components/RejoinPrompt';
-import AdminDashboard from './pages/AdminDashboard';
-import BecomeVip from './pages/BecomeVip';
-import Tournaments from './pages/Tournaments';
 import InstallPwaPrompt from './components/InstallPwaPrompt';
 import { Toaster } from 'react-hot-toast';
 import { VoiceChatProvider } from './context/VoiceChatContext';
@@ -17,6 +9,15 @@ import { useLanguage } from './context/LanguageContext';
 import { auth } from './firebase-client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { userErrorMessage } from './utils/userError';
+
+const AuthScreen = React.lazy(() => import('./components/AuthScreen'));
+const Dashboard = React.lazy(() => import('./components/Dashboard'));
+const GameRoomView = React.lazy(() => import('./components/GameRoom'));
+const WalletModal = React.lazy(() => import('./components/WalletModal'));
+const RejoinPrompt = React.lazy(() => import('./components/RejoinPrompt'));
+const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
+const Tournaments = React.lazy(() => import('./pages/Tournaments'));
 
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -229,6 +230,39 @@ export default function App() {
       }
     }
   }, [activeRoom, user?.id]);
+
+  // SSE is instant on a single server process. Production hosts may route two
+  // players to different processes, so refresh the active room from the shared
+  // MySQL copy as a lightweight cross-process fallback.
+  useEffect(() => {
+    if (!activeRoom?.id || !user?.id) return;
+    let stopped = false;
+    let requestInFlight = false;
+
+    const refreshActiveRoom = async () => {
+      if (requestInFlight || document.visibilityState === 'hidden') return;
+      requestInFlight = true;
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/rooms/${activeRoom.id}?userId=${encodeURIComponent(user.id)}`);
+        if (!response.ok) return;
+        const room = await response.json() as GameRoom;
+        if (!stopped && room?.id === activeRoom.id) {
+          setActiveRoom(previous => previous?.id === room.id ? { ...room, rejectionReason: previous.rejectionReason || room.rejectionReason } : previous);
+        }
+      } catch {
+        // The existing SSE connection remains the primary real-time channel.
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    const timer = window.setInterval(refreshActiveRoom, 10000);
+    void refreshActiveRoom();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [activeRoom?.id, user?.id]);
 
 
   const userIdRef = useRef(user?.id);

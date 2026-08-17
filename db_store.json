@@ -1,398 +1,476 @@
 {
   "users": {
     "user_1784973054408_hvz9n": {
-      "id": "user_1784973054408_hvz9n",
-      "username": "LudoPro_99",
-      "email": "ludopro_99@google.com",
-      "avatar": "🦄",
-      "balance": 101.5,
       "winCount": 1,
+      "earnings": 2.5,
       "lossCount": 0,
-      "earnings": 2.5
+      "balance": 101.5,
+      "avatar": "🦄",
+      "id": "user_1784973054408_hvz9n",
+      "email": "ludopro_99@google.com",
+      "username": "LudoPro_99"
     },
     "user_1784973175980_rmpm4": {
-      "id": "user_1784973175980_rmpm4",
-      "username": "cali",
-      "email": "cali@gmail.com",
-      "avatar": "🎮",
-      "balance": 106,
       "winCount": 1,
+      "earnings": 2,
       "lossCount": 0,
-      "earnings": 2
+      "balance": 106,
+      "avatar": "🎮",
+      "id": "user_1784973175980_rmpm4",
+      "email": "cali@gmail.com",
+      "username": "cali"
     },
     "user_1784973418248_xb5wz": {
-      "id": "user_1784973418248_xb5wz",
-      "username": "cismaan",
-      "email": "cismaan@gmail.com",
-      "avatar": "🔥",
-      "balance": 100.5,
       "winCount": 1,
+      "earnings": 2.5,
       "lossCount": 0,
-      "earnings": 2.5
+      "balance": 100.5,
+      "avatar": "🔥",
+      "id": "user_1784973418248_xb5wz",
+      "email": "cismaan@gmail.com",
+      "username": "cismaan"
     },
     "user_1784977573504_shyx5": {
-      "id": "user_1784977573504_shyx5",
-      "username": "Jaamac",
       "email": "jaamac@gmail.com",
       "avatar": "🎮",
-      "balance": 91.3,
-      "winCount": 7,
-      "lossCount": 5,
-      "isOfflinePreference": false,
       "firebaseUid": "vqnUVnKJNpOeTWIL0Mc3djpkKA22",
-      "earnings": 9
+      "isOfflinePreference": false,
+      "winCount": 7,
+      "earnings": 9,
+      "lossCount": 5,
+      "balance": 91.3,
+      "id": "user_1784977573504_shyx5",
+      "username": "Jaamac"
     },
     "user_1784982586620_o40me": {
-      "id": "user_1784982586620_o40me",
       "username": "khaalid",
       "email": "khaalid@gmail.com",
-      "avatar": "🎲",
-      "balance": 76.00000000000001,
-      "winCount": 53,
-      "lossCount": 43,
-      "isOfflinePreference": false,
+      "isAdmin": true,
       "firebaseUid": "PmWZkLbaysOEHsYZlsYqlTOfIwh2",
-      "earnings": 106.5
+      "isOfflinePreference": false,
+      "winCount": 53,
+      "earnings": 106.5,
+      "lossCount": 43,
+      "balance": 76.00000000000001,
+      "avatar": "🎲",
+      "id": "user_1784982586620_o40me"
     },
     "user_1784984283647_0r0p9": {
-      "id": "user_1784984283647_0r0p9",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "😎",
+      "id": "user_1784984283647_0r0p9",
+      "username": "Cusmaan"
     },
     "user_1784984290662_avwha": {
-      "id": "user_1784984290662_avwha",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "😎",
+      "id": "user_1784984290662_avwha",
+      "username": "Cusmaan"
     },
     "user_1784984290678_d8i92": {
-      "id": "user_1784984290678_d8i92",
-      "username": "Jaamac",
-      "avatar": "🤠",
-      "balance": 105,
       "winCount": 1,
+      "earnings": 10,
       "lossCount": 0,
-      "earnings": 10
+      "balance": 105,
+      "avatar": "🤠",
+      "id": "user_1784984290678_d8i92",
+      "username": "Jaamac"
     },
     "user_1784984357518_ufqxm": {
-      "id": "user_1784984357518_ufqxm",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "😎",
+      "id": "user_1784984357518_ufqxm",
+      "username": "Cusmaan"
     },
     "user_1784984357532_4tbcn": {
-      "id": "user_1784984357532_4tbcn",
-      "username": "Jaamac",
-      "avatar": "🤠",
-      "balance": 105,
       "winCount": 1,
+      "earnings": 10,
       "lossCount": 0,
-      "earnings": 10
+      "balance": 105,
+      "avatar": "🤠",
+      "id": "user_1784984357532_4tbcn",
+      "username": "Jaamac"
     },
     "user_1784984410127_o7trj": {
-      "id": "user_1784984410127_o7trj",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "😎",
+      "id": "user_1784984410127_o7trj",
+      "username": "Cusmaan"
     },
     "user_1784984410140_iyj1e": {
-      "id": "user_1784984410140_iyj1e",
-      "username": "Jaamac",
-      "avatar": "🤠",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "🤠",
+      "id": "user_1784984410140_iyj1e",
+      "username": "Jaamac"
     },
     "user_1784993401567_93tkf": {
-      "id": "user_1784993401567_93tkf",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "😎",
+      "id": "user_1784993401567_93tkf",
+      "username": "Cusmaan"
     },
     "user_1784993401582_ldhu7": {
-      "id": "user_1784993401582_ldhu7",
-      "username": "Jaamac",
-      "avatar": "🤠",
-      "balance": 105,
       "winCount": 1,
+      "earnings": 10,
       "lossCount": 0,
-      "earnings": 10
+      "balance": 105,
+      "avatar": "🤠",
+      "id": "user_1784993401582_ldhu7",
+      "username": "Jaamac"
     },
     "user_1784993408478_76tm7": {
-      "id": "user_1784993408478_76tm7",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 105,
       "winCount": 1,
+      "earnings": 10,
       "lossCount": 0,
-      "earnings": 10
+      "balance": 105,
+      "avatar": "😎",
+      "id": "user_1784993408478_76tm7",
+      "username": "Cusmaan"
     },
     "user_1784993408490_1yowz": {
-      "id": "user_1784993408490_1yowz",
-      "username": "Jaamac",
-      "avatar": "🤠",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "🤠",
+      "id": "user_1784993408490_1yowz",
+      "username": "Jaamac"
     },
     "user_1784993416444_jp3nj": {
-      "id": "user_1784993416444_jp3nj",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 107.5,
       "winCount": 1,
+      "earnings": 12.5,
       "lossCount": 0,
-      "earnings": 12.5
+      "balance": 107.5,
+      "avatar": "😎",
+      "id": "user_1784993416444_jp3nj",
+      "username": "Cusmaan"
     },
     "user_1784993578243_35kdi": {
-      "id": "user_1784993578243_35kdi",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "😎",
+      "id": "user_1784993578243_35kdi",
+      "username": "Cusmaan"
     },
     "user_1784993587623_jcyib": {
-      "id": "user_1784993587623_jcyib",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "😎",
+      "id": "user_1784993587623_jcyib",
+      "username": "Cusmaan"
     },
     "user_1784993642214_ax24x": {
-      "id": "user_1784993642214_ax24x",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "😎",
+      "id": "user_1784993642214_ax24x",
+      "username": "Cusmaan"
     },
     "user_1784993648743_balrv": {
-      "id": "user_1784993648743_balrv",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "😎",
+      "id": "user_1784993648743_balrv",
+      "username": "Cusmaan"
     },
     "user_1784993685599_hcba1": {
-      "id": "user_1784993685599_hcba1",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "😎",
+      "id": "user_1784993685599_hcba1",
+      "username": "Cusmaan"
     },
     "user_1784993733256_bzzsb": {
-      "id": "user_1784993733256_bzzsb",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "😎",
+      "id": "user_1784993733256_bzzsb",
+      "username": "Cusmaan"
     },
     "user_1784993745087_pcexh": {
-      "id": "user_1784993745087_pcexh",
-      "username": "Cusmaan",
-      "avatar": "😎",
-      "balance": 95,
       "winCount": 0,
+      "earnings": 0,
       "lossCount": 1,
-      "earnings": 0
+      "balance": 95,
+      "avatar": "😎",
+      "id": "user_1784993745087_pcexh",
+      "username": "Cusmaan"
     },
     "user_1785366767809_bb7ba": {
-      "id": "user_1785366767809_bb7ba",
-      "firebaseUid": "WGdP4DgHQfgEZrzDGok71hpm3D33",
-      "username": "saalaxr",
       "email": "saalax@gmail.com",
-      "avatar": "🤖",
-      "balance": 88.30000000000003,
-      "winCount": 50,
-      "lossCount": 61,
+      "firebaseUid": "WGdP4DgHQfgEZrzDGok71hpm3D33",
       "isOfflinePreference": true,
-      "earnings": 111.8
+      "winCount": 50,
+      "earnings": 111.8,
+      "lossCount": 61,
+      "balance": 88.30000000000003,
+      "avatar": "🤖",
+      "id": "user_1785366767809_bb7ba",
+      "username": "saalaxr"
     },
     "user_1785393496443_rtmnd": {
-      "id": "user_1785393496443_rtmnd",
-      "firebaseUid": "Ntz9g92c13aXHK85mJIfmM5bBTg2",
-      "username": "casiiso",
-      "email": "casiiso@gmail.com",
-      "avatar": "🎲",
-      "balance": 89.39999999999999,
       "winCount": 9,
-      "lossCount": 4,
       "earnings": 9.7,
-      "seekingJoinedAt": 1785788884137
+      "firebaseUid": "Ntz9g92c13aXHK85mJIfmM5bBTg2",
+      "lossCount": 4,
+      "balance": 89.39999999999999,
+      "seekingJoinedAt": 1785788884137,
+      "avatar": "🎲",
+      "id": "user_1785393496443_rtmnd",
+      "email": "casiiso@gmail.com",
+      "username": "casiiso"
     },
     "user_1785575636907_a1f1e": {
-      "id": "user_1785575636907_a1f1e",
-      "firebaseUid": "4XBFhUx50wZqnwoqkR5Dk5bVYC23",
-      "username": "siciid",
+      "uid": "4XBFhUx50wZqnwoqkR5Dk5bVYC23",
       "email": "siciid@gmail.com",
-      "avatar": "🎲",
-      "balance": 113.2,
+      "displayName": "siciid",
+      "createdAt": {
+        "_seconds": 1785575013,
+        "_nanoseconds": 532000000
+      },
+      "stats": {
+        "gamesPlayed": 0,
+        "wins": 0,
+        "losses": 0
+      },
       "winCount": 20,
-      "lossCount": 16,
       "earnings": 41.4,
-      "seekingJoinedAt": 1785717486925
+      "firebaseUid": "4XBFhUx50wZqnwoqkR5Dk5bVYC23",
+      "lossCount": 16,
+      "balance": 113.2,
+      "seekingJoinedAt": 1785717486925,
+      "avatar": "🎲",
+      "id": "user_1785575636907_a1f1e",
+      "username": "siciid"
     },
     "user_1785594050532_sc7r1": {
-      "id": "user_1785594050532_sc7r1",
-      "firebaseUid": "UchszmpD6FXeZeYpPLod6NaBSDv1",
-      "username": "xasan",
+      "uid": "UchszmpD6FXeZeYpPLod6NaBSDv1",
       "email": "xasan@gmail.com",
-      "avatar": "🎲",
-      "balance": 98,
+      "displayName": "xasan",
+      "createdAt": {
+        "_seconds": 1785594050,
+        "_nanoseconds": 526000000
+      },
+      "stats": {
+        "gamesPlayed": 0,
+        "wins": 0,
+        "losses": 0
+      },
       "winCount": 0,
+      "earnings": 0,
+      "firebaseUid": "UchszmpD6FXeZeYpPLod6NaBSDv1",
       "lossCount": 0,
+      "balance": 98,
       "seekingJoinedAt": 1785594414520,
-      "earnings": 0
+      "avatar": "🎲",
+      "id": "user_1785594050532_sc7r1",
+      "username": "xasan"
     },
     "user_1785702436308_qff57": {
-      "id": "user_1785702436308_qff57",
-      "firebaseUid": "qyfWG44HHIMwBNLF5Xa5REVWNqB2",
-      "username": "khaalid",
-      "email": "khaalid4@gmail.com",
-      "avatar": "🎮",
-      "balance": 100,
       "winCount": 1,
-      "lossCount": 1,
       "earnings": 0.6,
-      "isOfflinePreference": false
+      "firebaseUid": "qyfWG44HHIMwBNLF5Xa5REVWNqB2",
+      "lossCount": 1,
+      "balance": 100,
+      "isOfflinePreference": false,
+      "avatar": "🎮",
+      "id": "user_1785702436308_qff57",
+      "email": "khaalid4@gmail.com",
+      "username": "khaalid"
     },
     "user_1785702509142_rmgma": {
-      "id": "user_1785702509142_rmgma",
-      "firebaseUid": "PajzOXEbMMURRTriRn4xjYvmkLP2",
-      "username": "saalax🍬",
-      "email": "saalax2@gmail.com",
-      "avatar": "🚀",
-      "balance": 5.350000000000023,
       "winCount": 4,
-      "lossCount": 10,
       "earnings": 3,
-      "isOfflinePreference": true
+      "firebaseUid": "PajzOXEbMMURRTriRn4xjYvmkLP2",
+      "lossCount": 10,
+      "balance": 5.350000000000023,
+      "isOfflinePreference": true,
+      "avatar": "🚀",
+      "id": "user_1785702509142_rmgma",
+      "email": "saalax2@gmail.com",
+      "username": "saalax🍬"
     },
     "user_1785703537862_xxk2n": {
-      "id": "user_1785703537862_xxk2n",
-      "firebaseUid": "8HHpIA7y4iVGu1AdHmAwABmLCC33",
-      "username": "khaalid6",
-      "email": "khaalid6@gmail.com",
-      "avatar": "🎮",
-      "balance": 100,
       "winCount": 0,
+      "earnings": 0,
+      "firebaseUid": "8HHpIA7y4iVGu1AdHmAwABmLCC33",
       "lossCount": 0,
-      "earnings": 0
+      "balance": 100,
+      "avatar": "🎮",
+      "id": "user_1785703537862_xxk2n",
+      "email": "khaalid6@gmail.com",
+      "username": "khaalid6"
     },
     "user_1785704210390_bck7d": {
-      "id": "user_1785704210390_bck7d",
-      "firebaseUid": "xBbHdhvIcsa3xmcodD93H2WVumo2",
-      "username": "khaalid",
-      "email": "khaalid2@gmail.com",
-      "avatar": "🎮",
-      "balance": 100.15,
       "winCount": 4,
-      "lossCount": 3,
       "earnings": 3.3,
-      "seekingJoinedAt": 1785878606225
+      "firebaseUid": "xBbHdhvIcsa3xmcodD93H2WVumo2",
+      "lossCount": 3,
+      "balance": 100.45,
+      "seekingJoinedAt": 1785878606225,
+      "avatar": "🎮",
+      "id": "user_1785704210390_bck7d",
+      "email": "khaalid2@gmail.com",
+      "username": "khaalid"
     },
     "user_1785704985989_trqrt": {
-      "id": "user_1785704985989_trqrt",
-      "firebaseUid": "ja7qjUdQxjRThMOUlYHpD8kmLsl1",
-      "username": "Axmed Maxamuud Maxam",
-      "email": "axmed@gmail.com",
-      "avatar": "🏆",
-      "balance": 100,
       "winCount": 1,
+      "earnings": 0.6,
+      "firebaseUid": "ja7qjUdQxjRThMOUlYHpD8kmLsl1",
       "lossCount": 1,
-      "earnings": 0.6
+      "balance": 100,
+      "avatar": "🏆",
+      "id": "user_1785704985989_trqrt",
+      "email": "axmed@gmail.com",
+      "username": "Axmed Maxamuud Maxam"
     },
     "user_1785866816536_xpf6i": {
-      "id": "user_1785866816536_xpf6i",
-      "firebaseUid": "Ckv8Cm6ud9cs0OiKnQE8sOEOrXg2",
-      "username": "Boocame",
-      "email": "boocame@gmail.com",
-      "avatar": "🎮",
-      "balance": 10.599999999999996,
       "winCount": 3,
+      "earnings": 1.7999999999999998,
+      "firebaseUid": "Ckv8Cm6ud9cs0OiKnQE8sOEOrXg2",
       "lossCount": 0,
-      "earnings": 1.7999999999999998
+      "balance": 10.599999999999996,
+      "avatar": "🎮",
+      "id": "user_1785866816536_xpf6i",
+      "email": "boocame@gmail.com",
+      "username": "Boocame"
     },
     "user_1785868239571_41ntx": {
-      "id": "user_1785868239571_41ntx",
-      "firebaseUid": "q5Gvi5eJCbNdzTVFb9ithZF6JNG2",
-      "username": "Tanha",
-      "email": "tanha2@gmail.com",
-      "avatar": "🎮",
-      "balance": 9.999999999999998,
       "winCount": 1,
+      "earnings": 0.6,
+      "firebaseUid": "q5Gvi5eJCbNdzTVFb9ithZF6JNG2",
       "lossCount": 1,
-      "earnings": 0.6
+      "balance": 9.999999999999998,
+      "avatar": "🎮",
+      "id": "user_1785868239571_41ntx",
+      "email": "tanha2@gmail.com",
+      "username": "Tanha"
     },
     "user_1785871427921_us98b": {
-      "id": "user_1785871427921_us98b",
+      "winCount": 0,
+      "earnings": 0,
       "firebaseUid": "bHDM7SQLV4MgxdVlal951xXQmNo2",
-      "username": "Me",
-      "email": "thedigitalsharif@gmail.com",
-      "avatar": "🎮",
-      "balance": 10.239999999999998,
-      "winCount": 1,
       "lossCount": 0,
+      "balance": 9.7,
+      "avatar": "🎮",
+      "id": "user_1785871427921_us98b",
+      "email": "thedigitalsharif@gmail.com",
+      "username": "Me"
+    },
+    "user_1786553339083_7e6jj": {
+      "winCount": 0,
+      "firebaseUid": "2j7V0jNc0GOqUTyqUfgSRW9E8582",
+      "lossCount": 0,
+      "balance": 1,
+      "linkedAgentId": "agent_1786552999186",
+      "email": "yaasmiin33@gmail.com",
+      "earnings": 0,
+      "avatar": "🎮",
+      "id": "user_1786553339083_7e6jj",
+      "username": "Yaasmiin33"
+    },
+    "user_1786555166542_88hfm": {
+      "winCount": 0,
+      "firebaseUid": "LSfy1qFhOVOALZhfRXZZlHYpYrp2",
+      "lossCount": 0,
+      "balance": 1,
+      "avatar": "🌸",
+      "id": "user_1786555166542_88hfm",
+      "email": "salmo@gmail.com",
+      "username": "salmo",
       "earnings": 0
+    },
+    "user_1786533251632_qqsgi": {
+      "winCount": 0,
+      "firebaseUid": "TN6RfTzJVbRT3ay9csQArTo1jWI3",
+      "lossCount": 0,
+      "balance": 1,
+      "avatar": "🌸",
+      "email": "saki@gmail.com",
+      "username": "saki",
+      "earnings": 0,
+      "seekingJoinedAt": 1786533303993,
+      "id": "user_1786533251632_qqsgi"
+    },
+    "user_1786554784734_cr6nd": {
+      "winCount": 0,
+      "firebaseUid": "bZKNjGAYGUOXjFxSsC6eJKcRVUb2",
+      "lossCount": 0,
+      "balance": 1,
+      "avatar": "🌸",
+      "email": "saki2@gmail.com",
+      "username": "saki2",
+      "earnings": 0,
+      "id": "user_1786554784734_cr6nd"
+    },
+    "user_1786533363268_hr0cx": {
+      "winCount": 0,
+      "firebaseUid": "kVNWKquiw1MY72R0e3zW7f33WeZ2",
+      "lossCount": 0,
+      "balance": 1,
+      "avatar": "🌸",
+      "id": "user_1786533363268_hr0cx",
+      "email": "libaax2@gmail.com",
+      "username": "libaax2",
+      "earnings": 0
+    },
+    "user_1786552543640_6orcr": {
+      "winCount": 0,
+      "firebaseUid": "oxckHKPM8FSzKJo3rWrnFHLsMJ23",
+      "lossCount": 0,
+      "balance": 1,
+      "avatar": "🌸",
+      "id": "user_1786552543640_6orcr",
+      "email": "jass1@gmail.com",
+      "username": "jass1",
+      "earnings": 0
+    },
+    "rPt42in5SIZknLd5avRy38DXJsU2": {
+      "id": "rPt42in5SIZknLd5avRy38DXJsU2",
+      "firebaseUid": "rPt42in5SIZknLd5avRy38DXJsU2",
+      "username": "saki",
+      "email": "saki3@gmail.com",
+      "avatar": "🎮",
+      "winCount": 0,
+      "linkedAgentId": "agent_1786057318162",
+      "promoCode": "KHAALID1",
+      "createdAt": 1786272265458,
+      "earnings": 0,
+      "balance": 11.09999999999999,
+      "lossCount": 7
     }
   },
   "transactions": [
-    {
-      "id": "tx_1786453001057_qseue",
-      "userId": "house",
-      "type": "app_commission",
-      "amount": 0.06,
-      "timestamp": 1786453001057,
-      "matchId": "MATCH_0F4HR",
-      "description": "Rake from forfeit match MATCH_0F4HR (10%)."
-    },
-    {
-      "id": "tx_1786453001042_5s722",
-      "userId": "user_1785871427921_us98b",
-      "type": "win_payout",
-      "amount": 0.54,
-      "timestamp": 1786453001042,
-      "matchId": "MATCH_0F4HR",
-      "description": "Win by opponent inactivity forfeit (Rake: $0.06)."
-    },
-    {
-      "id": "tx_1786452754875_cvtqz",
-      "userId": "user_1785704210390_bck7d",
-      "type": "bet_escrow_locked",
-      "amount": 0.3,
-      "timestamp": 1786452754875,
-      "matchId": "MATCH_7UHE2",
-      "description": "Escrow stake for Ludo Match MATCH_7UHE2."
-    },
     {
       "id": "tx_1785871808899_3505h",
       "userId": "user_1785871427921_us98b",
@@ -53864,11 +53942,11 @@
           "color": "green",
           "isHost": true,
           "isReady": true,
-          "status": "left",
+          "status": "online",
           "winCount": 3,
           "lossCount": 0,
           "balance": 10.899999999999997,
-          "inactivityTimer": 0
+          "inactivityTimer": 226
         },
         {
           "userId": "user_1785871427921_us98b",
@@ -53941,8 +54019,8 @@
             "position": -1
           }
         ],
-        "winnerId": "user_1785871427921_us98b",
-        "escrowBalance": 0,
+        "winnerId": null,
+        "escrowBalance": 0.6,
         "logs": [
           {
             "id": "1",
@@ -53995,34 +54073,14 @@
             "text": "⏱️ Waqtiga 30-ka ilbiriqsi wuu dhamaaday Boocame. Ganaaxa daahitaanka ayaa bilaabanaya."
           },
           {
-            "id": "log_1786452758972_k7jtp",
-            "timestamp": 1786452758972,
+            "id": "log_1786555836840_1dzfy",
+            "timestamp": 1786555836840,
             "text": "⏱️ Digniin: Boocame waxaa u harsan 4 daqiiqo. (Warning: Boocame has 4 minutes left.)"
           },
           {
-            "id": "log_1786452820941_yxk6m",
-            "timestamp": 1786452820941,
-            "text": "⏱️ Digniin: Boocame waxaa u harsan 3 daqiiqo. (Warning: Boocame has 3 minutes left.)"
-          },
-          {
-            "id": "log_1786452880977_5w0p8",
-            "timestamp": 1786452880977,
-            "text": "⏱️ Digniin: Boocame waxaa u harsan 2 daqiiqo. (Warning: Boocame has 2 minutes left.)"
-          },
-          {
-            "id": "log_1786452941009_s7wve",
-            "timestamp": 1786452941009,
-            "text": "⏱️ Digniin: Boocame waxaa u harsan 1 daqiiqo. (Warning: Boocame has 1 minutes left.)"
-          },
-          {
-            "id": "log_1786453001042_eo2fe",
-            "timestamp": 1786453001042,
-            "text": "⏱️ Boocame has been forfeited due to inactivity."
-          },
-          {
-            "id": "log_1786453001042_wu21a",
-            "timestamp": 1786453001042,
-            "text": "🏆 Game Over! Me wins by forfeit and takes the pot of $0.60!"
+            "id": "log_1786555851837_xy3fc",
+            "timestamp": 1786555851837,
+            "text": "Room closed due to inactivity or abandonment."
           }
         ],
         "chat": [],
@@ -54031,117 +54089,6 @@
         "consecutiveSixes": 0
       },
       "createdAt": 1785871809005
-    },
-    "MATCH_7UHE2": {
-      "id": "MATCH_7UHE2",
-      "status": "playing",
-      "betAmount": 0.3,
-      "players": [
-        {
-          "userId": "user_1785704210390_bck7d",
-          "username": "khaalid",
-          "avatar": "🎮",
-          "color": "green",
-          "isHost": true,
-          "isReady": true,
-          "status": "online",
-          "winCount": 4,
-          "lossCount": 3,
-          "balance": 100.45
-        },
-        {
-          "userId": "bot_match_1786452754875_1",
-          "username": "DesertFox AI #87",
-          "avatar": "🦊",
-          "color": "blue",
-          "isHost": false,
-          "isReady": true,
-          "status": "online",
-          "winCount": 26,
-          "lossCount": 18,
-          "balance": 100
-        }
-      ],
-      "capacity": 2,
-      "gameMode": "solo",
-      "gameState": {
-        "turn": 0,
-        "diceRoll": null,
-        "hasRolled": false,
-        "turnTimer": 0,
-        "tokens": [
-          {
-            "id": "token_green_0",
-            "ownerId": "user_1785704210390_bck7d",
-            "color": "green",
-            "position": -1
-          },
-          {
-            "id": "token_green_1",
-            "ownerId": "user_1785704210390_bck7d",
-            "color": "green",
-            "position": -1
-          },
-          {
-            "id": "token_green_2",
-            "ownerId": "user_1785704210390_bck7d",
-            "color": "green",
-            "position": -1
-          },
-          {
-            "id": "token_green_3",
-            "ownerId": "user_1785704210390_bck7d",
-            "color": "green",
-            "position": -1
-          },
-          {
-            "id": "token_blue_0",
-            "ownerId": "bot_match_1786452754875_1",
-            "color": "blue",
-            "position": -1
-          },
-          {
-            "id": "token_blue_1",
-            "ownerId": "bot_match_1786452754875_1",
-            "color": "blue",
-            "position": -1
-          },
-          {
-            "id": "token_blue_2",
-            "ownerId": "bot_match_1786452754875_1",
-            "color": "blue",
-            "position": -1
-          },
-          {
-            "id": "token_blue_3",
-            "ownerId": "bot_match_1786452754875_1",
-            "color": "blue",
-            "position": -1
-          }
-        ],
-        "winnerId": null,
-        "escrowBalance": 0.6,
-        "logs": [
-          {
-            "id": "1",
-            "timestamp": 1786452754901,
-            "text": "Match found! Mode: Solo 2P"
-          },
-          {
-            "id": "2",
-            "timestamp": 1786452754901,
-            "text": "Stake of $0.3 locked in secure escrow pool ($0.60)"
-          },
-          {
-            "id": "log_1786452785927_n5rwt",
-            "timestamp": 1786452785927,
-            "text": "⏱️ Waqtiga 30-ka ilbiriqsi wuu dhamaaday khaalid. Ganaaxa daahitaanka ayaa bilaabanaya."
-          }
-        ],
-        "chat": [],
-        "lastActivity": 1786452754901
-      },
-      "createdAt": 1786452754901
     }
   },
   "matchmakingQueues": {
@@ -54150,19 +54097,9 @@
     "5": [],
     "10": [],
     "25": [],
-    "50": [],
-    "1_2_solo": [],
-    "0_2_solo": [],
-    "50_2_solo": [],
-    "5_2_solo": [],
-    "1_4_solo": [],
-    "1_4_team": [],
-    "0.3_2_solo": [],
-    "0.3_4_team": [],
-    "10_4_team": [],
-    "0.75_2_solo": []
+    "50": []
   },
-  "houseRevenue": 23.06,
+  "houseRevenue": 23,
   "pendingManualTransactions": [
     {
       "id": "req_1785863837983_i4ine",
@@ -54267,6 +54204,354 @@
       "transactionType": "deposit",
       "status": "rejected",
       "createdAt": 1785834394894
+    },
+    {
+      "id": "req_1786556242463_w8wcu",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "userId": "rPt42in5SIZknLd5avRy38DXJsU2",
+      "senderPhone": "333333",
+      "transactionType": "deposit",
+      "createdAt": 1786556242463,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "saki",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561182311_yirws",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "userId": "user_1786560419418_fwmjv",
+      "senderPhone": "555555",
+      "transactionType": "deposit",
+      "createdAt": 1786561182311,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561320684_3pize",
+      "transactionType": "withdraw",
+      "createdAt": 1786561320684,
+      "agentId": "agent_1786057318162",
+      "amount": 4,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "455555555",
+      "provider": "sahal",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561381310_cp3tu",
+      "agentId": "agent_1786057318162",
+      "amount": 1,
+      "userId": "user_1786560419418_fwmjv",
+      "senderPhone": "1111111111",
+      "transactionType": "deposit",
+      "createdAt": 1786561381310,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561435538_cc89x",
+      "transactionType": "withdraw",
+      "createdAt": 1786561435538,
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "7777777",
+      "provider": "evc",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561521879_k0gnd",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "userId": "user_1786560419418_fwmjv",
+      "senderPhone": "66666666666",
+      "transactionType": "deposit",
+      "createdAt": 1786561521879,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561576780_iy5rb",
+      "transactionType": "withdraw",
+      "createdAt": 1786561576780,
+      "agentId": "agent_1786057318162",
+      "amount": 2,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "333333",
+      "provider": "evc",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561636153_ytia9",
+      "transactionType": "withdraw",
+      "createdAt": 1786561636153,
+      "agentId": "agent_1786057318162",
+      "amount": 4,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "44444",
+      "provider": "evc",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561695165_tuayw",
+      "agentId": "agent_1786057318162",
+      "amount": 2,
+      "userId": "user_1786560419418_fwmjv",
+      "senderPhone": "11111111112",
+      "transactionType": "deposit",
+      "createdAt": 1786561695165,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561730552_3o8b9",
+      "transactionType": "withdraw",
+      "createdAt": 1786561730552,
+      "agentId": "agent_1786057318162",
+      "amount": 2,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "444444",
+      "provider": "evc",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561771723_ot9su",
+      "transactionType": "withdraw",
+      "createdAt": 1786561771723,
+      "agentId": "agent_1786057318162",
+      "amount": 1,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "44444",
+      "provider": "evc",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561816391_7bfee",
+      "agentId": "agent_1786057318162",
+      "amount": 1,
+      "userId": "user_1786560419418_fwmjv",
+      "senderPhone": "3131313",
+      "transactionType": "deposit",
+      "createdAt": 1786561816391,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561845912_b9hlm",
+      "agentId": "agent_1786057318162",
+      "amount": 10,
+      "userId": "user_1786560419418_fwmjv",
+      "senderPhone": "444444",
+      "transactionType": "deposit",
+      "createdAt": 1786561845912,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786561888052_la92o",
+      "transactionType": "withdraw",
+      "createdAt": 1786561888052,
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "13131",
+      "provider": "evc",
+      "userId": "user_1786560419418_fwmjv",
+      "username": "salmo2",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786611475682_l9vro",
+      "agentId": "agent_1786057318162",
+      "amount": 10,
+      "userId": "user_1785866816536_xpf6i",
+      "senderPhone": "0907555335",
+      "transactionType": "deposit",
+      "createdAt": 1786611475682,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "sahal",
+      "status": "pending",
+      "username": "Boocame"
+    },
+    {
+      "id": "req_1786616866136_bg927",
+      "agentId": "agent_1786057318162",
+      "amount": 2,
+      "userId": "user_1786616682771_qsiq0",
+      "senderPhone": "6352512",
+      "transactionType": "deposit",
+      "createdAt": 1786616866136,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "zaad",
+      "username": "nimco Farax",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786616969137_nii3t",
+      "transactionType": "withdraw",
+      "createdAt": 1786616969137,
+      "agentId": "agent_1786057318162",
+      "amount": 1,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "32652365",
+      "provider": "evc",
+      "userId": "user_1786616682771_qsiq0",
+      "username": "nimco Farax",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786617371033_0n1au",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "userId": "user_1786609023002_ep3uw",
+      "senderPhone": "7777777",
+      "transactionType": "deposit",
+      "createdAt": 1786617371033,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "status": "pending",
+      "username": "barkulan youtube"
+    },
+    {
+      "id": "req_1786653632556_dxjc5",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "userId": "user_1786614205939_xhg6a",
+      "senderPhone": "2222222",
+      "transactionType": "deposit",
+      "createdAt": 1786653632556,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "milgo",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786653789736_z9ezu",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "netAmount": 4.5,
+      "fee": 0.5,
+      "playedPaidGame": false,
+      "feeRate": 0.1,
+      "userId": "user_1786614205939_xhg6a",
+      "transactionType": "withdraw",
+      "createdAt": 1786653789736,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "33323",
+      "provider": "evc",
+      "username": "milgo",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
+    },
+    {
+      "id": "req_1786661802666_mqqx2",
+      "agentId": "agent_1786057318162",
+      "amount": 5,
+      "userId": "user_1786614205939_xhg6a",
+      "senderPhone": "77777777",
+      "transactionType": "deposit",
+      "createdAt": 1786661802666,
+      "agentUsername": "khaalid2@gmail.com",
+      "managedBy": "agent",
+      "phone": "907788233",
+      "provider": "evc",
+      "username": "milgo",
+      "resolverUsername": "khaalid2@gmail.com",
+      "resolvedBy": "agent_1786057318162",
+      "status": "approved"
     }
   ],
   "paymentProviders": {
@@ -54307,5 +54592,51 @@
   },
   "agents": {},
   "agentTransactions": [],
-  "tournaments": {}
+  "tournaments": {
+    "tourney_weekly_1786555841834_1": {
+      "id": "tourney_weekly_1786555841834_1",
+      "name": "Ludo$om Weekly Champion Cup 🏆",
+      "entryFee": 5,
+      "prizePool": 100,
+      "status": "registration_open",
+      "players": [],
+      "maxPlayers": 16,
+      "startDate": 1786862797744,
+      "endDate": 0,
+      "winnerId": null,
+      "currentRound": 1,
+      "matches": [],
+      "createdAt": 1786555841834
+    },
+    "tourney_weekend_1786555841834_2": {
+      "id": "tourney_weekend_1786555841834_2",
+      "name": "Weekend High Stakes Knockout ⚡",
+      "entryFee": 10,
+      "prizePool": 200,
+      "status": "registration_open",
+      "players": [],
+      "maxPlayers": 8,
+      "startDate": 1786901441834,
+      "endDate": 0,
+      "winnerId": null,
+      "currentRound": 1,
+      "matches": [],
+      "createdAt": 1786555841834
+    },
+    "tourney_daily_1786555841834_3": {
+      "id": "tourney_daily_1786555841834_3",
+      "name": "Daily Quick Sprint Tournament 🚀",
+      "entryFee": 2,
+      "prizePool": 30,
+      "status": "registration_open",
+      "players": [],
+      "maxPlayers": 4,
+      "startDate": 1786829047930,
+      "endDate": 0,
+      "winnerId": null,
+      "currentRound": 1,
+      "matches": [],
+      "createdAt": 1786555841834
+    }
+  }
 }

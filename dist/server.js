@@ -291,6 +291,116 @@ async function migrateFirestoreToMySql(options = {}) {
 }
 
 // src/server/mysql-runtime-store.ts
+var gameRoomSchemaReady = null;
+var realtimeEventSchemaReady = null;
+var gameTimerLeaderConnection = null;
+var gameTimerLeadershipAttempt = null;
+function ensureMySqlGameRoomSchema() {
+  if (!gameRoomSchemaReady) {
+    gameRoomSchemaReady = getMySqlPool().execute(
+      `CREATE TABLE IF NOT EXISTS game_rooms (
+        id VARCHAR(191) PRIMARY KEY,
+        status VARCHAR(32) NOT NULL,
+        bet_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+        created_at BIGINT UNSIGNED NOT NULL,
+        updated_at BIGINT UNSIGNED NOT NULL,
+        room_json JSON NOT NULL,
+        INDEX idx_rooms_status_updated (status, updated_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+    ).then(() => void 0).catch((error) => {
+      gameRoomSchemaReady = null;
+      throw error;
+    });
+  }
+  return gameRoomSchemaReady;
+}
+function ensureMySqlRealtimeEventSchema() {
+  if (!realtimeEventSchemaReady) {
+    realtimeEventSchemaReady = getMySqlPool().execute(
+      `CREATE TABLE IF NOT EXISTS realtime_events (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        origin_id VARCHAR(64) NOT NULL,
+        scope_type VARCHAR(16) NOT NULL,
+        target_id VARCHAR(191) NULL,
+        event_name VARCHAR(64) NOT NULL,
+        payload_json JSON NOT NULL,
+        created_at BIGINT UNSIGNED NOT NULL,
+        INDEX idx_realtime_events_created (created_at),
+        INDEX idx_realtime_events_target (scope_type, target_id, id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+    ).then(() => void 0).catch((error) => {
+      realtimeEventSchemaReady = null;
+      throw error;
+    });
+  }
+  return realtimeEventSchemaReady;
+}
+async function publishMySqlRealtimeEvent(event) {
+  await ensureMySqlRealtimeEventSchema();
+  await getMySqlPool().execute(
+    `INSERT INTO realtime_events (origin_id, scope_type, target_id, event_name, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [event.originId, event.scopeType, event.targetId, event.eventName, JSON.stringify(event.payload), Date.now()]
+  );
+}
+async function latestMySqlRealtimeEventId() {
+  await ensureMySqlRealtimeEventSchema();
+  const [rows] = await getMySqlPool().query("SELECT COALESCE(MAX(id), 0) AS latest_id FROM realtime_events");
+  return Number(rows[0]?.latest_id || 0);
+}
+async function listMySqlRealtimeEvents(afterId) {
+  await ensureMySqlRealtimeEventSchema();
+  const [rows] = await getMySqlPool().execute(
+    `SELECT id, origin_id, scope_type, target_id, event_name, payload_json
+     FROM realtime_events WHERE id > ? ORDER BY id ASC LIMIT 500`,
+    [afterId]
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    originId: String(row.origin_id),
+    scopeType: row.scope_type,
+    targetId: row.target_id == null ? null : String(row.target_id),
+    eventName: String(row.event_name),
+    payload: typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json
+  }));
+}
+async function cleanupMySqlRealtimeEvents(olderThan) {
+  await ensureMySqlRealtimeEventSchema();
+  await getMySqlPool().execute("DELETE FROM realtime_events WHERE created_at < ?", [olderThan]);
+}
+async function ensureMySqlGameTimerLeadership() {
+  if (gameTimerLeaderConnection) {
+    try {
+      await gameTimerLeaderConnection.ping();
+      return true;
+    } catch {
+      try {
+        gameTimerLeaderConnection.destroy();
+      } catch {
+      }
+      gameTimerLeaderConnection = null;
+    }
+  }
+  if (gameTimerLeadershipAttempt) return gameTimerLeadershipAttempt;
+  gameTimerLeadershipAttempt = (async () => {
+    const connection = await getMySqlPool().getConnection();
+    try {
+      const [rows] = await connection.query("SELECT GET_LOCK('ludosom_game_timer_v1', 0) AS acquired");
+      if (Number(rows[0]?.acquired) !== 1) {
+        connection.release();
+        return false;
+      }
+      gameTimerLeaderConnection = connection;
+      return true;
+    } catch (error) {
+      connection.release();
+      throw error;
+    }
+  })().finally(() => {
+    gameTimerLeadershipAttempt = null;
+  });
+  return gameTimerLeadershipAttempt;
+}
 function mysqlRuntimeStoreMode() {
   if (!isMySqlConfigured()) return "disabled";
   const configured = String(process.env.MYSQL_RUNTIME_STORE_MODE || "shadow").trim().toLowerCase();
@@ -313,6 +423,50 @@ async function saveRuntimeStoreToMySql(snapshot) {
      ON DUPLICATE KEY UPDATE setting_json = VALUES(setting_json), updated_at = VALUES(updated_at)`,
     ["runtime_store", JSON.stringify(snapshot), Date.now()]
   );
+}
+async function loadMySqlGameRoom(roomId) {
+  await ensureMySqlGameRoomSchema();
+  const [rows] = await getMySqlPool().execute(
+    "SELECT room_json FROM game_rooms WHERE id = ? LIMIT 1",
+    [roomId]
+  );
+  if (!rows.length) return null;
+  const value = rows[0].room_json;
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
+async function saveMySqlGameRoom(room) {
+  if (!room?.id) return;
+  await ensureMySqlGameRoomSchema();
+  const updatedAt = Date.now();
+  await getMySqlPool().execute(
+    `INSERT INTO game_rooms (id, status, bet_amount, created_at, updated_at, room_json)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE status=VALUES(status), bet_amount=VALUES(bet_amount), updated_at=VALUES(updated_at), room_json=VALUES(room_json)`,
+    [room.id, room.status || "waiting", Number(room.betAmount || 0), Number(room.createdAt || updatedAt), updatedAt, JSON.stringify(room)]
+  );
+}
+async function listMySqlActiveGameRooms() {
+  await ensureMySqlGameRoomSchema();
+  const [rows] = await getMySqlPool().execute(
+    `SELECT room_json FROM game_rooms
+     WHERE status IN ('waiting', 'playing')
+     ORDER BY updated_at DESC`
+  );
+  return rows.map((row) => typeof row.room_json === "string" ? JSON.parse(row.room_json) : row.room_json);
+}
+async function loadMySqlRuntimeUser(userId) {
+  const [rows] = await getMySqlPool().execute(
+    "SELECT profile_json, balance, win_count, loss_count FROM app_users WHERE id = ? LIMIT 1",
+    [userId]
+  );
+  if (!rows.length) return null;
+  const profile = typeof rows[0].profile_json === "string" ? JSON.parse(rows[0].profile_json) : rows[0].profile_json;
+  return {
+    ...profile,
+    balance: Number(rows[0].balance || 0),
+    winCount: Number(rows[0].win_count || 0),
+    lossCount: Number(rows[0].loss_count || 0)
+  };
 }
 
 // src/server/mysql-realtime.ts
@@ -1331,6 +1485,9 @@ async function loadStoreFromFirestore() {
 }
 var persistedUserProfiles = /* @__PURE__ */ new Map();
 var userProfileSyncQueue = Promise.resolve();
+var userProfileSyncTimer = null;
+var resolveScheduledUserProfileSync = null;
+var scheduledUserProfileSync = null;
 function serializeUserProfile(user) {
   return JSON.stringify(user);
 }
@@ -1375,8 +1532,20 @@ async function syncUserProfilesToFirestore() {
   }
 }
 function queueUserProfileSync() {
-  userProfileSyncQueue = userProfileSyncQueue.then(() => syncUserProfilesToFirestore()).catch((error) => console.error("Failed to synchronize user profiles to Firestore:", error));
-  return userProfileSyncQueue;
+  if (!scheduledUserProfileSync) {
+    scheduledUserProfileSync = new Promise((resolve) => {
+      resolveScheduledUserProfileSync = resolve;
+    });
+    userProfileSyncTimer = setTimeout(() => {
+      userProfileSyncTimer = null;
+      const resolve = resolveScheduledUserProfileSync;
+      resolveScheduledUserProfileSync = null;
+      scheduledUserProfileSync = null;
+      userProfileSyncQueue = userProfileSyncQueue.then(() => syncUserProfilesToFirestore()).catch((error) => console.error("Failed to synchronize user profiles:", error)).finally(() => resolve?.());
+    }, 750);
+    userProfileSyncTimer.unref?.();
+  }
+  return scheduledUserProfileSync;
 }
 async function saveUserProfileToFirestore(user) {
   if (isMySqlRuntimePrimary()) return saveMySqlUserProfile(user);
@@ -1526,6 +1695,7 @@ async function syncToFirestore() {
   try {
     const storeRef = db.collection("ludo_store").doc("main");
     const serialized = JSON.stringify(store);
+    if (Buffer.byteLength(serialized, "utf8") > 9e5) return;
     await storeRef.set({ data: serialized, updatedAt: Date.now() });
     console.log("Successfully synchronized store to Firebase Firestore.");
   } catch (err) {
@@ -1536,11 +1706,12 @@ var pendingMySqlStoreSnapshot = null;
 var mySqlStoreSync = null;
 function queueMySqlStoreSync() {
   if (firebaseMySqlMigrationMode || mysqlRuntimeStoreMode() === "disabled") return Promise.resolve();
-  pendingMySqlStoreSnapshot = JSON.parse(JSON.stringify(store));
+  pendingMySqlStoreSnapshot = store;
   if (!mySqlStoreSync) {
     mySqlStoreSync = (async () => {
       while (pendingMySqlStoreSnapshot) {
-        const snapshot = pendingMySqlStoreSnapshot;
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        const snapshot = JSON.parse(JSON.stringify(pendingMySqlStoreSnapshot));
         pendingMySqlStoreSnapshot = null;
         await saveRuntimeStoreToMySql(snapshot);
       }
@@ -1550,9 +1721,21 @@ function queueMySqlStoreSync() {
   }
   return mySqlStoreSync;
 }
+var diskStoreSaveTimer = null;
+function queueDiskStoreSave() {
+  if (diskStoreSaveTimer) return;
+  diskStoreSaveTimer = setTimeout(() => {
+    diskStoreSaveTimer = null;
+    const payload = JSON.stringify(store, null, 2);
+    void fs2.promises.writeFile(DB_FILE, payload, "utf8").catch((error) => {
+      console.error("Failed to write database backup to disk.", error);
+    });
+  }, 200);
+  diskStoreSaveTimer.unref?.();
+}
 function saveStore() {
   try {
-    fs2.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    queueDiskStoreSave();
     void queueMySqlStoreSync().catch((error) => console.error("MySQL shadow store synchronization failed:", error));
     void queueUserProfileSync();
   } catch (error) {
@@ -1561,7 +1744,11 @@ function saveStore() {
 }
 async function saveStoreAndWait() {
   try {
-    fs2.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), "utf8");
+    if (diskStoreSaveTimer) {
+      clearTimeout(diskStoreSaveTimer);
+      diskStoreSaveTimer = null;
+    }
+    await fs2.promises.writeFile(DB_FILE, JSON.stringify(store, null, 2), "utf8");
     try {
       await queueMySqlStoreSync();
     } catch (error) {
@@ -1587,6 +1774,17 @@ function purgeSimulatedUsers() {
 }
 purgeSimulatedUsers();
 var activeClients = [];
+var SERVER_INSTANCE_ID = crypto.randomUUID();
+function publishRealtimeEvent(scopeType, targetId, eventName, payload) {
+  if (!isMySqlConfigured() || eventName === "timer_tick") return;
+  void publishMySqlRealtimeEvent({
+    originId: SERVER_INSTANCE_ID,
+    scopeType,
+    targetId,
+    eventName,
+    payload
+  }).catch((error) => console.error(`Failed to publish shared ${eventName} event:`, error));
+}
 function sendEventToUser(userId, eventName, data) {
   const clients = activeClients.filter((c) => c.userId === userId);
   clients.forEach((client) => {
@@ -1604,7 +1802,7 @@ data: ${JSON.stringify(data)}
     }
   });
 }
-function broadcastToAll(eventName, data) {
+function broadcastToAllLocal(eventName, data) {
   const payload = `event: ${eventName}
 data: ${JSON.stringify(data)}
 
@@ -1621,7 +1819,11 @@ data: ${JSON.stringify(data)}
     }
   });
 }
-function broadcastToRoom(roomId, eventName, data) {
+function broadcastToAll(eventName, data) {
+  broadcastToAllLocal(eventName, data);
+  publishRealtimeEvent("all", null, eventName, data);
+}
+function broadcastToRoomLocal(roomId, eventName, data) {
   const room = store.rooms[roomId];
   if (!room) return;
   let payload = { ...data };
@@ -1651,12 +1853,58 @@ function broadcastToRoom(roomId, eventName, data) {
     }
   });
 }
+function broadcastToRoom(roomId, eventName, data) {
+  broadcastToRoomLocal(roomId, eventName, data);
+  publishRealtimeEvent("room", roomId, eventName, data);
+}
 function broadcastUserUpdate(userId) {
   const user = store.users[userId];
   if (user) {
     sendEventToUser(userId, "user_update", user);
+    publishRealtimeEvent("user", userId, "user_update", user);
   }
 }
+var mySqlRealtimeCursor = null;
+var mySqlRealtimePollRunning = false;
+var lastMySqlRealtimeCleanupAt = 0;
+async function pollMySqlRealtimeEvents() {
+  if (!isMySqlConfigured() || mySqlRealtimePollRunning) return;
+  mySqlRealtimePollRunning = true;
+  try {
+    if (mySqlRealtimeCursor === null) {
+      mySqlRealtimeCursor = await latestMySqlRealtimeEventId();
+      return;
+    }
+    const events = await listMySqlRealtimeEvents(mySqlRealtimeCursor);
+    for (const event of events) {
+      mySqlRealtimeCursor = Math.max(mySqlRealtimeCursor, event.id);
+      if (event.originId === SERVER_INSTANCE_ID) continue;
+      if (event.scopeType === "room" && event.targetId) {
+        if (event.eventName === "game_update" && event.payload?.id) {
+          store.rooms[event.payload.id] = event.payload;
+        }
+        broadcastToRoomLocal(event.targetId, event.eventName, event.payload);
+      } else if (event.scopeType === "user" && event.targetId) {
+        if (event.eventName === "user_update" && event.payload?.id) {
+          store.users[event.payload.id] = event.payload;
+        }
+        sendEventToUser(event.targetId, event.eventName, event.payload);
+      } else {
+        broadcastToAllLocal(event.eventName, event.payload);
+      }
+    }
+    if (Date.now() - lastMySqlRealtimeCleanupAt > 6e4) {
+      lastMySqlRealtimeCleanupAt = Date.now();
+      await cleanupMySqlRealtimeEvents(Date.now() - 5 * 6e4);
+    }
+  } catch (error) {
+    console.error("MySQL realtime event poll failed:", error);
+  } finally {
+    mySqlRealtimePollRunning = false;
+  }
+}
+var mySqlRealtimePollTimer = setInterval(() => void pollMySqlRealtimeEvents(), 500);
+mySqlRealtimePollTimer.unref?.();
 function removeSSEClient(res) {
   const client = activeClients.find((c) => c.res === res);
   activeClients = activeClients.filter((c) => c.res !== res);
@@ -2242,59 +2490,82 @@ function handleInactivityForfeit(room, inactivePlayer) {
   saveStore();
   broadcastToRoom(room.id, "game_update", room);
 }
-setInterval(() => {
-  let changed = false;
-  Object.keys(store.rooms).forEach((roomId) => {
-    const room = store.rooms[roomId];
-    if (room.status === "playing") {
-      const gs = room.gameState;
-      const activePlayer = room.players[gs.turn];
-      if (activePlayer && !isBotPlayer(activePlayer.userId)) {
-        if (!activePlayer.inactivityDeadline) {
-          const remainingSeconds = Number.isFinite(activePlayer.inactivityTimer) ? Math.max(0, Number(activePlayer.inactivityTimer)) : PLAYER_INACTIVITY_SECONDS;
-          activePlayer.inactivityDeadline = Date.now() + remainingSeconds * 1e3;
-          activePlayer.lastInactivityWarningMinute = void 0;
-          saveStore();
-        }
-        activePlayer.inactivityTimer = Math.max(
-          0,
-          Math.ceil((activePlayer.inactivityDeadline - Date.now()) / 1e3)
-        );
-        changed = true;
-        const minutesLeft = Math.ceil(activePlayer.inactivityTimer / 60);
-        if (minutesLeft >= 1 && minutesLeft <= 4 && activePlayer.lastInactivityWarningMinute !== minutesLeft) {
-          activePlayer.lastInactivityWarningMinute = minutesLeft;
-          const warningMsg = `Waqtigaagu wuu sii dhamaanayaa! Waxaa kuu harsan ${minutesLeft} daqiiqo. (Your time is running out! ${minutesLeft} minutes left.)`;
-          sendEventToUser(activePlayer.userId, "inactivity_warning", { message: warningMsg });
-          addLog(room, `\u23F1\uFE0F Digniin: ${activePlayer.username} waxaa u harsan ${minutesLeft} daqiiqo. (Warning: ${activePlayer.username} has ${minutesLeft} minutes left.)`);
-          saveStore();
-        }
-        if (activePlayer.inactivityTimer <= 0) {
-          handleInactivityForfeit(room, activePlayer);
-          return;
-        }
-      }
-      if (gs.turnTimer > 0) {
-        gs.turnTimer -= 1;
-        changed = true;
-        if (gs.turnTimer === 0) {
-          addLog(room, `\u23F1\uFE0F Waqtiga 30-ka ilbiriqsi wuu dhamaaday ${activePlayer.username}. Ganaaxa daahitaanka ayaa bilaabanaya.`);
-          broadcastToRoom(room.id, "game_update", room);
-        }
-      }
+var gameTimerTickRunning = false;
+var lastSharedTimerPersistAt = 0;
+setInterval(async () => {
+  if (gameTimerTickRunning) return;
+  gameTimerTickRunning = true;
+  try {
+    if (isMySqlConfigured()) {
+      const isLeader = await ensureMySqlGameTimerLeadership();
+      if (!isLeader) return;
+      const sharedRooms = await listMySqlActiveGameRooms();
+      sharedRooms.forEach((room) => {
+        if (room?.id) store.rooms[room.id] = room;
+      });
     }
-  });
-  if (changed) {
+    let changed = false;
     Object.keys(store.rooms).forEach((roomId) => {
       const room = store.rooms[roomId];
       if (room.status === "playing") {
-        broadcastToRoom(roomId, "timer_tick", {
-          turn: room.gameState.turn,
-          turnTimer: room.gameState.turnTimer,
-          inactivityTimer: room.players[room.gameState.turn]?.inactivityTimer
-        });
+        const gs = room.gameState;
+        const activePlayer = room.players[gs.turn];
+        if (activePlayer && !isBotPlayer(activePlayer.userId)) {
+          if (!activePlayer.inactivityDeadline) {
+            const remainingSeconds = Number.isFinite(activePlayer.inactivityTimer) ? Math.max(0, Number(activePlayer.inactivityTimer)) : PLAYER_INACTIVITY_SECONDS;
+            activePlayer.inactivityDeadline = Date.now() + remainingSeconds * 1e3;
+            activePlayer.lastInactivityWarningMinute = void 0;
+            saveStore();
+          }
+          activePlayer.inactivityTimer = Math.max(
+            0,
+            Math.ceil((activePlayer.inactivityDeadline - Date.now()) / 1e3)
+          );
+          changed = true;
+          const minutesLeft = Math.ceil(activePlayer.inactivityTimer / 60);
+          if (minutesLeft >= 1 && minutesLeft <= 4 && activePlayer.lastInactivityWarningMinute !== minutesLeft) {
+            activePlayer.lastInactivityWarningMinute = minutesLeft;
+            const warningMsg = `Waqtigaagu wuu sii dhamaanayaa! Waxaa kuu harsan ${minutesLeft} daqiiqo. (Your time is running out! ${minutesLeft} minutes left.)`;
+            sendEventToUser(activePlayer.userId, "inactivity_warning", { message: warningMsg });
+            addLog(room, `\u23F1\uFE0F Digniin: ${activePlayer.username} waxaa u harsan ${minutesLeft} daqiiqo. (Warning: ${activePlayer.username} has ${minutesLeft} minutes left.)`);
+            saveStore();
+          }
+          if (activePlayer.inactivityTimer <= 0) {
+            handleInactivityForfeit(room, activePlayer);
+            return;
+          }
+        }
+        if (gs.turnTimer > 0) {
+          gs.turnTimer -= 1;
+          changed = true;
+          if (gs.turnTimer === 0) {
+            addLog(room, `\u23F1\uFE0F Waqtiga 30-ka ilbiriqsi wuu dhamaaday ${activePlayer.username}. Ganaaxa daahitaanka ayaa bilaabanaya.`);
+            broadcastToRoom(room.id, "game_update", room);
+          }
+        }
       }
     });
+    if (changed) {
+      Object.keys(store.rooms).forEach((roomId) => {
+        const room = store.rooms[roomId];
+        if (room.status === "playing") {
+          broadcastToRoom(roomId, "timer_tick", {
+            turn: room.gameState.turn,
+            turnTimer: room.gameState.turnTimer,
+            inactivityTimer: room.players[room.gameState.turn]?.inactivityTimer
+          });
+        }
+      });
+      if (isMySqlConfigured() && Date.now() - lastSharedTimerPersistAt >= 5e3) {
+        lastSharedTimerPersistAt = Date.now();
+        const activeRooms = Object.values(store.rooms).filter((room) => room.status === "playing");
+        await Promise.all(activeRooms.map((room) => saveMySqlGameRoom(room)));
+      }
+    }
+  } catch (error) {
+    console.error("Shared game timer tick failed:", error);
+  } finally {
+    gameTimerTickRunning = false;
   }
 }, 1e3);
 setInterval(() => {
@@ -3424,6 +3695,66 @@ setInterval(() => {
     }
   });
 }, 3e4);
+app.use("/api/rooms", async (req, res, next) => {
+  if (!isMySqlConfigured()) return next();
+  const pathParts = req.path.split("/").filter(Boolean);
+  const reservedPaths = /* @__PURE__ */ new Set([
+    "active",
+    "create",
+    "join",
+    "matchmaking",
+    "create-bot-room",
+    "voice-signaling",
+    "challenge",
+    "ready",
+    "add-bot",
+    "change-team",
+    "start",
+    "roll-dice",
+    "move-token",
+    "chat",
+    "accept-player",
+    "decline-player",
+    "nudge",
+    "emoji",
+    "leave"
+  ]);
+  const bodyRoomId = String(req.body?.roomId || req.body?.roomCode || "").trim().toUpperCase();
+  const pathRoomId = pathParts[0] === "check-status" ? String(pathParts[1] || "").trim().toUpperCase() : !reservedPaths.has(pathParts[0]) ? String(pathParts[0] || "").trim().toUpperCase() : "";
+  const roomId = bodyRoomId || pathRoomId;
+  try {
+    if (req.method === "GET" && pathParts[0] === "active") {
+      const rooms = await listMySqlActiveGameRooms();
+      rooms.forEach((room) => {
+        if (room?.id) store.rooms[room.id] = room;
+      });
+    } else if (roomId) {
+      const room = await loadMySqlGameRoom(roomId);
+      if (room) store.rooms[roomId] = room;
+    }
+    const userIds = [
+      req.body?.userId,
+      req.body?.senderId,
+      req.body?.receiverId,
+      req.query?.userId
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+    await Promise.all([...new Set(userIds)].map(async (userId) => {
+      const user = await loadMySqlRuntimeUser(userId);
+      if (user?.id) store.users[user.id] = user;
+    }));
+  } catch (error) {
+    console.error("MySQL live room hydration failed; continuing with local state:", error);
+  }
+  res.once("finish", () => {
+    const persistedRoomId = String(res.locals.roomId || roomId || "").trim().toUpperCase();
+    const room = store.rooms[persistedRoomId];
+    if (!room || res.statusCode >= 500) return;
+    void saveMySqlGameRoom(room).catch((error) => {
+      console.error(`MySQL live room persistence failed for ${persistedRoomId}:`, error);
+    });
+  });
+  next();
+});
 app.get("/api/rooms/active", (req, res) => {
   const now2 = Date.now();
   const activeGames = Object.values(store.rooms).filter((r) => {
@@ -3535,6 +3866,7 @@ app.post("/api/rooms/create", (req, res) => {
     createdAt: Date.now()
   };
   store.rooms[roomId] = newRoom;
+  res.locals.roomId = roomId;
   saveStore();
   res.json(newRoom);
 });

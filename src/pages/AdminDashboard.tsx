@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import GameRoomComponent from '../components/GameRoom';
 import AdminLayout from '../components/admin/AdminLayout';
 import StatsGrid from '../components/admin/StatsGrid';
 import UsersTable from '../components/admin/UsersTable';
@@ -21,6 +20,8 @@ import CashierManagement from '../components/admin/CashierManagement';
 import { isFullAdmin } from '../utils/admin';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import { userErrorMessage } from '../utils/userError';
+
+const GameRoomComponent = React.lazy(() => import('../components/GameRoom'));
 
 const VIEW_PERMISSIONS: Record<string, string> = {
     stats: 'stats', users: 'users', rooms: 'rooms', transactions: 'transactions',

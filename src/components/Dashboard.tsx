@@ -199,7 +199,7 @@ export default function Dashboard({
     fetchOnlinePlayers();
     // SSE gives instant updates on the same server process; this 2-second sync
     // also discovers searches created on other production processes/browsers.
-    const liveSearchInterval = window.setInterval(fetchOnlinePlayers, 2000);
+    const liveSearchInterval = window.setInterval(fetchOnlinePlayers, 5000);
     const handleRefresh = () => fetchOnlinePlayers();
     const handlePlayerLeft = (e: CustomEvent) => {
       const { userId } = e.detail;

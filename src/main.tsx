@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import './api-runtime';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
@@ -6,9 +6,10 @@ import App from './App.tsx';
 import './index.css';
 import { LanguageProvider } from './context/LanguageContext.tsx';
 import ErrorPage from "./pages/ErrorPage";
-import AdminDashboard from './pages/AdminDashboard';
-import BecomeVip from './pages/BecomeVip';
-import Tournaments from './pages/Tournaments';
+
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const BecomeVip = lazy(() => import('./pages/BecomeVip'));
+const Tournaments = lazy(() => import('./pages/Tournaments'));
 
 const router = createBrowserRouter([
   {
@@ -41,7 +42,9 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
-      <RouterProvider router={router} />
+      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#020012] text-sm font-bold text-white">Loading LudoSom…</div>}>
+        <RouterProvider router={router} />
+      </Suspense>
     </LanguageProvider>
   </StrictMode>,
 );

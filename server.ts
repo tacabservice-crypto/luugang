@@ -43,7 +43,7 @@ import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
-import { loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
+import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
 import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
@@ -951,6 +951,9 @@ async function loadStoreFromFirestore(): Promise<boolean> {
 // unchanged and continues to be the source used by the rest of the app.
 const persistedUserProfiles = new Map<string, string>();
 let userProfileSyncQueue: Promise<void> = Promise.resolve();
+let userProfileSyncTimer: NodeJS.Timeout | null = null;
+let resolveScheduledUserProfileSync: (() => void) | null = null;
+let scheduledUserProfileSync: Promise<void> | null = null;
 
 function serializeUserProfile(user: UserProfile) {
   return JSON.stringify(user);
@@ -1005,10 +1008,23 @@ async function syncUserProfilesToFirestore() {
 }
 
 function queueUserProfileSync() {
-  userProfileSyncQueue = userProfileSyncQueue
-    .then(() => syncUserProfilesToFirestore())
-    .catch((error) => console.error('Failed to synchronize user profiles to Firestore:', error));
-  return userProfileSyncQueue;
+  if (!scheduledUserProfileSync) {
+    scheduledUserProfileSync = new Promise<void>(resolve => {
+      resolveScheduledUserProfileSync = resolve;
+    });
+    userProfileSyncTimer = setTimeout(() => {
+      userProfileSyncTimer = null;
+      const resolve = resolveScheduledUserProfileSync;
+      resolveScheduledUserProfileSync = null;
+      scheduledUserProfileSync = null;
+      userProfileSyncQueue = userProfileSyncQueue
+        .then(() => syncUserProfilesToFirestore())
+        .catch((error) => console.error('Failed to synchronize user profiles:', error))
+        .finally(() => resolve?.());
+    }, 750);
+    userProfileSyncTimer.unref?.();
+  }
+  return scheduledUserProfileSync;
 }
 
 async function saveUserProfileToFirestore(user: UserProfile) {
@@ -1194,6 +1210,10 @@ async function syncToFirestore() {
   try {
     const storeRef = db.collection('ludo_store').doc('main');
     const serialized = JSON.stringify(store);
+    // Firestore documents are capped at 1 MiB. User profiles and manual
+    // requests are already persisted separately, so do not spend time on a
+    // guaranteed-to-fail central snapshot once it approaches that limit.
+    if (Buffer.byteLength(serialized, 'utf8') > 900_000) return;
     await storeRef.set({ data: serialized, updatedAt: Date.now() });
     console.log('Successfully synchronized store to Firebase Firestore.');
   } catch (err) {
@@ -1206,11 +1226,17 @@ let mySqlStoreSync: Promise<void> | null = null;
 
 function queueMySqlStoreSync(): Promise<void> {
   if (firebaseMySqlMigrationMode || mysqlRuntimeStoreMode() === 'disabled') return Promise.resolve();
-  pendingMySqlStoreSnapshot = JSON.parse(JSON.stringify(store));
+  // Mark the latest state as pending without cloning the entire store on every
+  // dice/timer mutation. The worker takes one immutable snapshot per actual DB
+  // write and naturally coalesces bursts of updates.
+  pendingMySqlStoreSnapshot = store;
   if (!mySqlStoreSync) {
     mySqlStoreSync = (async () => {
       while (pendingMySqlStoreSnapshot) {
-        const snapshot = pendingMySqlStoreSnapshot;
+        // Dice rolls and timer ticks can arrive in large bursts. Allow a short
+        // coalescing window so one shared snapshot represents the whole burst.
+        await new Promise(resolve => setTimeout(resolve, 750));
+        const snapshot = JSON.parse(JSON.stringify(pendingMySqlStoreSnapshot));
         pendingMySqlStoreSnapshot = null;
         await saveRuntimeStoreToMySql(snapshot);
       }
@@ -1221,10 +1247,24 @@ function queueMySqlStoreSync(): Promise<void> {
   return mySqlStoreSync;
 }
 
+let diskStoreSaveTimer: NodeJS.Timeout | null = null;
+
+function queueDiskStoreSave() {
+  if (diskStoreSaveTimer) return;
+  diskStoreSaveTimer = setTimeout(() => {
+    diskStoreSaveTimer = null;
+    const payload = JSON.stringify(store, null, 2);
+    void fs.promises.writeFile(DB_FILE, payload, 'utf8').catch(error => {
+      console.error('Failed to write database backup to disk.', error);
+    });
+  }, 200);
+  diskStoreSaveTimer.unref?.();
+}
+
 // Save store to disk and sync with Firestore
 function saveStore() {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
+    queueDiskStoreSave();
     void queueMySqlStoreSync().catch(error => console.error('MySQL shadow store synchronization failed:', error));
     void queueUserProfileSync();
   } catch (error) {
@@ -1235,7 +1275,11 @@ function saveStore() {
 // Slower, awaited version for critical updates
 async function saveStoreAndWait() {
     try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
+      if (diskStoreSaveTimer) {
+        clearTimeout(diskStoreSaveTimer);
+        diskStoreSaveTimer = null;
+      }
+      await fs.promises.writeFile(DB_FILE, JSON.stringify(store, null, 2), 'utf8');
       try {
         await queueMySqlStoreSync();
       } catch (error) {
@@ -1275,6 +1319,18 @@ interface SSEClient {
 }
 
 let activeClients: SSEClient[] = [];
+const SERVER_INSTANCE_ID = crypto.randomUUID();
+
+function publishRealtimeEvent(scopeType: 'all' | 'room' | 'user', targetId: string | null, eventName: string, payload: any) {
+  if (!isMySqlConfigured() || eventName === 'timer_tick') return;
+  void publishMySqlRealtimeEvent({
+    originId: SERVER_INSTANCE_ID,
+    scopeType,
+    targetId,
+    eventName,
+    payload,
+  }).catch(error => console.error(`Failed to publish shared ${eventName} event:`, error));
+}
 
 // Send update to specific user
 function sendEventToUser(userId: string, eventName: string, data: any) {
@@ -1296,7 +1352,7 @@ data: ${JSON.stringify(data)}
 }
 
 // Send update to all active connected SSE clients globally
-function broadcastToAll(eventName: string, data: any) {
+function broadcastToAllLocal(eventName: string, data: any) {
   const payload = `event: ${eventName}
 data: ${JSON.stringify(data)}
 
@@ -1314,8 +1370,13 @@ data: ${JSON.stringify(data)}
   });
 }
 
+function broadcastToAll(eventName: string, data: any) {
+  broadcastToAllLocal(eventName, data);
+  publishRealtimeEvent('all', null, eventName, data);
+}
+
 // Send update to all players AND SPECTATORS in a room
-function broadcastToRoom(roomId: string, eventName: string, data: any) {
+function broadcastToRoomLocal(roomId: string, eventName: string, data: any) {
   const room = store.rooms[roomId];
   if (!room) return;
 
@@ -1358,13 +1419,63 @@ function broadcastToRoom(roomId: string, eventName: string, data: any) {
   });
 }
 
+function broadcastToRoom(roomId: string, eventName: string, data: any) {
+  broadcastToRoomLocal(roomId, eventName, data);
+  publishRealtimeEvent('room', roomId, eventName, data);
+}
+
 // Global user update broadcast (for dashboard balance/profile syncing)
 function broadcastUserUpdate(userId: string) {
   const user = store.users[userId];
   if (user) {
     sendEventToUser(userId, 'user_update', user);
+    publishRealtimeEvent('user', userId, 'user_update', user);
   }
 }
+
+let mySqlRealtimeCursor: number | null = null;
+let mySqlRealtimePollRunning = false;
+let lastMySqlRealtimeCleanupAt = 0;
+
+async function pollMySqlRealtimeEvents() {
+  if (!isMySqlConfigured() || mySqlRealtimePollRunning) return;
+  mySqlRealtimePollRunning = true;
+  try {
+    if (mySqlRealtimeCursor === null) {
+      mySqlRealtimeCursor = await latestMySqlRealtimeEventId();
+      return;
+    }
+    const events = await listMySqlRealtimeEvents(mySqlRealtimeCursor);
+    for (const event of events) {
+      mySqlRealtimeCursor = Math.max(mySqlRealtimeCursor, event.id);
+      if (event.originId === SERVER_INSTANCE_ID) continue;
+      if (event.scopeType === 'room' && event.targetId) {
+        if (event.eventName === 'game_update' && event.payload?.id) {
+          store.rooms[event.payload.id] = event.payload;
+        }
+        broadcastToRoomLocal(event.targetId, event.eventName, event.payload);
+      } else if (event.scopeType === 'user' && event.targetId) {
+        if (event.eventName === 'user_update' && event.payload?.id) {
+          store.users[event.payload.id] = event.payload;
+        }
+        sendEventToUser(event.targetId, event.eventName, event.payload);
+      } else {
+        broadcastToAllLocal(event.eventName, event.payload);
+      }
+    }
+    if (Date.now() - lastMySqlRealtimeCleanupAt > 60_000) {
+      lastMySqlRealtimeCleanupAt = Date.now();
+      await cleanupMySqlRealtimeEvents(Date.now() - 5 * 60_000);
+    }
+  } catch (error) {
+    console.error('MySQL realtime event poll failed:', error);
+  } finally {
+    mySqlRealtimePollRunning = false;
+  }
+}
+
+const mySqlRealtimePollTimer = setInterval(() => void pollMySqlRealtimeEvents(), 500);
+mySqlRealtimePollTimer.unref?.();
 
 // Remove disconnected client
 function removeSSEClient(res: any) {
@@ -2149,8 +2260,21 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
   broadcastToRoom(room.id, 'game_update', room);
 }
 
-// Initialize continuous turn timers thread (1s interval)
-setInterval(() => {
+// Initialize continuous turn timers thread (1s interval). Only one production
+// process owns timer/forfeit decisions; this prevents duplicate payouts when a
+// host runs multiple Node workers.
+let gameTimerTickRunning = false;
+let lastSharedTimerPersistAt = 0;
+setInterval(async () => {
+  if (gameTimerTickRunning) return;
+  gameTimerTickRunning = true;
+  try {
+    if (isMySqlConfigured()) {
+      const isLeader = await ensureMySqlGameTimerLeadership();
+      if (!isLeader) return;
+      const sharedRooms = await listMySqlActiveGameRooms();
+      sharedRooms.forEach(room => { if (room?.id) store.rooms[room.id] = room; });
+    }
   let changed = false;
   Object.keys(store.rooms).forEach(roomId => {
     const room = store.rooms[roomId];
@@ -2229,6 +2353,17 @@ setInterval(() => {
         });
       }
     });
+
+    if (isMySqlConfigured() && Date.now() - lastSharedTimerPersistAt >= 5000) {
+      lastSharedTimerPersistAt = Date.now();
+      const activeRooms = Object.values(store.rooms).filter(room => room.status === 'playing');
+      await Promise.all(activeRooms.map(room => saveMySqlGameRoom(room)));
+    }
+  }
+  } catch (error) {
+    console.error('Shared game timer tick failed:', error);
+  } finally {
+    gameTimerTickRunning = false;
   }
 }, 1000);
 
@@ -3624,6 +3759,58 @@ setInterval(() => {
 // 5. MATCHMAKING & LOBBY SYSTEM
 // ==========================================
 
+// Keep live room state shared when production traffic is served by more than
+// one Node process. Local memory remains the fast working copy, while MySQL is
+// the hand-off point between processes.
+app.use('/api/rooms', async (req, res, next) => {
+  if (!isMySqlConfigured()) return next();
+
+  const pathParts = req.path.split('/').filter(Boolean);
+  const reservedPaths = new Set([
+    'active', 'create', 'join', 'matchmaking', 'create-bot-room', 'voice-signaling',
+    'challenge', 'ready', 'add-bot', 'change-team', 'start', 'roll-dice',
+    'move-token', 'chat', 'accept-player', 'decline-player', 'nudge', 'emoji', 'leave',
+  ]);
+  const bodyRoomId = String(req.body?.roomId || req.body?.roomCode || '').trim().toUpperCase();
+  const pathRoomId = pathParts[0] === 'check-status'
+    ? String(pathParts[1] || '').trim().toUpperCase()
+    : (!reservedPaths.has(pathParts[0]) ? String(pathParts[0] || '').trim().toUpperCase() : '');
+  const roomId = bodyRoomId || pathRoomId;
+
+  try {
+    if (req.method === 'GET' && pathParts[0] === 'active') {
+      const rooms = await listMySqlActiveGameRooms();
+      rooms.forEach(room => { if (room?.id) store.rooms[room.id] = room; });
+    } else if (roomId) {
+      const room = await loadMySqlGameRoom(roomId);
+      if (room) store.rooms[roomId] = room;
+    }
+
+    const userIds = [
+      req.body?.userId,
+      req.body?.senderId,
+      req.body?.receiverId,
+      req.query?.userId,
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    await Promise.all([...new Set(userIds)].map(async userId => {
+      const user = await loadMySqlRuntimeUser(userId);
+      if (user?.id) store.users[user.id] = user;
+    }));
+  } catch (error) {
+    console.error('MySQL live room hydration failed; continuing with local state:', error);
+  }
+
+  res.once('finish', () => {
+    const persistedRoomId = String(res.locals.roomId || roomId || '').trim().toUpperCase();
+    const room = store.rooms[persistedRoomId];
+    if (!room || res.statusCode >= 500) return;
+    void saveMySqlGameRoom(room).catch(error => {
+      console.error(`MySQL live room persistence failed for ${persistedRoomId}:`, error);
+    });
+  });
+  next();
+});
+
 // GET /api/rooms/active
 // Returns a list of all currently active games that can be spectated.
 app.get('/api/rooms/active', (req, res) => {
@@ -3771,6 +3958,7 @@ app.post('/api/rooms/create', (req, res) => {
   };
 
   store.rooms[roomId] = newRoom;
+  res.locals.roomId = roomId;
   saveStore();
   res.json(newRoom);
 });
