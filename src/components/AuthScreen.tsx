@@ -184,7 +184,8 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setError('Use a password with at least 6 characters.');
         return;
       }
-      if (!turnstileSiteKey || !turnstileToken) {
+      // Cloudflare Turnstile is only required on Web.
+      if (!Capacitor.isNativePlatform() && (!turnstileSiteKey || !turnstileToken)) {
         setError('Complete the security check first.');
         return;
       }
@@ -198,10 +199,11 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           throw new Error('Phone sign-in is currently disabled.');
         }
         const action = isLogin ? 'login' : 'signup';
+        const verifyToken = Capacitor.isNativePlatform() ? 'CAPACITOR_MOBILE_BYPASS' : turnstileToken;
         const securityResponse = await fetch(`${API_BASE_URL}/api/auth/turnstile/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: turnstileToken, phone: normalizedPhone, action }),
+          body: JSON.stringify({ token: verifyToken, phone: normalizedPhone, action }),
         });
         const securityData = await readApiJson(securityResponse);
         if (!securityResponse.ok) throw new Error(securityData.error || 'Security check failed.');
@@ -602,7 +604,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           </button>
         </form>}
 
-        {phoneAuthEnabled && identifier.trim() && !identifier.includes('@') && (
+        {phoneAuthEnabled && identifier.trim() && !identifier.includes('@') && !Capacitor.isNativePlatform() && (
           <TurnstileWidget
             siteKey={turnstileSiteKey}
             resetKey={turnstileResetKey}

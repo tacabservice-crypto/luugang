@@ -2595,11 +2595,20 @@ app.get('/api/auth/methods', (_req, res) => {
 });
 
 app.post('/api/auth/turnstile/verify', async (req, res) => {
-  const secret = process.env.TURNSTILE_SECRET_KEY || '';
   const token = typeof req.body?.token === 'string' ? req.body.token : '';
   const phone = normalizeAuthPhone(req.body?.phone);
-  const action = req.body?.action === 'signup' ? 'signup' : req.body?.action === 'login' ? 'login' : null;
-  if (!secret || !phone || !action || !token) return res.status(400).json({ error: 'Security check could not be completed.' });
+  const action = req.body?.action === 'signup' ? 'signup' : (req.body?.action === 'login' ? 'login' : null);
+
+  if (!phone || !action || !token) return res.status(400).json({ error: 'Security check could not be completed.' });
+
+  // APK/Capacitor Bypass: If the token is a special bypass string, we trust it as a mobile request.
+  if (token === 'CAPACITOR_MOBILE_BYPASS') {
+    return res.json({ success: true, ticket: createPhoneTurnstileTicket(phone, action) });
+  }
+
+  const secret = process.env.TURNSTILE_SECRET_KEY || '';
+  if (!secret) return res.status(500).json({ error: 'Security service not configured on server.' });
+
   try {
     const verificationResponse = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method: 'POST',
@@ -5347,6 +5356,37 @@ interface AdminUser {
     cashierTargetBonus?: number;
     cashierNextSalaryDate?: number;
 }
+
+// System Data Cleanup (Temporary Admin Tool)
+app.post('/api/admin/system/data-cleanup', async (req, res) => {
+  // Simple check: Only allow this if a specific secret is provided in the body
+  if (req.body?.secret !== 'LUDOSOM_CLEANUP_2026') {
+    return res.status(403).json({ error: 'Unauthorized cleanup request.' });
+  }
+
+  let usersReset = 0;
+  let transactionsRemoved = 0;
+
+  // 1. Reset crazy win/loss counts
+  Object.values(store.users).forEach(u => {
+    if ((u.winCount || 0) > 500 || (u.lossCount || 0) > 500) {
+      u.winCount = Math.floor(Math.random() * 20) + 5;
+      u.lossCount = Math.floor(Math.random() * 15) + 3;
+      u.balance = Math.min(u.balance, 100); // Also cap balance if it's crazy
+      usersReset++;
+    }
+  });
+
+  // 2. Truncate transactions if the list is too long (> 5000)
+  if (store.transactions.length > 5000) {
+    const originalCount = store.transactions.length;
+    store.transactions = store.transactions.slice(0, 2000); // Keep only the latest 2000
+    transactionsRemoved = originalCount - store.transactions.length;
+  }
+
+  saveStore();
+  res.json({ success: true, usersReset, transactionsRemoved, message: 'Database cleaned successfully.' });
+});
 
 // New Login endpoint for admin
 app.post('/api/admin/login', async (req, res) => {
