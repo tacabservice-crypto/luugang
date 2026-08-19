@@ -64,11 +64,8 @@ interface AuthScreenProps {
 
 export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenProps) {
   const API_BASE_URL = (() => {
-    if (typeof window === 'undefined') {
-      // Server-side rendering
-      return 'http://localhost:3002';
-    }
-    // In browser, use relative paths so requests hit the current hosting origin directly
+    if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
+    if (typeof window === 'undefined') return 'http://localhost:3002';
     return '';
   })();
   const { t } = useLanguage();

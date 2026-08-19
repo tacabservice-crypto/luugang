@@ -25,6 +25,9 @@ const ERROR_MESSAGES: Array<[RegExp, string]> = [
   [/quota|resource_exhausted/i, 'The service is temporarily busy. Please try again later.'],
   [/promo code.*(invalid|expired)|invalid.*promo/i, 'The promo code is invalid or expired.'],
   [/server-ku api json|unexpected token|<!doctype/i, 'The service is temporarily unavailable. Please try again.'],
+  [/not your turn to roll/i, 'It is not your turn to roll!'],
+  [/game is not in playing state/i, 'The game has not started yet or has already ended.'],
+  [/already rolled the dice/i, 'You have already rolled the dice!'],
 ];
 
 export function userErrorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {

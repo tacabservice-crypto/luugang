@@ -2254,6 +2254,12 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
     // remaining players continue. Never leave the turn pointing at a player
     // whose status is already `left`.
     advanceTurn(room);
+  } else if (activePlayers.length === 0) {
+    room.status = 'completed';
+    room.gameState.winnerId = null;
+    room.gameState.completionReason = 'inactivity';
+    room.gameState.escrowBalance = 0;
+    addLog(room, 'The game ended because all players became inactive.');
   }
 
   saveStore();
@@ -5295,6 +5301,7 @@ app.post('/api/rooms/leave', (req, res) => {
       room.status = 'completed';
       room.gameState.winnerId = null;
       room.gameState.completionReason = 'forfeit';
+      room.gameState.escrowBalance = 0; // Ensure balance is cleared if no players remain
       addLog(room, 'The game ended because no active players remained.');
       broadcastToRoom(room.id, 'game_update', room);
       res.json({ success: true, room });
