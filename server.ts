@@ -2012,9 +2012,11 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
     .every(t => t.position === 56);
   const hasWon = room.gameMode === 'team' ? teamAllFinished : allFinished;
 
-  if (hasWon) {
-    // WINNER DETECTED!
-    room.status = 'completed';
+    if (hasWon) {
+      if (room.status === 'completed') return; // Already processed this win
+
+      // WINNER DETECTED!
+      room.status = 'completed';
     gs.winnerId = activePlayer.userId;
     gs.completionReason = 'all_tokens_home';
 
@@ -2190,7 +2192,7 @@ function completeTeamForfeit(room: GameRoom, forfeitingPlayer: LudoPlayer, reaso
 
 // Helper to handle inactivity forfeit
 function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
-  if (room.status !== 'playing') return;
+  if (room.status !== 'playing') return; // Cannot forfeit a room that is not playing (e.g. already completed)
 
   addLog(room, `⏱️ ${inactivePlayer.username} has been forfeited due to inactivity.`);
   inactivePlayer.status = 'left';
@@ -2279,7 +2281,17 @@ setInterval(async () => {
       const isLeader = await ensureMySqlGameTimerLeadership();
       if (!isLeader) return;
       const sharedRooms = await listMySqlActiveGameRooms();
-      sharedRooms.forEach(room => { if (room?.id) store.rooms[room.id] = room; });
+      sharedRooms.forEach(room => {
+        if (room?.id) {
+          const localRoom = store.rooms[room.id];
+          // SAFETY: Do not allow MySQL sync to revert a room that is already finished or cancelled in memory.
+          // This prevents the "infinite win/payout loop" if MySQL is slightly behind the local state.
+          if (localRoom && (localRoom.status === 'completed' || localRoom.status === 'cancelled')) {
+            return;
+          }
+          store.rooms[room.id] = room;
+        }
+      });
     }
   let changed = false;
   Object.keys(store.rooms).forEach(roomId => {
