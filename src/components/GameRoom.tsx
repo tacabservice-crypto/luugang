@@ -1271,7 +1271,7 @@ export default function GameRoomView({
               <span className="mb-2 block text-[9px] font-black uppercase tracking-widest text-slate-400">
                 Dareeno Degdeg Ah {defaultReactionTarget ? `→ ${defaultReactionTarget.username}` : ''}
               </span>
-              <div className="flex items-center justify-start gap-2 overflow-x-auto px-1 pb-1 sm:justify-center">
+              <div className="flex items-center justify-center gap-1 overflow-x-auto px-0.5 pb-1 sm:gap-1.5">
                 {QUICK_REACTIONS.map((reaction) => (
                   <button
                     key={reaction.id}
@@ -1290,10 +1290,10 @@ export default function GameRoomView({
                         console.error(err);
                       }
                     }}
-                    className="group flex min-w-12 flex-col items-center rounded-xl border border-white/10 bg-gradient-to-b from-white/10 to-black/30 px-2 py-1.5 shadow-lg transition-all hover:-translate-y-1 hover:border-purple-400/50 hover:bg-purple-500/15 active:scale-90 disabled:opacity-40"
+                    className="group flex min-w-9 flex-col items-center rounded-lg border border-white/10 bg-gradient-to-b from-white/10 to-black/30 px-1 py-1 shadow-md transition-all hover:-translate-y-0.5 hover:border-purple-400/50 hover:bg-purple-500/15 active:scale-90 disabled:opacity-40 sm:min-w-10 sm:rounded-xl sm:px-1.5"
                   >
-                    <span className="text-2xl drop-shadow-lg transition-transform group-hover:scale-125">{reaction.emoji}</span>
-                    <span className="text-[7px] font-black uppercase text-slate-400">{reaction.label}</span>
+                    <span className="text-lg leading-none drop-shadow-lg transition-transform group-hover:scale-110 sm:text-xl">{reaction.emoji}</span>
+                    <span className="mt-0.5 hidden text-[6px] font-black uppercase text-slate-400 sm:block">{reaction.label}</span>
                   </button>
                 ))}
               </div>
