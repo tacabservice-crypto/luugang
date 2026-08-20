@@ -149,6 +149,7 @@ export default function GameRoomView({
   const [displayTurnTimer, setDisplayTurnTimer] = useState(room.gameState.turnTimer);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
+  const [playReminderStrike, setPlayReminderStrike] = useState<number | null>(null);
   const [panelDragY, setPanelDragY] = useState(0);
   const [isPanelDragging, setIsPanelDragging] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -170,6 +171,10 @@ export default function GameRoomView({
   const rollRequestInFlightRef = useRef(false);
   const optimisticRollRef = useRef(false);
   const optimisticRollTimeoutRef = useRef<number | null>(null);
+  const lastShownInactivityStrikeAtRef = useRef(Number(
+    room.players.find(player => player.userId === userId)?.lastInactivityStrikeAt || 0
+  ));
+  const playReminderTimeoutRef = useRef<number | null>(null);
   const timerAnchorRef = useRef({
     turn: room.gameState.turn,
     seconds: room.gameState.turnTimer,
@@ -238,6 +243,8 @@ export default function GameRoomView({
 
   const requestDiceRoll = useCallback(async () => {
     if (rollRequestInFlightRef.current) return;
+    setPlayReminderStrike(null);
+    if (playReminderTimeoutRef.current) window.clearTimeout(playReminderTimeoutRef.current);
     rollRequestInFlightRef.current = true;
     setIsRollRequestPending(true);
     // Give immediate tactile feedback from the user's tap. The authoritative
@@ -265,6 +272,12 @@ export default function GameRoomView({
     }
   }, []);
 
+  const requestTokenMove = useCallback((tokenId: string) => {
+    setPlayReminderStrike(null);
+    if (playReminderTimeoutRef.current) window.clearTimeout(playReminderTimeoutRef.current);
+    onMoveToken(tokenId);
+  }, [onMoveToken]);
+
   // Render the countdown continuously between authoritative server updates.
   // This removes the visible freezes for clients connected to a non-leader
   // production worker while preserving the server as the source of truth.
@@ -290,6 +303,7 @@ export default function GameRoomView({
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', updateDisplayTimer);
       if (optimisticRollTimeoutRef.current) window.clearTimeout(optimisticRollTimeoutRef.current);
+      if (playReminderTimeoutRef.current) window.clearTimeout(playReminderTimeoutRef.current);
     };
   }, []);
 
@@ -406,6 +420,18 @@ export default function GameRoomView({
   const teamBPlayers = room.players.filter(player => getLobbyTeam(player.color) === 'B');
   const teamsAreBalanced = room.gameMode !== 'team' || (teamACount === 2 && teamBCount === 2);
   const canStartLobby = room.players.length === lobbyCapacity && room.players.every(player => player.isReady) && teamsAreBalanced;
+
+  // Show each server-issued 30-second warning exactly once. Keeping this as a
+  // short fixed overlay makes it visible in Android WebView/mobile browsers,
+  // while a real dice roll or token move dismisses it immediately.
+  useEffect(() => {
+    const strikeAt = Number(myPlayer?.lastInactivityStrikeAt || 0);
+    if (!strikeAt || strikeAt <= lastShownInactivityStrikeAtRef.current) return;
+    lastShownInactivityStrikeAtRef.current = strikeAt;
+    setPlayReminderStrike(inactivityStrikes);
+    if (playReminderTimeoutRef.current) window.clearTimeout(playReminderTimeoutRef.current);
+    playReminderTimeoutRef.current = window.setTimeout(() => setPlayReminderStrike(null), 3500);
+  }, [myPlayer?.lastInactivityStrikeAt, inactivityStrikes]);
 
 
   // Auto-scroll chats/logs
@@ -1128,11 +1154,11 @@ export default function GameRoomView({
         )}
         {/* 3. GAMEPLAY LUDO BOARD BOARD */}
         <div className={`flex justify-center py-2 relative transition-transform duration-500 ${room.status === 'waiting' ? 'order-2' : ''}`}>
-          {isActiveTurn && inactivityStrikes > 0 && inactivityStrikes < 5 && (
-            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center" aria-live="assertive">
+          {playReminderStrike !== null && playReminderStrike < 5 && (
+            <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center px-4" aria-live="assertive">
               <div className="ludosom-play-reminder rounded-2xl border-2 border-yellow-300 bg-slate-950/90 px-8 py-4 text-center shadow-[0_0_40px_rgba(250,204,21,0.7)]">
                 <div className="text-4xl font-black tracking-[0.2em] text-yellow-300 sm:text-6xl">CIYAAR</div>
-                <div className="mt-1 text-xs font-bold text-white">Fursad {inactivityStrikes}/5</div>
+                <div className="mt-1 text-xs font-bold text-white">Fursad {playReminderStrike}/5</div>
               </div>
             </div>
           )}
@@ -1141,7 +1167,7 @@ export default function GameRoomView({
             players={room.players}
             activeColor={activePlayer ? activePlayer.color : null}
             validTokenMoves={canPlay ? validTokenMoves : []}
-            onTokenClick={canPlay ? onMoveToken : () => {}}
+            onTokenClick={canPlay ? requestTokenMove : () => {}}
             userColor={myPlayer?.color}
           />
         </div>

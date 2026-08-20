@@ -23,7 +23,19 @@ function shouldAcceptRoomUpdate(current: GameRoom | null, incoming: GameRoom): b
   if (!current || current.id !== incoming.id) return true;
   if (current.status === 'completed' || current.status === 'cancelled') return false;
   if (incoming.status === 'completed' || incoming.status === 'cancelled') return true;
-  return Number(incoming.gameState?.lastActivity || 0) >= Number(current.gameState?.lastActivity || 0);
+  const currentRevision = Number(current.gameState?.lastActivity || 0);
+  const incomingRevision = Number(incoming.gameState?.lastActivity || 0);
+  if (incomingRevision < currentRevision) return false;
+
+  // Timer-only snapshots can arrive out of order through SSE/reconnects. A
+  // snapshot for the same gameplay revision must never rewind the countdown.
+  if (
+    incomingRevision === currentRevision &&
+    incoming.gameState.turn === current.gameState.turn &&
+    incoming.gameState.turnTimer > current.gameState.turnTimer
+  ) return false;
+
+  return true;
 }
 
 export default function App() {
@@ -418,6 +430,7 @@ export default function App() {
         setActiveRoom(prev => {
           if (!prev) return null;
           if (Number(tick.lastActivity || 0) !== Number(prev.gameState.lastActivity || 0)) return prev;
+          if (tick.turn === prev.gameState.turn && tick.turnTimer > prev.gameState.turnTimer) return prev;
           return {
             ...prev,
             gameState: {
