@@ -521,7 +521,7 @@ async function upsertMySqlMatchmaking(record) {
     `INSERT INTO matchmaking_queue (user_id, status, bet_amount, capacity, game_mode, updated_at, expires_at, record_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE status=VALUES(status), bet_amount=VALUES(bet_amount), capacity=VALUES(capacity), game_mode=VALUES(game_mode), updated_at=VALUES(updated_at), expires_at=VALUES(expires_at), record_json=VALUES(record_json)`,
-    [String(record.userId), record.status || "WAITING_FOR_MATCH", Number(record.betAmount || 0).toFixed(2), Number(record.capacity || 2), record.gameMode || "solo", updatedAt, updatedAt + 18e4, JSON.stringify(record)]
+    [String(record.userId), record.status || "WAITING_FOR_MATCH", Number(record.betAmount || 0).toFixed(2), Number(record.capacity || 2), record.gameMode || "solo", updatedAt, updatedAt + 10 * 6e4, JSON.stringify(record)]
   );
 }
 async function deleteMySqlMatchmaking(userIds) {
@@ -1609,8 +1609,21 @@ async function saveUserProfileToFirestore(user) {
 }
 async function saveManualRequestToFirestore(request) {
   if (isMySqlRuntimePrimary()) return saveMySqlManualRequest(request);
-  if (!db) throw new Error("Database not initialized");
-  await db.collection("manualTransactionRequests").doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
+  if (db) {
+    try {
+      await db.collection("manualTransactionRequests").doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
+      return;
+    } catch (error) {
+      if (!isMySqlConfigured()) throw error;
+      console.error("Firestore manual request write failed; falling back to MySQL:", error);
+    }
+  }
+  if (isMySqlConfigured()) {
+    const requestUser = store.users[request.userId];
+    if (requestUser) await saveMySqlUserProfile(requestUser);
+    return saveMySqlManualRequest(request);
+  }
+  throw new Error("Database not initialized");
 }
 async function loadManualRequestsFromFirestore() {
   if (!db || isMySqlRuntimePrimary()) return;
@@ -1652,7 +1665,7 @@ function cashierCities(admin) {
   return [...new Set([...Array.isArray(admin.cashierLocations) ? admin.cashierLocations : [], admin.location].map(normalizedCity).filter(Boolean))].slice(0, 2);
 }
 async function assignCashierToRequest(request, now2 = Date.now()) {
-  if (!db || request.managedBy === "agent" || request.status !== "pending") return false;
+  if (!db && !isMySqlConfigured() || request.managedBy === "agent" || request.status !== "pending") return false;
   const user = store.users[request.userId];
   const city = normalizedCity(request.cashierCity || user?.location);
   request.cashierCity = city;
@@ -1997,7 +2010,7 @@ function cleanupMatchmakingQueues() {
       if (inGame) return false;
       const u = store.users[userId];
       const seekingJoinedAt = u?.seekingJoinedAt;
-      if (seekingJoinedAt && now2 - seekingJoinedAt > 18e4) {
+      if (seekingJoinedAt && now2 - seekingJoinedAt > 10 * 6e4) {
         delete u.seekingJoinedAt;
         void deleteSharedMatchmakingRecords(userId);
         return false;
@@ -2708,15 +2721,11 @@ setInterval(() => {
 }, 1e4);
 setInterval(() => {
   cleanupMatchmakingQueues();
-  const activeConnectedUserIds = new Set(activeClients.map((c) => c.userId));
   Object.keys(store.matchmakingQueues).forEach((queueKey) => {
     const queueUserIds = store.matchmakingQueues[queueKey];
     if (!queueUserIds || queueUserIds.length === 0) return;
-    const connectedQueueUserIds = queueUserIds.filter((id) => activeConnectedUserIds.has(id));
-    if (connectedQueueUserIds.length === 0) {
-      store.matchmakingQueues[queueKey] = [];
-      return;
-    }
+    const connectedQueueUserIds = queueUserIds.filter((id) => Boolean(store.users[id]));
+    if (connectedQueueUserIds.length === 0) return;
     const parts = queueKey.split("_");
     const bet = parseFloat(parts[0]) || 0;
     const cap = parseInt(parts[1]) || 2;
@@ -3351,7 +3360,7 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
   }
   let assignedAgentUsername;
   if (assignedAgentId) {
-    if (!db) {
+    if (!db && !isMySqlRuntimePrimary()) {
       return res.status(503).json({ error: "The payment service is temporarily unavailable." });
     }
     try {
@@ -4245,6 +4254,7 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
   players.forEach((p) => {
     if (!isBotPlayer(p.userId)) {
       sendEventToUser(p.userId, "matchmaker_success", { roomId: newRoom.id, room: newRoom });
+      publishRealtimeEvent("user", p.userId, "matchmaker_success", { roomId: newRoom.id, room: newRoom });
       broadcastToAll("matchmaker_seeking_cancelled", { senderId: p.userId });
     }
   });
@@ -4400,7 +4410,7 @@ app.post("/api/rooms/voice-signaling", (req, res) => {
   });
   res.json({ success: true });
 });
-app.post("/api/rooms/challenge/invite", (req, res) => {
+app.post("/api/rooms/challenge/invite", async (req, res) => {
   const { senderId, receiverId, betAmount, capacity, gameMode } = req.body;
   const sender = store.users[senderId];
   if (!sender) return res.status(404).json({ error: "Sender user not found." });
@@ -4409,7 +4419,7 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
     return res.status(400).json({ error: `Insufficient wallet balance for $${bet} bet.` });
   }
   const selectedMode = gameMode === "team" ? "team" : "solo";
-  const selectedCapacity = selectedMode === "team" ? 4 : parseInt(capacity) || 2;
+  const selectedCapacity = selectedMode === "team" ? 4 : 2;
   if (receiverId.startsWith("sim_") || receiverId.startsWith("bot_")) {
     const receiverUser2 = {
       id: receiverId,
@@ -4489,7 +4499,23 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
   broadcastToAll("matchmaker_seeking_cancelled", { senderId });
   broadcastToAll("matchmaker_seeking_cancelled", { senderId: receiverId });
   saveStore();
+  try {
+    await persistLiveRoom(newRoom);
+  } catch (error) {
+    delete store.rooms[roomId];
+    console.error(`Failed to persist challenge room ${roomId}:`, error);
+    return res.status(503).json({ error: "The challenge could not be synchronized. Please try again." });
+  }
   sendEventToUser(receiverId, "game_invite", {
+    senderId: sender.id,
+    senderName: sender.username,
+    senderAvatar: sender.avatar,
+    betAmount: bet,
+    capacity: selectedCapacity,
+    gameMode: selectedMode,
+    roomId
+  });
+  publishRealtimeEvent("user", receiverId, "game_invite", {
     senderId: sender.id,
     senderName: sender.username,
     senderAvatar: sender.avatar,
@@ -4500,11 +4526,15 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
   });
   res.json({ success: true, roomId });
 });
-app.post("/api/rooms/challenge/accept", (req, res) => {
+app.post("/api/rooms/challenge/accept", async (req, res) => {
   const { userId, roomId } = req.body;
   const user = store.users[userId];
   if (!user) return res.status(404).json({ error: "User not found" });
-  const room = store.rooms[roomId];
+  let room = store.rooms[roomId];
+  if (!room && isMySqlConfigured()) {
+    room = await loadMySqlGameRoom(roomId) || void 0;
+    if (room) store.rooms[room.id] = room;
+  }
   if (!room) return res.status(404).json({ error: "Challenge lobby no longer exists." });
   if (room.players.length >= (room.capacity || 2)) {
     return res.status(400).json({ error: "Room is already full." });
@@ -4528,13 +4558,55 @@ app.post("/api/rooms/challenge/accept", (req, res) => {
     balance: user.balance
   };
   room.players.push(newPlayer);
+  const requiredPlayers = room.capacity || 2;
+  if (room.players.length === requiredPlayers) {
+    const realPlayers = room.players.filter((player) => !isBotPlayer(player.userId));
+    const insufficientPlayer = realPlayers.find((player) => Number(store.users[player.userId]?.balance || 0) < room.betAmount);
+    if (insufficientPlayer) {
+      room.players = room.players.filter((player) => player.userId !== user.id);
+      return res.status(400).json({ error: `${insufficientPlayer.username} no longer has enough balance for this match.` });
+    }
+    if (room.players.length === 2 && room.gameMode === "solo") {
+      const host = room.players.find((player) => player.isHost);
+      const guest = room.players.find((player) => !player.isHost);
+      if (host) host.color = "red";
+      if (guest) guest.color = "yellow";
+    }
+    let totalEscrow = 0;
+    for (const player of realPlayers) {
+      const profile = store.users[player.userId];
+      profile.balance = Number((profile.balance - room.betAmount).toFixed(2));
+      addTransaction(player.userId, "bet_escrow_locked", room.betAmount, room.id, `Escrow lock for Match ${room.id}`);
+      totalEscrow += room.betAmount;
+      broadcastUserUpdate(player.userId);
+    }
+    room.status = "playing";
+    room.gameState.tokens = room.players.flatMap((player) => createInitialTokens(player.userId, player.color));
+    room.gameState.escrowBalance = Number(totalEscrow.toFixed(2));
+    room.gameState.turn = 0;
+    room.gameState.turnTimer = 30;
+    room.players.forEach((player) => {
+      player.teamFinishSkipPending = false;
+      player.teamAssistUnlocked = false;
+      player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
+      player.inactivityDeadline = void 0;
+      player.lastInactivityWarningMinute = void 0;
+    });
+    resetPlayerInactivity(room.players[0]);
+    touchRoom(room);
+  }
   addLog(room, `\u2694\uFE0F ${user.username} accepted the challenge and joined the room.`);
   saveStore();
+  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
+  broadcastToRoom(room.id, "game_update", room);
   const hostId = room.players.find((p) => p.isHost)?.userId;
   if (hostId) {
-    sendEventToUser(hostId, "game_invite_accepted", { roomId });
+    sendEventToUser(hostId, "game_invite_accepted", { roomId, room });
+    publishRealtimeEvent("user", hostId, "game_invite_accepted", { roomId, room });
   }
-  res.json({ success: true, roomId });
+  sendEventToUser(user.id, "matchmaker_success", { roomId, room });
+  publishRealtimeEvent("user", user.id, "matchmaker_success", { roomId, room });
+  res.json({ success: true, roomId, room });
 });
 app.post("/api/rooms/challenge/decline", (req, res) => {
   const { userId, roomId } = req.body;
@@ -4545,6 +4617,7 @@ app.post("/api/rooms/challenge/decline", (req, res) => {
     const hostId = room.players.find((p) => p.isHost)?.userId;
     if (hostId) {
       sendEventToUser(hostId, "game_invite_declined", { receiverName: user.username });
+      publishRealtimeEvent("user", hostId, "game_invite_declined", { receiverName: user.username });
     }
     delete store.rooms[roomId];
     saveStore();

@@ -32,7 +32,7 @@ export async function upsertMySqlMatchmaking(record: Record<string, any>): Promi
     `INSERT INTO matchmaking_queue (user_id, status, bet_amount, capacity, game_mode, updated_at, expires_at, record_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE status=VALUES(status), bet_amount=VALUES(bet_amount), capacity=VALUES(capacity), game_mode=VALUES(game_mode), updated_at=VALUES(updated_at), expires_at=VALUES(expires_at), record_json=VALUES(record_json)`,
-    [String(record.userId), record.status || 'WAITING_FOR_MATCH', Number(record.betAmount || 0).toFixed(2), Number(record.capacity || 2), record.gameMode || 'solo', updatedAt, updatedAt + 180_000, JSON.stringify(record)],
+    [String(record.userId), record.status || 'WAITING_FOR_MATCH', Number(record.betAmount || 0).toFixed(2), Number(record.capacity || 2), record.gameMode || 'solo', updatedAt, updatedAt + 10 * 60_000, JSON.stringify(record)],
   );
 }
 

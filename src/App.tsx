@@ -38,6 +38,7 @@ export default function App() {
   })();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true); // Add a loading state for auth
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [activeRoom, setActiveRoom] = useState<GameRoom | null>(null);
   const [rejoinableRoom, setRejoinableRoom] = useState<GameRoom | null>(null);
   const rejoinableRoomRef = useRef<GameRoom | null>(rejoinableRoom);
@@ -55,6 +56,29 @@ export default function App() {
     gameMode: 'solo'
   });
   const [error, setError] = useState<string | null>(null);
+
+  // Connectivity is separate from authentication. Losing mobile data/Wi-Fi
+  // must never be interpreted as a logout or send a verified user to sign-in.
+  useEffect(() => {
+    const restoreCachedSession = () => {
+      setIsOnline(false);
+      try {
+        const cached = JSON.parse(localStorage.getItem('ludosom_cached_profile') || 'null') as UserProfile | null;
+        if (cached?.id) setUser(current => current || cached);
+      } catch {
+        // A malformed cache is ignored; the offline screen remains available.
+      }
+      setAuthLoading(false);
+    };
+    const markOnline = () => setIsOnline(true);
+    window.addEventListener('offline', restoreCachedSession);
+    window.addEventListener('online', markOnline);
+    if (!navigator.onLine) restoreCachedSession();
+    return () => {
+      window.removeEventListener('offline', restoreCachedSession);
+      window.removeEventListener('online', markOnline);
+    };
+  }, []);
 
   // Detect a new server/web deployment, remove stale PWA responses, and reload
   // exactly once. This also refreshes the live frontend used by the Android APK.
@@ -184,7 +208,13 @@ export default function App() {
     let authStateResolved = false;
     const authLoadingTimeout = window.setTimeout(() => {
       if (!authStateResolved) {
-        console.warn('Firebase Auth initialization timed out; showing the sign-in screen.');
+        console.warn('Firebase Auth initialization timed out; preserving any cached session.');
+        if (!navigator.onLine) {
+          try {
+            const cached = JSON.parse(localStorage.getItem('ludosom_cached_profile') || 'null') as UserProfile | null;
+            if (cached?.id) setUser(cached);
+          } catch { /* ignore invalid cache */ }
+        }
         setAuthLoading(false);
       }
     }, 5000);
@@ -253,7 +283,14 @@ export default function App() {
           }
         }
       } else {
-        setUser(null);
+        if (!navigator.onLine) {
+          try {
+            const cached = JSON.parse(localStorage.getItem('ludosom_cached_profile') || 'null') as UserProfile | null;
+            if (cached?.id) setUser(current => current || cached);
+          } catch { /* ignore invalid cache */ }
+        } else {
+          setUser(null);
+        }
       }
       setAuthLoading(false);
     });
@@ -461,9 +498,10 @@ export default function App() {
 
     eventSource.addEventListener('game_invite_accepted', (e: any) => {
       try {
-        const data = JSON.parse(e.data) as { roomId: string };
+        const data = JSON.parse(e.data) as { roomId: string; room?: GameRoom };
         setMatchmakingState({ isQueued: false, betAmount: 0 });
-        fetchRoomStateAndRedirect(data.roomId);
+        if (data.room) setActiveRoom(data.room);
+        else fetchRoomStateAndRedirect(data.roomId);
       } catch (err) {
         console.error('Failed to parse game invite accepted', err);
       }
@@ -992,8 +1030,9 @@ export default function App() {
         body: JSON.stringify({ userId: user.id, roomId: incomingInvite.roomId })
       });
       if (response.ok) {
-        // Redirect to the challenged game room!
-        fetchRoomStateAndRedirect(incomingInvite.roomId);
+        const data = await response.json() as { roomId: string; room?: GameRoom };
+        if (data.room) setActiveRoom(data.room);
+        else fetchRoomStateAndRedirect(data.roomId || incomingInvite.roomId);
       } else {
         const err = await response.json();
         setErrorToast(err.error || 'Ku biirista martiqaadka waa ay guuldaraysatay.');
@@ -1089,12 +1128,33 @@ export default function App() {
   }
 
   if (!user) {
+    if (!isOnline) {
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex items-center justify-center p-6">
+          <div className="max-w-sm w-full rounded-2xl border border-amber-400/30 bg-black/30 p-7 text-center shadow-2xl">
+            <div className="text-5xl">📡</div>
+            <h1 className="mt-4 text-xl font-black">Internet ma jiro</h1>
+            <p className="mt-3 text-sm font-semibold leading-relaxed text-slate-300">
+              Hubi in Mobile Data ama Wi-Fi uu shidan yahay, kadibna isku day mar kale. Login page-ka wuxuu soo noqonayaa marka xiriirku soo laabto.
+            </p>
+            <button type="button" onClick={() => window.location.reload()} className="mt-6 rounded-xl bg-purple-600 px-5 py-3 text-sm font-black">
+              Isku day mar kale
+            </button>
+          </div>
+        </div>
+      );
+    }
     return <AuthScreen onLoginSuccess={handleLoginSuccess} initialError={error} />;
   }
 
   // This function renders overlays that should appear above the main content.
   const renderOverlays = () => (
     <>
+      {!isOnline && (
+        <div className="fixed inset-x-3 top-3 z-[120] mx-auto max-w-md rounded-xl border border-amber-400/40 bg-amber-950/95 p-3 text-center shadow-2xl backdrop-blur-md">
+          <p className="text-xs font-black text-amber-200">📡 Internetku wuu go'an yahay. Hubi Mobile Data ama Wi-Fi. Account-kaaga lama logout-gareyn.</p>
+        </div>
+      )}
       {activeReaction && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] bg-[#1A0C40]/90 border border-purple-500/40 p-3 px-5 rounded-2xl flex items-center gap-3 shadow-2xl animate-bounce backdrop-blur-md">
           <span className="text-3xl animate-pulse">{activeReaction.emoji}</span>

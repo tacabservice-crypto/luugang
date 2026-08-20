@@ -20,18 +20,22 @@ const router = createBrowserRouter([
   {
     path: "/room/:roomId",
     element: <App />,
+    errorElement: <ErrorPage />,
   },
   {
     path: "/admin",
     element: <AdminDashboard />,
+    errorElement: <ErrorPage />,
   },
   {
     path: "/vip",
     element: <BecomeVip />,
+    errorElement: <ErrorPage />,
   },
   {
     path: "/tournaments",
     element: <Tournaments />,
+    errorElement: <ErrorPage />,
   },
   {
     path: "/*",

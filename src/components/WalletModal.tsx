@@ -140,7 +140,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 transactionType: activeTab,
             }),
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (response.ok) {
             setConfirmationRequested(true);
             if (onBalanceUpdated) {
@@ -150,10 +150,10 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
               onClose();
             }, 2000);
         } else {
-            setError(userErrorMessage(data.error, 'The request could not be submitted.'));
+            setError(userErrorMessage(data.error, data.error || 'The request could not be submitted.'));
         }
     } catch (err) {
-        setError('An unexpected error occurred. Please try again.');
+        setError(userErrorMessage(err, 'The request could not be submitted. Check your connection and try again.'));
     } finally {
         setConfirmationLoading(false);
     }
