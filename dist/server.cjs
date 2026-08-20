@@ -833,6 +833,16 @@ var VIP_TIERS = {
 };
 var RAKE_PERCENTAGE = 0.1;
 var app = (0, import_express.default)();
+app.set("trust proxy", 1);
+var DEPLOY_VERSION = String(
+  process.env.DEPLOY_VERSION || process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || (() => {
+    try {
+      return Math.floor(import_fs.default.statSync(import_path.default.join(appDir, "server.js")).mtimeMs).toString(36);
+    } catch {
+      return "development";
+    }
+  })()
+).trim();
 var configuredAllowedOrigins = [
   process.env.VITE_APP_URL,
   process.env.PUBLIC_URL,
@@ -854,18 +864,20 @@ var allowedOrigins = Array.from(/* @__PURE__ */ new Set([
   "http://127.0.0.1:3002",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://localhost",
+  "capacitor://localhost",
   ...configuredAllowedOrigins
 ]));
 app.use((0, import_cors.default)({
   origin: function(origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.includes("ludosom.com")) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(null, true);
+      callback(new Error("Origin is not allowed by LudoSom CORS policy."));
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-LudoSom-Platform"],
   credentials: true
 }));
 app.use("/api", (_req, res, next) => {
@@ -928,6 +940,24 @@ function verifyPhoneTurnstileTicket(ticket, phone, action) {
   } catch {
     return false;
   }
+}
+var nativeSecurityAttempts = /* @__PURE__ */ new Map();
+function isTrustedCapacitorAndroidRequest(req) {
+  const origin = String(req.headers.origin || "").toLowerCase();
+  const platform = String(req.headers["x-ludosom-platform"] || "").toLowerCase();
+  const userAgent = String(req.headers["user-agent"] || "");
+  return (origin === "https://localhost" || origin === "capacitor://localhost" || origin === "https://ludosom.com" || origin === "https://www.ludosom.com") && platform === "android" && /android/i.test(userAgent) && /;\s*wv\)|version\/\d+\.\d+.*chrome/i.test(userAgent);
+}
+function consumeNativeSecurityAttempt(key) {
+  const now2 = Date.now();
+  const current = nativeSecurityAttempts.get(key);
+  if (!current || current.resetAt <= now2) {
+    nativeSecurityAttempts.set(key, { count: 1, resetAt: now2 + 10 * 60 * 1e3 });
+    return true;
+  }
+  if (current.count >= 10) return false;
+  current.count += 1;
+  return true;
 }
 async function sendOtpEmail(email, otp) {
   const apiKey = process.env.RESEND_API_KEY;
@@ -1527,7 +1557,7 @@ async function loadUserProfilesFromFirestore() {
 }
 async function syncUserProfilesToFirestore() {
   if (isMySqlRuntimePrimary()) {
-    const changedUsers = Object.values(store.users).filter((user) => !user.id.startsWith("user_sim_") && !user.id.startsWith("bot_") && persistedUserProfiles.get(user.firebaseUid || user.id) !== serializeUserProfile(user));
+    const changedUsers = Object.values(store.users).filter((user) => !isBotPlayer(user.id) && persistedUserProfiles.get(user.firebaseUid || user.id) !== serializeUserProfile(user));
     for (const user of changedUsers) {
       await saveMySqlUserProfile(user);
       persistedUserProfiles.set(user.firebaseUid || user.id, serializeUserProfile(user));
@@ -1536,7 +1566,7 @@ async function syncUserProfilesToFirestore() {
   }
   if (!db) return;
   const users = Object.values(store.users).filter((user) => {
-    if (user.id.startsWith("user_sim_") || user.id.startsWith("bot_")) return false;
+    if (isBotPlayer(user.id)) return false;
     const documentId = user.firebaseUid || user.id;
     return persistedUserProfiles.get(documentId) !== serializeUserProfile(user);
   });
@@ -1785,7 +1815,7 @@ async function saveStoreAndWait() {
 function purgeSimulatedUsers() {
   let changed = false;
   Object.keys(store.users).forEach((id) => {
-    if (id.startsWith("user_sim_")) {
+    if (id.startsWith("user_sim_") || id.startsWith("sim_")) {
       delete store.users[id];
       changed = true;
     }
@@ -1903,7 +1933,12 @@ async function pollMySqlRealtimeEvents() {
       if (event.originId === SERVER_INSTANCE_ID) continue;
       if (event.scopeType === "room" && event.targetId) {
         if (event.eventName === "game_update" && event.payload?.id) {
-          store.rooms[event.payload.id] = event.payload;
+          const incomingRoom = event.payload;
+          if (shouldAcceptRoomSnapshot(store.rooms[incomingRoom.id], incomingRoom)) {
+            store.rooms[incomingRoom.id] = incomingRoom;
+          } else {
+            continue;
+          }
         }
         broadcastToRoomLocal(event.targetId, event.eventName, event.payload);
       } else if (event.scopeType === "user" && event.targetId) {
@@ -2061,8 +2096,17 @@ function getPlayableColor(room, player) {
 function resetPlayerInactivity(player) {
   if (!player || isBotPlayer(player.userId)) return;
   player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
-  player.inactivityDeadline = Date.now() + PLAYER_INACTIVITY_SECONDS * 1e3;
+  player.inactivityDeadline = void 0;
   player.lastInactivityWarningMinute = void 0;
+}
+function touchRoom(room) {
+  room.gameState.lastActivity = Math.max(Date.now(), Number(room.gameState.lastActivity || 0) + 1);
+}
+function shouldAcceptRoomSnapshot(localRoom, incomingRoom) {
+  if (!localRoom) return true;
+  if (localRoom.status === "completed" || localRoom.status === "cancelled") return false;
+  if (incomingRoom.status === "completed" || incomingRoom.status === "cancelled") return true;
+  return Number(incomingRoom.gameState?.lastActivity || 0) >= Number(localRoom.gameState?.lastActivity || 0);
 }
 function getGlobalPosition(color, relativePos) {
   if (relativePos < 0 || relativePos > 50) return null;
@@ -2115,6 +2159,7 @@ function advanceTurn(room) {
     resetPlayerInactivity(nextPlayer);
     addLog(room, `It is now ${nextPlayer.username}'s turn. Please roll the dice!`);
   }
+  touchRoom(room);
 }
 function addTransaction(userId, type, amount, matchId, description = "") {
   const tx = {
@@ -2138,6 +2183,10 @@ function hasMatchPayout(userId, matchId) {
 async function persistLiveRoom(room) {
   if (!isMySqlConfigured()) return;
   await saveMySqlGameRoom(room);
+}
+async function persistRoomUserProfiles(room) {
+  const profiles = room.players.filter((player) => !isBotPlayer(player.userId)).map((player) => store.users[player.userId]).filter((profile) => Boolean(profile));
+  await Promise.all(profiles.map((profile) => saveUserProfileToFirestore(profile)));
 }
 function recordHouseRevenue(category, amount, referenceId, description = "") {
   const normalizedAmount = Number(Number(amount || 0).toFixed(2));
@@ -2201,7 +2250,7 @@ function addLog(room, text) {
   }
 }
 function isBotPlayer(userId) {
-  return userId.startsWith("bot_") || userId.startsWith("user_sim_");
+  return userId.startsWith("bot_") || userId.startsWith("user_sim_") || userId.startsWith("sim_");
 }
 function executeBotTurnIfActive(room) {
   const activePlayer = room.players[room.gameState.turn];
@@ -2211,6 +2260,7 @@ function executeBotTurnIfActive(room) {
       const d = Math.floor(Math.random() * 6) + 1;
       room.gameState.diceRoll = d;
       room.gameState.hasRolled = true;
+      touchRoom(room);
       broadcastToRoom(room.id, "game_update", room);
       addLog(room, `\u{1F916} Bot ${activePlayer.username} rolled a ${d}!`);
       const playableColor = getPlayableColor(room, activePlayer);
@@ -2260,6 +2310,7 @@ function moveTokenLogic(room, tokenId, diceValue) {
   const activePlayer = room.players[gs.turn];
   const playableColor = getPlayableColor(room, activePlayer);
   if (token.color !== playableColor || !isMoveValid(token, diceValue)) return;
+  touchRoom(room);
   const oldPos = token.position;
   let newPos = oldPos;
   const RELATIVE_HOME_ENTRY_SQUARE = 51;
@@ -2352,6 +2403,7 @@ function moveTokenLogic(room, tokenId, diceValue) {
             const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
             distributed += share;
             if (p.userId === gs.winnerId) gs.winnerPayout = share;
+            gs.winnerPayouts = { ...gs.winnerPayouts || {}, [p.userId]: share };
             if (!hasMatchPayout(p.userId, room.id)) {
               user.balance += share;
               user.winCount += 1;
@@ -2383,6 +2435,7 @@ function moveTokenLogic(room, tokenId, diceValue) {
           const payoutAmount = Number((gs.escrowBalance - rakeAmount).toFixed(2));
           gs.rakeAmount = Number(rakeAmount.toFixed(2));
           gs.winnerPayout = payoutAmount;
+          gs.winnerPayouts = { [activePlayer.userId]: payoutAmount };
           if (!hasMatchPayout(activePlayer.userId, room.id)) {
             winnerProfile.balance += payoutAmount;
             winnerProfile.winCount += 1;
@@ -2450,6 +2503,7 @@ function completeTeamForfeit(room, forfeitingPlayer, reason) {
         const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
         distributed += share;
         const profile = store.users[player.userId];
+        room.gameState.winnerPayouts = { ...room.gameState.winnerPayouts || {}, [player.userId]: share };
         if (!hasMatchPayout(player.userId, room.id)) {
           profile.balance += share;
           profile.winCount = (profile.winCount || 0) + 1;
@@ -2515,6 +2569,7 @@ function handleInactivityForfeit(room, inactivePlayer) {
           const payoutAmount = Number((totalPayout - rakeAmount).toFixed(2));
           room.gameState.rakeAmount = Number(rakeAmount.toFixed(2));
           room.gameState.winnerPayout = payoutAmount;
+          room.gameState.winnerPayouts = { [winner.userId]: payoutAmount };
           if (!hasMatchPayout(winner.userId, room.id)) {
             winnerProfile.balance += payoutAmount;
             winnerProfile.winCount += 1;
@@ -2538,7 +2593,7 @@ function handleInactivityForfeit(room, inactivePlayer) {
     addLog(room, "The game ended because all players became inactive.");
   }
   saveStore();
-  if (room.status === "completed" || room.status === "cancelled") {
+  if (room.status === "completed") {
     void persistLiveRoom(room).catch((error) => console.error(`Failed to persist completed room ${room.id}:`, error));
   }
   broadcastToRoom(room.id, "game_update", room);
@@ -2559,7 +2614,9 @@ setInterval(async () => {
           if (localRoom && (localRoom.status === "completed" || localRoom.status === "cancelled")) {
             return;
           }
-          store.rooms[room.id] = room;
+          if (!localRoom || Number(room.gameState?.lastActivity || 0) > Number(localRoom.gameState?.lastActivity || 0)) {
+            store.rooms[room.id] = room;
+          }
         }
       });
     }
@@ -2570,26 +2627,32 @@ setInterval(async () => {
         const gs = room.gameState;
         const activePlayer = room.players[gs.turn];
         if (activePlayer && !isBotPlayer(activePlayer.userId)) {
-          if (!activePlayer.inactivityDeadline) {
+          if (gs.turnTimer > 0) {
+            activePlayer.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
+            activePlayer.inactivityDeadline = void 0;
+            activePlayer.lastInactivityWarningMinute = void 0;
+          } else if (!activePlayer.inactivityDeadline) {
             const remainingSeconds = Number.isFinite(activePlayer.inactivityTimer) ? Math.max(0, Number(activePlayer.inactivityTimer)) : PLAYER_INACTIVITY_SECONDS;
             activePlayer.inactivityDeadline = Date.now() + remainingSeconds * 1e3;
             activePlayer.lastInactivityWarningMinute = void 0;
             saveStore();
           }
-          activePlayer.inactivityTimer = Math.max(
-            0,
-            Math.ceil((activePlayer.inactivityDeadline - Date.now()) / 1e3)
-          );
+          if (activePlayer.inactivityDeadline) {
+            activePlayer.inactivityTimer = Math.max(
+              0,
+              Math.ceil((activePlayer.inactivityDeadline - Date.now()) / 1e3)
+            );
+          }
           changed = true;
           const minutesLeft = Math.ceil(activePlayer.inactivityTimer / 60);
-          if (minutesLeft >= 1 && minutesLeft <= 4 && activePlayer.lastInactivityWarningMinute !== minutesLeft) {
+          if (activePlayer.inactivityDeadline && minutesLeft >= 1 && minutesLeft <= 4 && activePlayer.lastInactivityWarningMinute !== minutesLeft) {
             activePlayer.lastInactivityWarningMinute = minutesLeft;
             const warningMsg = `Waqtigaagu wuu sii dhamaanayaa! Waxaa kuu harsan ${minutesLeft} daqiiqo. (Your time is running out! ${minutesLeft} minutes left.)`;
             sendEventToUser(activePlayer.userId, "inactivity_warning", { message: warningMsg });
             addLog(room, `\u23F1\uFE0F Digniin: ${activePlayer.username} waxaa u harsan ${minutesLeft} daqiiqo. (Warning: ${activePlayer.username} has ${minutesLeft} minutes left.)`);
             saveStore();
           }
-          if (activePlayer.inactivityTimer <= 0) {
+          if (activePlayer.inactivityDeadline && activePlayer.inactivityTimer <= 0) {
             handleInactivityForfeit(room, activePlayer);
             return;
           }
@@ -2611,7 +2674,8 @@ setInterval(async () => {
           broadcastToRoom(roomId, "timer_tick", {
             turn: room.gameState.turn,
             turnTimer: room.gameState.turnTimer,
-            inactivityTimer: room.players[room.gameState.turn]?.inactivityTimer
+            inactivityTimer: room.players[room.gameState.turn]?.inactivityTimer,
+            lastActivity: room.gameState.lastActivity
           });
         }
       });
@@ -2676,9 +2740,9 @@ setInterval(() => {
           id: `bot_match_${Date.now()}_${botIndex}`,
           username: botNames[Math.floor(Math.random() * botNames.length)] + ` #${Math.floor(10 + Math.random() * 90)}`,
           avatar: botAvatars[botIndex % botAvatars.length],
-          winCount: 15 + Math.floor(Math.random() * 25),
-          lossCount: 10 + Math.floor(Math.random() * 15),
-          balance: 100
+          winCount: 0,
+          lossCount: 0,
+          balance: 0
         });
       }
       const room = startMatchedRoom(matchedList, bet, cap, mode);
@@ -2791,9 +2855,6 @@ app.post("/api/auth/turnstile/verify", async (req, res) => {
   const phone = normalizeAuthPhone(req.body?.phone);
   const action = req.body?.action === "signup" ? "signup" : req.body?.action === "login" ? "login" : null;
   if (!phone || !action || !token) return res.status(400).json({ error: "Security check could not be completed." });
-  if (token === "CAPACITOR_MOBILE_BYPASS") {
-    return res.json({ success: true, ticket: createPhoneTurnstileTicket(phone, action) });
-  }
   const secret = process.env.TURNSTILE_SECRET_KEY || "";
   if (!secret) return res.status(500).json({ error: "Security service not configured on server." });
   try {
@@ -2810,13 +2871,39 @@ app.post("/api/auth/turnstile/verify", async (req, res) => {
     res.status(503).json({ error: "Security check is temporarily unavailable." });
   }
 });
+app.post("/api/auth/native-security-ticket", (req, res) => {
+  const phone = normalizeAuthPhone(req.body?.phone);
+  const action = req.body?.action === "signup" ? "signup" : req.body?.action === "login" ? "login" : null;
+  if (!phone || !action) return res.status(400).json({ error: "Enter a valid phone number." });
+  if (!process.env.TURNSTILE_SECRET_KEY) return res.status(503).json({ error: "Native security service is not configured." });
+  if (!isTrustedCapacitorAndroidRequest(req)) return res.status(403).json({ error: "This security route is available only inside the LudoSom Android app." });
+  const key = `${req.ip}:${phone}:${action}`;
+  if (!consumeNativeSecurityAttempt(key)) {
+    return res.status(429).json({ error: "Too many security requests. Please wait ten minutes and try again." });
+  }
+  return res.json({ success: true, ticket: createPhoneTurnstileTicket(phone, action), expiresIn: 300 });
+});
 app.get("/api/auth/profile-status", verifyFirebaseToken, async (req, res) => {
   const profile = await findUserProfileInFirestore(req.user.uid, req.user.email);
   const otpEnabled = isOtpEnabled() && req.user.firebase?.sign_in_provider !== "phone";
-  res.json({ exists: Boolean(profile?.id), otpEnabled, phoneAuthEnabled: isPhoneAuthEnabled(), otpRequired: otpEnabled && !profile?.emailOtpVerifiedAt, otpVerified: !otpEnabled || Boolean(profile?.emailOtpVerifiedAt), linkedToAgent: Boolean(profile?.linkedAgentId) });
+  const exists = Boolean(profile?.id);
+  res.json({
+    exists,
+    onboardingRequired: !exists,
+    otpEnabled,
+    phoneAuthEnabled: isPhoneAuthEnabled(),
+    otpRequired: otpEnabled && !exists,
+    otpVerified: exists || !otpEnabled,
+    linkedToAgent: Boolean(profile?.linkedAgentId)
+  });
 });
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
+});
+app.get("/api/version", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.json({ version: DEPLOY_VERSION, deployedFrontend: true });
 });
 app.get("/api/admin/migrate-users", async (req, res) => {
   if (!auth) {
@@ -2980,17 +3067,8 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   if ((signInProvider === "phone" || isPhonePasswordLogin) && !isPhoneAuthEnabled()) {
     return res.status(403).json({ error: "Phone sign-in is currently disabled." });
   }
-  if (requiresEmailOtp && !req.user.email_verified && signInProvider === "password") {
-    return res.status(403).json({ error: "Please verify your email address before signing in." });
-  }
   let foundUser = Object.values(store.users).find((u) => u.firebaseUid === firebaseUid);
   if (foundUser) {
-    if (requiresEmailOtp && !foundUser.emailOtpVerifiedAt) {
-      const otpVerification = await readEmailOtp(firebaseUid);
-      const verifiedAt = Number(otpVerification?.verifiedAt || 0);
-      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
-      foundUser.emailOtpVerifiedAt = verifiedAt;
-    }
     foundUser.avatar = normalizeAppAvatar(foundUser.avatar);
     foundUser.phone = foundUser.phone || aliasPhone || req.user.phone_number || phone || void 0;
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
@@ -3003,12 +3081,6 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   }
   const persistedUser = await findUserProfileInFirestore(firebaseUid, email);
   if (persistedUser?.id) {
-    if (requiresEmailOtp && !persistedUser.emailOtpVerifiedAt) {
-      const otpVerification = await readEmailOtp(firebaseUid);
-      const verifiedAt = Number(otpVerification?.verifiedAt || 0);
-      if (onboardingComplete !== true || !verifiedAt) return res.status(428).json({ error: "Email OTP verification is required." });
-      persistedUser.emailOtpVerifiedAt = verifiedAt;
-    }
     persistedUser.firebaseUid = firebaseUid;
     persistedUser.email = persistedUser.email || email || void 0;
     persistedUser.phone = persistedUser.phone || aliasPhone || req.user.phone_number || phone || void 0;
@@ -3029,12 +3101,9 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       (u) => u.email?.trim().toLowerCase() === normalizedEmail && !u.firebaseUid
     );
     if (userByEmail) {
-      const otpVerification = isOtpEnabled() ? await readEmailOtp(firebaseUid) : null;
-      const verifiedAt = isOtpEnabled() ? Number(otpVerification?.verifiedAt || 0) : Date.now();
-      if (isOtpEnabled() && (onboardingComplete !== true || !verifiedAt)) return res.status(428).json({ error: "Email OTP verification is required." });
       userByEmail.firebaseUid = firebaseUid;
       userByEmail.email = normalizedEmail;
-      userByEmail.emailOtpVerifiedAt = verifiedAt;
+      userByEmail.emailOtpVerifiedAt = userByEmail.emailOtpVerifiedAt || Date.now();
       if (!userByEmail.linkedAgentId && normalizePromoCode(promoCode)) {
         const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
         if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
@@ -3066,6 +3135,13 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   }
   if (isPhonePasswordLogin && phoneAuthAction !== "signup") {
     return res.status(404).json({ error: "No account was found with this phone number." });
+  }
+  if (requiresEmailOtp && signInProvider === "password") {
+    const otpVerification = await readEmailOtp(firebaseUid);
+    const verifiedAt = Number(otpVerification?.verifiedAt || 0);
+    if (onboardingComplete !== true || !verifiedAt) {
+      return res.status(428).json({ error: "Complete email OTP verification before creating the account." });
+    }
   }
   if (signInProvider === "google.com" && isOtpEnabled()) {
     if (onboardingComplete !== true) {
@@ -3114,7 +3190,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   res.json(newUser);
 });
 app.get("/api/users/leaderboard", async (req, res) => {
-  const allUsers = Object.values(store.users).filter((u) => !u.id.startsWith("user_sim_") && !u.id.startsWith("bot_"));
+  const allUsers = Object.values(store.users).filter((u) => !isBotPlayer(u.id));
   const rankedUsers = allUsers.map((u) => {
     const userTransactions = store.transactions.filter((t) => t.userId === u.id);
     const payoutsAndRefunds = userTransactions.filter((t) => t.type === "win_payout" || t.type === "refund").reduce((sum, t) => sum + t.amount, 0);
@@ -3146,7 +3222,7 @@ app.get("/api/users/online", async (req, res) => {
   const now2 = Date.now();
   const onlineList = [];
   Object.values(store.users).forEach((u) => {
-    if (u.id.startsWith("user_sim_")) return;
+    if (isBotPlayer(u.id)) return;
     let status = "offline";
     let seekingDetails = null;
     for (const [qKey, queueUserIds] of Object.entries(store.matchmakingQueues)) {
@@ -3789,12 +3865,12 @@ app.use("/api/rooms", async (req, res, next) => {
     if (req.method === "GET" && pathParts[0] === "active") {
       const rooms = await listMySqlActiveGameRooms();
       rooms.forEach((room) => {
-        if (room?.id) store.rooms[room.id] = room;
+        if (room?.id && shouldAcceptRoomSnapshot(store.rooms[room.id], room)) store.rooms[room.id] = room;
       });
     } else if (roomId) {
       const room = await loadMySqlGameRoom(roomId);
       const localRoom = store.rooms[roomId];
-      if (room && !(localRoom && (localRoom.status === "completed" || localRoom.status === "cancelled"))) {
+      if (room && shouldAcceptRoomSnapshot(localRoom, room)) {
         store.rooms[roomId] = room;
       }
     }
@@ -3806,7 +3882,7 @@ app.use("/api/rooms", async (req, res, next) => {
     ].map((value) => String(value || "").trim()).filter(Boolean);
     await Promise.all([...new Set(userIds)].map(async (userId) => {
       const user = await loadMySqlRuntimeUser(userId);
-      if (user?.id) store.users[user.id] = user;
+      if (user?.id && !store.users[user.id]) store.users[user.id] = user;
     }));
   } catch (error) {
     console.error("MySQL live room hydration failed; continuing with local state:", error);
@@ -4165,6 +4241,7 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
   };
   store.rooms[roomId] = newRoom;
   saveStore();
+  void Promise.all([persistLiveRoom(newRoom), persistRoomUserProfiles(newRoom)]).catch((error) => console.error(`Failed to persist matched room ${roomId}:`, error));
   players.forEach((p) => {
     if (!isBotPlayer(p.userId)) {
       sendEventToUser(p.userId, "matchmaker_success", { roomId: newRoom.id, room: newRoom });
@@ -4288,9 +4365,9 @@ app.post("/api/rooms/create-bot-room", (req, res) => {
       id: `bot_match_${Date.now()}_${botIndex}`,
       username: botNames[botIndex % botNames.length],
       avatar: botAvatars[botIndex % botAvatars.length],
-      winCount: 10 + Math.floor(Math.random() * 20),
-      lossCount: 5 + Math.floor(Math.random() * 10),
-      balance: 100
+      winCount: 0,
+      lossCount: 0,
+      balance: 0
     });
   }
   const room = startMatchedRoom(matchedList, bet, cap, mode);
@@ -4338,9 +4415,9 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
       id: receiverId,
       username: receiverId.includes("1") ? "Kaptan_Ludo \u{1F451}" : receiverId.includes("2") ? "SomaliGamer_252" : receiverId.includes("3") ? "Pro_Dice_Master" : "Speedy_Runner",
       avatar: receiverId.includes("1") ? "\u{1F981}" : receiverId.includes("2") ? "\u26A1" : receiverId.includes("3") ? "\u{1F98A}" : "\u{1F409}",
-      winCount: 20,
-      lossCount: 8,
-      balance: 100
+      winCount: 0,
+      lossCount: 0,
+      balance: 0
     };
     const matchedList = [sender, receiverUser2];
     const botAvatars = ["\u{1F916}", "\u{1F98A}", "\u26A1", "\u{1F451}"];
@@ -4351,9 +4428,9 @@ app.post("/api/rooms/challenge/invite", (req, res) => {
         id: `bot_match_${Date.now()}_${idx}`,
         username: botNames[idx % botNames.length],
         avatar: botAvatars[idx % botAvatars.length],
-        winCount: 10 + Math.floor(Math.random() * 20),
-        lossCount: 5 + Math.floor(Math.random() * 10),
-        balance: 100
+        winCount: 0,
+        lossCount: 0,
+        balance: 0
       });
     }
     const room = startMatchedRoom(matchedList, bet, selectedCapacity, selectedMode);
@@ -4642,9 +4719,10 @@ app.post("/api/rooms/start", async (req, res) => {
     }
   });
   resetPlayerInactivity(room.players[0]);
+  touchRoom(room);
   addLog(room, `\u2694\uFE0F Ciyaartu waa ay bilaabatay! Ciyaartoyda: ${room.players.length}. Bet: $${bet}. Escrow Locked: $${totalEscrow}`);
   saveStore();
-  await persistLiveRoom(room);
+  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
   broadcastToRoom(room.id, "game_update", room);
   res.json(room);
 });
@@ -4667,6 +4745,7 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
   gs.diceRoll = d;
   gs.lastDiceRoll = d;
   gs.hasRolled = true;
+  touchRoom(room);
   addLog(room, `\u{1F3B2} ${activePlayer.username} rolled a ${d}!`);
   if (d === 6) {
     gs.consecutiveSixes = (gs.consecutiveSixes || 0) + 1;
@@ -4736,7 +4815,7 @@ app.post("/api/rooms/move-token", async (req, res) => {
   gs.turnTimer = 30;
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  await persistLiveRoom(room);
+  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
   broadcastToRoom(room.id, "game_update", room);
   executeBotTurnIfActive(room);
   res.json(room);
@@ -4864,7 +4943,7 @@ app.post("/api/rooms/emoji", (req, res) => {
   });
   res.json({ success: true });
 });
-app.post("/api/rooms/leave", (req, res) => {
+app.post("/api/rooms/leave", async (req, res) => {
   const { userId, roomId } = req.body;
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: "Room not found" });
@@ -4905,7 +4984,9 @@ app.post("/api/rooms/leave", (req, res) => {
     }
     if (room.gameMode === "team") {
       completeTeamForfeit(room, p, "forfeit");
+      touchRoom(room);
       saveStore();
+      await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
       broadcastToRoom(room.id, "game_update", room);
       return res.json({ success: true, room });
     }
@@ -4937,9 +5018,12 @@ app.post("/api/rooms/leave", (req, res) => {
           const payoutAmount = Number((totalPayout - rakeAmount).toFixed(2));
           room.gameState.rakeAmount = rakeAmount;
           room.gameState.winnerPayout = payoutAmount;
-          winnerProfile.balance += payoutAmount;
-          winnerProfile.winCount = (winnerProfile.winCount || 0) + 1;
-          addTransaction(opponent.userId, "win_payout", payoutAmount, room.id, `Win by opponent forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+          room.gameState.winnerPayouts = { [opponent.userId]: payoutAmount };
+          if (!hasMatchPayout(opponent.userId, room.id)) {
+            winnerProfile.balance += payoutAmount;
+            winnerProfile.winCount = (winnerProfile.winCount || 0) + 1;
+            addTransaction(opponent.userId, "win_payout", payoutAmount, room.id, `Win by opponent forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+          }
           broadcastUserUpdate(opponent.userId);
           recordHouseRevenue("forfeit_rake", rakeAmount, room.id, `Rake from manual forfeit match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
         } else if (totalPayout > 0) {
@@ -4949,6 +5033,9 @@ app.post("/api/rooms/leave", (req, res) => {
         }
       }
       room.gameState.escrowBalance = 0;
+      touchRoom(room);
+      saveStore();
+      await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
       broadcastToRoom(room.id, "game_update", room);
       res.json({ success: true, room });
     } else {
@@ -5604,7 +5691,7 @@ async function getAdminFinancialMetrics() {
   return value;
 }
 app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
-  const users = Object.values(store.users).filter((user) => !user.id.startsWith("bot_") && !user.id.startsWith("user_sim_"));
+  const users = Object.values(store.users).filter((user) => !isBotPlayer(user.id));
   const rooms = Object.values(store.rooms);
   const tournaments = Object.values(store.tournaments);
   const manualTransactions = store.pendingManualTransactions || [];
@@ -5653,7 +5740,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     const bucket = monthBuckets.get(`${date.getFullYear()}-${date.getMonth()}`);
     if (!bucket) return;
     bucket.transactions += 1;
-    if (tx.type === "deposit" || tx.type === "win_payout" || tx.type === "refund") bucket.deposits += Number(tx.amount || 0);
+    if (tx.type === "deposit") bucket.deposits += Number(tx.amount || 0);
     if (tx.type === "withdrawal") bucket.withdrawals += Number(tx.amount || 0);
   });
   let totalAgents = 0;
@@ -5674,7 +5761,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     }
   }
   const recentActivity = [
-    ...store.transactions.slice(-8).map((tx) => ({ id: tx.id, kind: "transaction", title: tx.description, amount: tx.amount, status: tx.status || "completed", timestamp: tx.timestamp })),
+    ...store.transactions.slice(0, 8).map((tx) => ({ id: tx.id, kind: "transaction", title: tx.description, amount: tx.amount, status: tx.status || "completed", timestamp: tx.timestamp })),
     ...manualTransactions.slice(0, 8).map((tx) => ({ id: tx.id, kind: "manual", title: `${tx.username} requested a ${tx.transactionType}`, amount: tx.amount, status: tx.status, timestamp: tx.createdAt }))
   ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
   res.json({
@@ -5708,10 +5795,10 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
   });
 });
 app.get("/api/admin/users", hasPermission("users"), (req, res) => {
-  res.json(Object.values(store.users));
+  res.json(Object.values(store.users).filter((user) => !isBotPlayer(user.id)));
 });
 app.get("/api/admin/rooms", hasPermission("rooms"), (req, res) => {
-  res.json(Object.values(store.rooms));
+  res.json(Object.values(store.rooms).filter((room) => room.status !== "cancelled"));
 });
 app.get("/api/admin/transactions", hasPermission("transactions"), (req, res) => {
   res.json(store.transactions);

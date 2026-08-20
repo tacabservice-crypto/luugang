@@ -1,6 +1,10 @@
 # LudoSom Android build
 
 The Android application uses Capacitor and keeps the existing web/server deployment as its backend.
+The distributed shell loads `CAPACITOR_SERVER_URL` (default `https://ludosom.com`),
+so normal frontend and backend deploys are shared immediately with browser users.
+Users only need another APK for native Android changes such as permissions,
+plugins, signing, or a changed native shell URL.
 
 ## Requirements
 
@@ -34,6 +38,10 @@ VITE_NATIVE_API_BASE_URL=https://ludosom.com
 ```
 
 The production server must use HTTPS and permit requests from the Capacitor application.
+Phone security in Android uses the short-lived `/api/auth/native-security-ticket`
+route. Production must set `TURNSTILE_SECRET_KEY`; the same secret signs both web
+Turnstile tickets and Android tickets. The Android route accepts only Capacitor's
+local HTTPS origin and applies per-IP/phone rate limiting.
 
 ## Release build
 
@@ -44,5 +52,6 @@ Before public distribution:
 3. Create and securely back up a release keystore. Never commit the keystore or its passwords.
 4. Configure release signing and build an Android App Bundle (`bundleRelease`) or signed APK.
 5. Add `android/app/google-services.json` only when native Firebase services such as FCM are enabled; the file is intentionally ignored by Git.
+6. Add the release SHA-256 fingerprint to the Firebase Android app before testing Google sign-in. Email/phone-password login uses the same Firebase project as the browser.
 
 Real-money staking and cash prizes need a separate distribution/compliance decision. A direct APK can be distributed independently, while Google Play eligibility depends on its current gambling and real-money-games rules, licensing, country availability, and approval.

@@ -199,11 +199,14 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           throw new Error('Phone sign-in is currently disabled.');
         }
         const action = isLogin ? 'login' : 'signup';
-        const verifyToken = Capacitor.isNativePlatform() ? 'CAPACITOR_MOBILE_BYPASS' : turnstileToken;
-        const securityResponse = await fetch(`${API_BASE_URL}/api/auth/turnstile/verify`, {
+        const isNativeAndroid = Capacitor.getPlatform() === 'android';
+        const securityResponse = await fetch(`${API_BASE_URL}${isNativeAndroid ? '/api/auth/native-security-ticket' : '/api/auth/turnstile/verify'}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: verifyToken, phone: normalizedPhone, action }),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(isNativeAndroid ? { 'X-LudoSom-Platform': 'android' } : {}),
+          },
+          body: JSON.stringify({ token: isNativeAndroid ? undefined : turnstileToken, phone: normalizedPhone, action }),
         });
         const securityData = await readApiJson(securityResponse);
         if (!securityResponse.ok) throw new Error(securityData.error || 'Security check failed.');
@@ -251,7 +254,9 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         const profileStatus = await readApiJson(statusResponse);
         if (!statusResponse.ok) throw new Error(profileStatus.error || 'Account status could not be checked.');
         setExistingAgentLink(Boolean(profileStatus.linkedToAgent));
-        if (profileStatus.otpRequired) {
+        if (profileStatus.exists) {
+          await handleBackendLogin(userCredential.user);
+        } else if (profileStatus.otpRequired) {
           const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
           const otpData = await readApiJson(otpResponse);
           if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
@@ -260,9 +265,6 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           setVerificationPending(true);
           setSuccessMessage(otpResponse.ok ? '6-digit OTP ayaa loo diray email-kaaga.' : otpData.error);
           return;
-        }
-        if (profileStatus.linkedToAgent) {
-          await handleBackendLogin(userCredential.user, true);
         } else {
           setOtpUser(userCredential.user);
           setGoogleOnboarding(true);
@@ -356,7 +358,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
           setSuccessMessage('Email verified. You may add a promo code, or skip this step.');
         }
       } else {
-        await handleBackendLogin(otpUser);
+        await handleBackendLogin(otpUser, true);
       }
     } catch (err: any) { setError(userErrorMessage(err, 'The code could not be verified.')); } finally { setLoading(false); }
   };
@@ -398,7 +400,9 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
       const status = await readApiJson(statusResponse);
       if (!statusResponse.ok) throw new Error(status.error || 'Could not check account status.');
       setExistingAgentLink(Boolean(status.linkedToAgent));
-      if (status.otpRequired) {
+      if (status.exists) {
+        await handleBackendLogin(credential.user);
+      } else if (status.otpRequired) {
         const otpResponse = await fetch(`${API_BASE_URL}/api/auth/otp/request`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
         const otpData = await readApiJson(otpResponse);
         if (!otpResponse.ok && otpResponse.status !== 429) throw new Error(otpData.error || 'OTP could not be sent.');
@@ -406,8 +410,6 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         setGoogleOnboarding(true);
         setVerificationPending(true);
         setSuccessMessage(otpResponse.ok ? '6-digit OTP ayaa loo diray Gmail-kaaga.' : otpData.error);
-      } else if (status.linkedToAgent) {
-        await handleBackendLogin(credential.user, true);
       } else {
         setOtpUser(credential.user);
         setGoogleOnboarding(true);

@@ -19,6 +19,13 @@ const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
 const Tournaments = React.lazy(() => import('./pages/Tournaments'));
 
+function shouldAcceptRoomUpdate(current: GameRoom | null, incoming: GameRoom): boolean {
+  if (!current || current.id !== incoming.id) return true;
+  if (current.status === 'completed' || current.status === 'cancelled') return false;
+  if (incoming.status === 'completed' || incoming.status === 'cancelled') return true;
+  return Number(incoming.gameState?.lastActivity || 0) >= Number(current.gameState?.lastActivity || 0);
+}
+
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
@@ -48,6 +55,57 @@ export default function App() {
     gameMode: 'solo'
   });
   const [error, setError] = useState<string | null>(null);
+
+  // Detect a new server/web deployment, remove stale PWA responses, and reload
+  // exactly once. This also refreshes the live frontend used by the Android APK.
+  useEffect(() => {
+    let stopped = false;
+    let checking = false;
+    const versionKey = 'ludosom_deploy_version';
+
+    const checkForDeployment = async () => {
+      if (checking || stopped || document.visibilityState === 'hidden') return;
+      checking = true;
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/version?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json() as { version?: string };
+        const incomingVersion = String(data.version || '').trim();
+        if (!incomingVersion) return;
+        const currentVersion = localStorage.getItem(versionKey);
+        if (!currentVersion) {
+          localStorage.setItem(versionKey, incomingVersion);
+          return;
+        }
+        if (currentVersion === incomingVersion) return;
+
+        // Store first to prevent a reload loop if service-worker cleanup takes
+        // longer than navigation on a slow phone.
+        localStorage.setItem(versionKey, incomingVersion);
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.filter(name => /workbox|vite|ludosom|precache/i.test(name)).map(name => caches.delete(name)));
+        }
+        const registrations = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistrations() : [];
+        registrations.forEach(registration => registration.update().catch(() => undefined));
+        window.location.reload();
+      } catch {
+        // Offline users keep the last working app; the next focus/poll retries.
+      } finally {
+        checking = false;
+      }
+    };
+
+    const timer = window.setInterval(checkForDeployment, 60_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void checkForDeployment(); };
+    document.addEventListener('visibilitychange', onVisible);
+    void checkForDeployment();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [API_BASE_URL]);
 
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [showConfirmLeave, setShowConfirmLeave] = useState(false);
@@ -244,7 +302,9 @@ export default function App() {
         if (!response.ok) return;
         const room = await response.json() as GameRoom;
         if (!stopped && room?.id === activeRoom.id) {
-          setActiveRoom(previous => previous?.id === room.id ? { ...room, rejectionReason: previous.rejectionReason || room.rejectionReason } : previous);
+          setActiveRoom(previous => previous?.id === room.id && shouldAcceptRoomUpdate(previous, room)
+            ? { ...room, rejectionReason: previous.rejectionReason || room.rejectionReason }
+            : previous);
         }
       } catch {
         // The existing SSE connection remains the primary real-time channel.
@@ -301,6 +361,7 @@ export default function App() {
         setActiveRoom(prevRoom => {
           // Only update activeRoom if the user is already currently in this specific room
           if (prevRoom && prevRoom.id === updatedRoom.id) {
+            if (!shouldAcceptRoomUpdate(prevRoom, updatedRoom)) return prevRoom;
             if (prevRoom.rejectionReason) {
               return { ...updatedRoom, rejectionReason: prevRoom.rejectionReason };
             }
@@ -316,9 +377,10 @@ export default function App() {
 
     eventSource.addEventListener('timer_tick', (e: any) => {
       try {
-        const tick = JSON.parse(e.data) as { turn: number; turnTimer: number };
+        const tick = JSON.parse(e.data) as { turn: number; turnTimer: number; inactivityTimer?: number; lastActivity?: number };
         setActiveRoom(prev => {
           if (!prev) return null;
+          if (Number(tick.lastActivity || 0) !== Number(prev.gameState.lastActivity || 0)) return prev;
           return {
             ...prev,
             gameState: {

@@ -124,11 +124,12 @@ export interface GameState {
   completionReason?: 'forfeit' | 'inactivity' | 'all_tokens_home';
   endReasonText?: string;
   winnerPayout?: number; // Net amount credited to the displayed winner after rake
+  winnerPayouts?: Record<string, number>; // Exact net credit for each winner in team games
   rakeAmount?: number; // Platform commission retained from the escrow pot
   escrowBalance: number;
   logs: GameLog[];
   chat: ChatMessage[];
-  lastActivity: number;
+  lastActivity: number; // Gameplay revision timestamp used to reject stale snapshots
   consecutiveSixes?: number; // Track consecutive rolls of 6
 }
 

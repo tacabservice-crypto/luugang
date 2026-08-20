@@ -6,8 +6,17 @@ const nativeApiOrigin = String(import.meta.env.VITE_NATIVE_API_BASE_URL || confi
   .replace(/\/$/, '');
 
 export function apiUrl(value: string): string {
-  if (!Capacitor.isNativePlatform() || !value.startsWith('/api/')) return value;
-  return `${nativeApiOrigin}${value}`;
+  if (!Capacitor.isNativePlatform()) return value;
+  if (value.startsWith('/api/')) return `${nativeApiOrigin}${value}`;
+  try {
+    const parsed = new URL(value, nativeApiOrigin);
+    if (parsed.pathname.startsWith('/api/')) {
+      return `${nativeApiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // Non-URL values are passed through to the browser unchanged.
+  }
+  return value;
 }
 
 export function installNativeApiBridge(): void {

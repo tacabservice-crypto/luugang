@@ -634,6 +634,7 @@ export default function GameRoomView({
     const isMeWinner = winnerIds.includes(userId);
     const winnerPlayer = room.players.find(p => p.userId === winnerId) || room.players[0];
     const losers = room.players.filter(p => !winnerIds.includes(p.userId));
+    const myNetPayout = room.gameState.winnerPayouts?.[userId] ?? room.gameState.winnerPayout ?? 0;
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-between p-4 selection:bg-purple-500 selection:text-white relative overflow-hidden">
@@ -691,10 +692,12 @@ export default function GameRoomView({
 
           {/* Total Winnings update */}
           <div className="mt-4 bg-black/40 border border-yellow-500/30 px-6 py-2 rounded-xl text-center shadow-lg">
-            <span className="text-[9px] text-yellow-400 font-black uppercase tracking-widest block">Dakhliga Guusha (Winnings)</span>
-            <span className="text-2xl font-mono font-black text-green-400 block mt-0.5">
-              +{room.betAmount > 0
-                ? formatCurrency(room.gameState.winnerPayout ?? ((room.betAmount || 0) * (room.players?.length || 0)))
+            <span className="text-[9px] text-yellow-400 font-black uppercase tracking-widest block">
+              {isMeWinner ? 'Dakhliga Guusha (Net Winnings)' : 'Lacagta Khasaaray (Stake Lost)'}
+            </span>
+            <span className={`text-2xl font-mono font-black block mt-0.5 ${isMeWinner ? 'text-green-400' : 'text-red-400'}`}>
+              {room.betAmount > 0
+                ? `${isMeWinner ? '+' : '-'}${formatCurrency(isMeWinner ? myNetPayout : room.betAmount)}`
                 : 'FREE DEMO'}
             </span>
           </div>
