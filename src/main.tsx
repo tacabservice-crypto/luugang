@@ -28,6 +28,11 @@ const router = createBrowserRouter([
     errorElement: <ErrorPage />,
   },
   {
+    path: "/cashier",
+    element: <AdminDashboard cashierMode />,
+    errorElement: <ErrorPage />,
+  },
+  {
     path: "/vip",
     element: <BecomeVip />,
     errorElement: <ErrorPage />,
