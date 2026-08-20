@@ -580,7 +580,13 @@ async function saveMySqlUserProfile(user) {
   await getMySqlPool().execute(
     `INSERT INTO app_users (id, firebase_uid, email, phone, username, avatar, balance, win_count, loss_count, linked_agent_id, applied_promo_code, email_verified, status, created_at, updated_at, profile_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE firebase_uid=VALUES(firebase_uid), email=VALUES(email), phone=VALUES(phone), username=VALUES(username), avatar=VALUES(avatar), balance=VALUES(balance), win_count=VALUES(win_count), loss_count=VALUES(loss_count), linked_agent_id=VALUES(linked_agent_id), applied_promo_code=VALUES(applied_promo_code), email_verified=VALUES(email_verified), status=VALUES(status), updated_at=VALUES(updated_at), profile_json=VALUES(profile_json), version=version+1`,
+     ON DUPLICATE KEY UPDATE
+       firebase_uid=IF(id=VALUES(id), firebase_uid, VALUES(firebase_uid)),
+       email=VALUES(email), phone=VALUES(phone), username=VALUES(username), avatar=VALUES(avatar),
+       balance=VALUES(balance), win_count=VALUES(win_count), loss_count=VALUES(loss_count),
+       linked_agent_id=VALUES(linked_agent_id), applied_promo_code=VALUES(applied_promo_code),
+       email_verified=VALUES(email_verified), status=VALUES(status), updated_at=VALUES(updated_at),
+       profile_json=VALUES(profile_json), version=version+1`,
     [user.id, user.firebaseUid || null, user.email || null, user.phone || null, user.username, user.avatar || null, Number(user.balance || 0), Number(user.winCount || 0), Number(user.lossCount || 0), user.linkedAgentId || null, user.appliedPromoCode || null, Boolean(user.emailOtpVerifiedAt), user.status || "active", Number(user.createdAt || now2), now2, JSON.stringify(user)]
   );
 }
