@@ -901,6 +901,7 @@ var configuredAllowedOrigins = [
 var allowedOrigins = Array.from(/* @__PURE__ */ new Set([
   "https://ludosom.com",
   "https://www.ludosom.com",
+  "https://darkgray-jellyfish-374710.hostingersite.com",
   "https://ludo31.onrender.com",
   "https://dhili-dhili-ludo.onrender.com",
   "https://dhilidhili.onrender.com",
