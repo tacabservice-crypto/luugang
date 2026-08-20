@@ -1994,6 +1994,62 @@ function executeBotTurnIfActive(room: GameRoom) {
   }, 400);
 }
 
+function selectAutomaticToken(room: GameRoom, player: LudoPlayer, diceValue: number): LudoToken | null {
+  const playableColor = getPlayableColor(room, player);
+  const validTokens = room.gameState.tokens.filter(token => token.color === playableColor && isMoveValid(token, diceValue));
+  if (!validTokens.length) return null;
+
+  // Prefer a capture, then releasing a token, then the token furthest along.
+  const capture = validTokens.find(token => {
+    const nextRelative = token.position === -1 ? 0 : token.position + diceValue;
+    const globalPosition = getGlobalPosition(token.color, nextRelative);
+    if (globalPosition === null || SAFE_GLOBAL_SQUARES.includes(globalPosition)) return false;
+    return room.gameState.tokens.some(other => {
+      if (other.color === token.color || other.position < 0 || other.position > 50) return false;
+      if (room.gameMode === 'team' && getTeamColors(token.color).includes(other.color)) return false;
+      return getGlobalPosition(other.color, other.position) === globalPosition;
+    });
+  });
+  if (capture) return capture;
+  if (diceValue === 6) {
+    const baseToken = validTokens.find(token => token.position === -1);
+    if (baseToken) return baseToken;
+  }
+  return [...validTokens].sort((a, b) => b.position - a.position)[0];
+}
+
+function performAutomaticPlayerTurn(room: GameRoom, player: LudoPlayer, strike: number) {
+  if (room.status !== 'playing' || room.players[room.gameState.turn]?.userId !== player.userId) return;
+  const existingRoll = room.gameState.hasRolled ? room.gameState.diceRoll : null;
+  const diceValue = existingRoll ?? (Math.floor(Math.random() * 6) + 1);
+  room.gameState.diceRoll = diceValue;
+  room.gameState.lastDiceRoll = diceValue;
+  room.gameState.hasRolled = true;
+  room.gameState.turnTimer = 30;
+  touchRoom(room);
+  addLog(room, existingRoll === null
+    ? `Auto-play ${strike}/3: ${player.username} rolled ${diceValue} after the 30-second timer expired.`
+    : `Auto-play ${strike}/3: ${player.username}'s pending roll ${diceValue} was moved automatically.`);
+  saveStore();
+  void persistLiveRoom(room).catch(error => console.error(`Failed to persist auto-roll for ${room.id}:`, error));
+  broadcastToRoom(room.id, 'game_update', room);
+
+  const selectedToken = selectAutomaticToken(room, player, diceValue);
+  setTimeout(() => {
+    const currentRoom = store.rooms[room.id];
+    if (!currentRoom || currentRoom.status !== 'playing') return;
+    const currentPlayer = currentRoom.players[currentRoom.gameState.turn];
+    if (currentPlayer?.userId !== player.userId || !currentRoom.gameState.hasRolled || currentRoom.gameState.diceRoll !== diceValue) return;
+    if (selectedToken) moveTokenLogic(currentRoom, selectedToken.id, diceValue);
+    else advanceTurn(currentRoom);
+    saveStore();
+    void Promise.all([persistLiveRoom(currentRoom), persistRoomUserProfiles(currentRoom)])
+      .catch(error => console.error(`Failed to persist automatic turn for ${currentRoom.id}:`, error));
+    broadcastToRoom(currentRoom.id, 'game_update', currentRoom);
+    executeBotTurnIfActive(currentRoom);
+  }, 900);
+}
+
 // Core token movement logic
 function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
   const gs = room.gameState;
@@ -2370,9 +2426,8 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
   }
 
   saveStore();
-  if (room.status === 'completed') {
-    void persistLiveRoom(room).catch(error => console.error(`Failed to persist completed room ${room.id}:`, error));
-  }
+  void Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)])
+    .catch(error => console.error(`Failed to persist inactivity forfeit for ${room.id}:`, error));
   broadcastToRoom(room.id, 'game_update', room);
 }
 
@@ -2482,6 +2537,31 @@ setInterval(async () => {
         }
 
         if (gs.turnTimer === 0) {
+          if (!activePlayer || isBotPlayer(activePlayer.userId)) return;
+          const strike = Number(activePlayer.inactivityStrikes || 0) + 1;
+          activePlayer.inactivityStrikes = strike;
+          activePlayer.lastInactivityStrikeAt = now;
+          activePlayer.inactivityTimer = Math.max(0, (5 - strike) * 30);
+          const message = strike <= 3
+            ? `30-ka sekan way dhammaadeen. Auto-play ${strike}/3 ayaa laguu sameeyay. Fadlan ciyaar!`
+            : strike === 4
+              ? 'DIGNIIN KAMA DAMBAYS AH: Mar kale haddii 30-ka sekan kaa dhammaadaan ciyaarta waa lagaa saarayaa.'
+              : 'Waxaad seegtay shan turn. Ciyaarta waxaa laguu diiwaan geliyey forfeit.';
+          sendEventToUser(activePlayer.userId, 'inactivity_warning', { message, strike });
+          publishRealtimeEvent('user', activePlayer.userId, 'inactivity_warning', { message, strike });
+
+          if (strike <= 3) {
+            performAutomaticPlayerTurn(room, activePlayer, strike);
+          } else if (strike === 4) {
+            addLog(room, `Final inactivity warning sent to ${activePlayer.username}; their turn was passed.`);
+            advanceTurn(room);
+            saveStore();
+            void persistLiveRoom(room).catch(error => console.error(`Failed to persist inactivity warning for ${room.id}:`, error));
+            broadcastToRoom(room.id, 'game_update', room);
+          } else {
+            handleInactivityForfeit(room, activePlayer);
+          }
+          return;
           // 30-second turn timer is up.
           // The 5-minute inactivity timer is already running.
           // We no longer auto-play for the user. We just let the inactivity timer handle the penalty.
@@ -4363,6 +4443,7 @@ function startMatchedRoom(matchedUsers: Array<{ id: string; username: string; av
     lossCount: u.lossCount || 0,
     balance: u.balance || 0,
     inactivityTimer: isBotPlayer(u.id) ? undefined : PLAYER_INACTIVITY_SECONDS,
+    inactivityStrikes: 0,
     teamFinishSkipPending: false,
     teamAssistUnlocked: false
   }));
@@ -4877,6 +4958,8 @@ app.post('/api/rooms/challenge/accept', async (req, res) => {
       player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
       player.inactivityDeadline = undefined;
       player.lastInactivityWarningMinute = undefined;
+      player.inactivityStrikes = 0;
+      player.lastInactivityStrikeAt = undefined;
     });
     resetPlayerInactivity(room.players[0]);
     touchRoom(room);
@@ -5127,6 +5210,8 @@ app.post('/api/rooms/start', async (req, res) => {
       player.inactivityTimer = PLAYER_INACTIVITY_SECONDS;
       player.inactivityDeadline = undefined;
       player.lastInactivityWarningMinute = undefined;
+      player.inactivityStrikes = 0;
+      player.lastInactivityStrikeAt = undefined;
     }
   });
   resetPlayerInactivity(room.players[0]);

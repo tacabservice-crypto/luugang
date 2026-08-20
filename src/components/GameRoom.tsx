@@ -395,6 +395,7 @@ export default function GameRoomView({
   // and their ID appears in the list of pending players.
   const isPendingGuest = !myPlayer && !hasBeenRejected && room.pendingPlayers?.some(p => p.userId === userId);
   const isActiveTurn = canPlay && room.status === 'playing' && room.players[room.gameState.turn]?.userId === userId;
+  const inactivityStrikes = Number(myPlayer?.inactivityStrikes || 0);
   const activePlayer = room.status === 'playing' ? room.players[room.gameState.turn] : null;
   const host = room.players.find(p => p.isHost);
   const lobbyCapacity = room.capacity || 2;
@@ -1127,6 +1128,14 @@ export default function GameRoomView({
         )}
         {/* 3. GAMEPLAY LUDO BOARD BOARD */}
         <div className={`flex justify-center py-2 relative transition-transform duration-500 ${room.status === 'waiting' ? 'order-2' : ''}`}>
+          {isActiveTurn && inactivityStrikes > 0 && inactivityStrikes < 5 && (
+            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center" aria-live="assertive">
+              <div className="ludosom-play-reminder rounded-2xl border-2 border-yellow-300 bg-slate-950/90 px-8 py-4 text-center shadow-[0_0_40px_rgba(250,204,21,0.7)]">
+                <div className="text-4xl font-black tracking-[0.2em] text-yellow-300 sm:text-6xl">CIYAAR</div>
+                <div className="mt-1 text-xs font-bold text-white">Fursad {inactivityStrikes}/5</div>
+              </div>
+            </div>
+          )}
           <LudoBoard
             tokens={room.gameState.tokens}
             players={room.players}

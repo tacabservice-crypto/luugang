@@ -86,6 +86,8 @@ export interface LudoPlayer {
   inactivityTimer?: number;
   inactivityDeadline?: number;
   lastInactivityWarningMinute?: number;
+  inactivityStrikes?: number;
+  lastInactivityStrikeAt?: number;
   teamFinishSkipPending?: boolean;
   teamAssistUnlocked?: boolean;
 }
