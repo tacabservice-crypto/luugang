@@ -1,5 +1,34 @@
 import { getMySqlPool } from './mysql.ts';
 
+let manualRequestSchemaPromise: Promise<void> | null = null;
+
+async function ensureManualRequestSchema(): Promise<void> {
+  if (!manualRequestSchemaPromise) {
+    manualRequestSchemaPromise = getMySqlPool().execute(
+      `CREATE TABLE IF NOT EXISTS manual_transaction_requests (
+        id VARCHAR(191) PRIMARY KEY,
+        user_id VARCHAR(191) NOT NULL,
+        agent_id VARCHAR(191) NULL,
+        managed_by VARCHAR(32) NOT NULL,
+        transaction_type VARCHAR(32) NOT NULL,
+        amount DECIMAL(18,2) NOT NULL,
+        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+        assigned_cashier_id VARCHAR(191) NULL,
+        created_at BIGINT UNSIGNED NOT NULL,
+        resolved_at BIGINT UNSIGNED NULL,
+        request_json JSON NOT NULL,
+        INDEX idx_manual_status_created (status, created_at),
+        INDEX idx_manual_agent_status (agent_id, status),
+        INDEX idx_manual_cashier_status (assigned_cashier_id, status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    ).then(() => undefined).catch(error => {
+      manualRequestSchemaPromise = null;
+      throw error;
+    });
+  }
+  return manualRequestSchemaPromise;
+}
+
 function parseJson<T>(value: unknown): T {
   if (typeof value === 'string') return JSON.parse(value) as T;
   return value as T;
@@ -35,6 +64,7 @@ export async function listMySqlUsersByAgent(agentId: string, promoCode: string) 
 }
 
 export async function saveMySqlManualRequest(request: any) {
+  await ensureManualRequestSchema();
   await getMySqlPool().execute(
     `INSERT INTO manual_transaction_requests (id, user_id, agent_id, managed_by, transaction_type, amount, status, assigned_cashier_id, created_at, resolved_at, request_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
