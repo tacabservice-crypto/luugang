@@ -65,9 +65,6 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
         const storedUser = localStorage.getItem('admin_user');
         try {
             const parsed = storedUser ? JSON.parse(storedUser) as AdminUser : null;
-            if (cashierMode && parsed && !parsed.permissions?.includes('cashier') && !parsed.permissions?.includes('all')) {
-                return null;
-            }
             return parsed;
         } catch {
             return null;
@@ -76,8 +73,14 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
     const adminId = adminUser?.id;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>(() =>
-        cashierMode ? 'manual-transactions' : 'stats');
+    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>(() => {
+        const storedUser = localStorage.getItem('admin_user');
+        try {
+            return storedUser ? getInitialView(JSON.parse(storedUser)) as typeof view : 'my-settings';
+        } catch {
+            return 'my-settings';
+        }
+    });
     const [error, setError] = useState<string | null>(null);
     
     // Data states
@@ -115,6 +118,33 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
         localStorage.removeItem('admin_user');
         setAdminUser(null);
     };
+
+    useEffect(() => {
+        if (!adminId) return;
+        let cancelled = false;
+        const refreshAdminSession = async () => {
+            try {
+                const response = await fetch(`/api/admin/me?userId=${encodeURIComponent(adminId)}`);
+                if (response.status === 401 || response.status === 403) {
+                    if (!cancelled) handleLogout();
+                    return;
+                }
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!cancelled && data.user) {
+                    localStorage.setItem('admin_user', JSON.stringify(data.user));
+                    setAdminUser(data.user);
+                    setView(current => canAccessView(data.user, current)
+                        ? current
+                        : getInitialView(data.user) as typeof current);
+                }
+            } catch {
+                // Keep the existing session during temporary network interruptions.
+            }
+        };
+        void refreshAdminSession();
+        return () => { cancelled = true; };
+    }, [adminId]);
 
     useEffect(() => {
         if (!adminUser?.permissions?.includes('cashier')) return;
@@ -255,12 +285,8 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
             }
             const data = await response.json();
             if (data.success && data.user) {
-                const loginPermissions: string[] = Array.isArray(data.user.permissions) ? data.user.permissions : [];
-                if (cashierMode && !loginPermissions.includes('cashier') && !loginPermissions.includes('all')) {
-                    throw new Error('Koontadan ma laha cashier permission. Fadlan isticmaal cashier role sax ah.');
-                }
                 localStorage.setItem('admin_user', JSON.stringify(data.user));
-                setView(cashierMode ? 'manual-transactions' : getInitialView(data.user) as typeof view);
+                setView(getInitialView(data.user) as typeof view);
                 setAdminUser(data.user);
             } else {
                 throw new Error(data.error || 'Login failed');

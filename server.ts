@@ -5862,6 +5862,34 @@ app.post('/api/admin/login', async (req, res) => {
     }
 });
 
+// Return the canonical server-side admin profile so permission changes made by
+// a Full Admin replace any stale dashboard data cached in the browser.
+app.get('/api/admin/me', async (req, res) => {
+    const adminId = String(req.query.userId || '').trim();
+    if (!adminId) return res.status(401).json({ error: 'Admin session is required.' });
+    try {
+        let adminUser: AdminUser | undefined;
+        if (isMySqlRuntimePrimary()) {
+            adminUser = adminUsersCache.get(adminId);
+        } else if (db) {
+            const snapshot = await db.collection('adminUsers').doc(adminId).get();
+            if (snapshot.exists) adminUser = snapshot.data() as AdminUser;
+        }
+        if (!adminUser) return res.status(401).json({ error: 'Admin session was not found.' });
+        if (adminUser.status === 'suspended') return res.status(403).json({ error: 'This admin account is suspended.' });
+        const canonicalUser = {
+            ...adminUser,
+            id: adminUser.id || adminId,
+            permissions: normalizeAdminPermissions(adminUser.permissions),
+        };
+        const { password: _, ...userToReturn } = canonicalUser;
+        return res.json({ success: true, user: userToReturn });
+    } catch (error) {
+        console.error('Failed to refresh admin session:', error);
+        return res.status(500).json({ error: 'Admin session could not be refreshed.' });
+    }
+});
+
 // New middleware factory to check for specific permissions
 const hasPermission = (requiredPermission: string) => {
     return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
