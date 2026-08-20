@@ -643,6 +643,14 @@ async function saveMySqlManualRequest(request, user) {
     [request.id, databaseUserId, request.agentId || null, request.managedBy || (request.agentId ? "agent" : "admin"), request.transactionType, Number(request.amount || 0), request.status || "pending", request.assignedCashierId || null, Number(request.createdAt || Date.now()), request.resolvedAt || null, JSON.stringify(request)]
   );
 }
+async function listMySqlManualRequests() {
+  await ensureManualRequestSchema();
+  const [rows] = await getMySqlPool().query(
+    `SELECT request_json FROM manual_transaction_requests
+     ORDER BY created_at DESC`
+  );
+  return rows.map((row) => parseJson(row.request_json));
+}
 async function saveMySqlAgent(agent) {
   const now2 = Date.now();
   await getMySqlPool().execute(
@@ -6129,6 +6137,12 @@ app.get("/api/admin/manual-transactions", hasAnyPermission("transactions", "cash
     } else if (db) {
       await db.collection("adminUsers").doc(adminId).update({ cashierOnlineAt });
     }
+  }
+  if (isMySqlRuntimePrimary()) {
+    const persistedRequests = await listMySqlManualRequests();
+    const mergedRequests = new Map(store.pendingManualTransactions.map((request) => [request.id, request]));
+    persistedRequests.forEach((request) => mergedRequests.set(request.id, request));
+    store.pendingManualTransactions = [...mergedRequests.values()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   }
   await reassignExpiredCashierRequests();
   const agentNames = new Map(Object.values(store.agents).map((agent) => [agent.id, agent.username]));

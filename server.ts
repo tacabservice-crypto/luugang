@@ -46,7 +46,7 @@ import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
-import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
+import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlManualRequests, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -6707,6 +6707,17 @@ app.get('/api/admin/manual-transactions', hasAnyPermission('transactions', 'cash
         } else if (db) {
             await db.collection('adminUsers').doc(adminId).update({ cashierOnlineAt });
         }
+    }
+
+    // Production may serve the player and cashier from different instances.
+    // MySQL is canonical, so merge its latest requests before assigning/filtering
+    // instead of relying on instance-local memory populated by another request.
+    if (isMySqlRuntimePrimary()) {
+        const persistedRequests = await listMySqlManualRequests();
+        const mergedRequests = new Map(store.pendingManualTransactions.map(request => [request.id, request]));
+        persistedRequests.forEach(request => mergedRequests.set(request.id, request));
+        store.pendingManualTransactions = [...mergedRequests.values()]
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     }
     await reassignExpiredCashierRequests();
     const agentNames = new Map(Object.values(store.agents).map(agent => [agent.id, agent.username]));

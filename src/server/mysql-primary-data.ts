@@ -84,6 +84,15 @@ export async function saveMySqlManualRequest(request: any, user?: any) {
   );
 }
 
+export async function listMySqlManualRequests(): Promise<any[]> {
+  await ensureManualRequestSchema();
+  const [rows] = await getMySqlPool().query<any[]>(
+    `SELECT request_json FROM manual_transaction_requests
+     ORDER BY created_at DESC`,
+  );
+  return rows.map(row => parseJson<any>(row.request_json));
+}
+
 export async function saveMySqlAgent(agent: any) {
   const now = Date.now();
   await getMySqlPool().execute(
