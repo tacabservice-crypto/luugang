@@ -810,12 +810,12 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, roomId: activeRoom.id, tokenId })
       });
-      if (response.ok) {
-        const data = await response.json();
-        setActiveRoom(data);
-      }
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'The token could not be moved.');
+      setActiveRoom(data);
     } catch (err) {
       console.error(err);
+      setErrorToast(userErrorMessage(err, 'The token could not be moved. Please try again.'));
     }
   };
 

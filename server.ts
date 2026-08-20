@@ -1744,11 +1744,25 @@ function addTransaction(userId: string, type: WalletTransaction['type'], amount:
   return tx;
 }
 
+function hasMatchPayout(userId: string, matchId: string): boolean {
+  return store.transactions.some(tx =>
+    tx.userId === userId && tx.matchId === matchId && tx.type === 'win_payout'
+  );
+}
+
+async function persistLiveRoom(room: GameRoom): Promise<void> {
+  if (!isMySqlConfigured()) return;
+  await saveMySqlGameRoom(room);
+}
+
 type RevenueCategory = NonNullable<WalletTransaction['revenueCategory']>;
 
 function recordHouseRevenue(category: RevenueCategory, amount: number, referenceId?: string, description = '') {
   const normalizedAmount = Number(Number(amount || 0).toFixed(2));
   if (!normalizedAmount) return;
+  if (referenceId && store.transactions.some(tx =>
+    tx.type === 'app_commission' && tx.matchId === referenceId && tx.revenueCategory === category
+  )) return;
   store.houseRevenue = Number(((store.houseRevenue || 0) + normalizedAmount).toFixed(2));
   const tx = addTransaction('house', 'app_commission', normalizedAmount, referenceId, description);
   tx.revenueCategory = category;
@@ -2049,9 +2063,11 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
             const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
             distributed += share;
             if (p.userId === gs.winnerId) gs.winnerPayout = share;
-            user.balance += share;
-            user.winCount += 1;
-            addTransaction(p.userId, 'win_payout', share, room.id, `Team win payout for match ${room.id} (Rake: $${rakeAmount.toFixed(2)}).`);
+            if (!hasMatchPayout(p.userId, room.id)) {
+              user.balance += share;
+              user.winCount += 1;
+              addTransaction(p.userId, 'win_payout', share, room.id, `Team win payout for match ${room.id} (Rake: $${rakeAmount.toFixed(2)}).`);
+            }
             broadcastUserUpdate(p.userId);
           });
           recordHouseRevenue('team_game_rake', rakeAmount, room.id, `Team-game rake from match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
@@ -2085,15 +2101,17 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
           gs.rakeAmount = Number(rakeAmount.toFixed(2));
           gs.winnerPayout = payoutAmount;
 
-          winnerProfile.balance += payoutAmount;
-          winnerProfile.winCount += 1;
-          addTransaction(
-            activePlayer.userId,
-            'win_payout',
-            payoutAmount,
-            room.id,
-            `Payout for winning match ${room.id} with $${room.betAmount} bet (Rake: $${rakeAmount.toFixed(2)}).`
-          );
+          if (!hasMatchPayout(activePlayer.userId, room.id)) {
+            winnerProfile.balance += payoutAmount;
+            winnerProfile.winCount += 1;
+            addTransaction(
+              activePlayer.userId,
+              'win_payout',
+              payoutAmount,
+              room.id,
+              `Payout for winning match ${room.id} with $${room.betAmount} bet (Rake: $${rakeAmount.toFixed(2)}).`
+            );
+          }
           broadcastUserUpdate(activePlayer.userId);
 
           recordHouseRevenue('game_rake', rakeAmount, room.id, `Rake from match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
@@ -2164,9 +2182,11 @@ function completeTeamForfeit(room: GameRoom, forfeitingPlayer: LudoPlayer, reaso
         const share = index === realWinners.length - 1 ? Number((payoutPool - distributed).toFixed(2)) : baseShare;
         distributed += share;
         const profile = store.users[player.userId]!;
-        profile.balance += share;
-        profile.winCount = (profile.winCount || 0) + 1;
-        addTransaction(player.userId, 'win_payout', share, room.id, `Team win by ${reason} forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+        if (!hasMatchPayout(player.userId, room.id)) {
+          profile.balance += share;
+          profile.winCount = (profile.winCount || 0) + 1;
+          addTransaction(player.userId, 'win_payout', share, room.id, `Team win by ${reason} forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+        }
         broadcastUserUpdate(player.userId);
       });
       room.gameState.rakeAmount = rakeAmount;
@@ -2208,6 +2228,7 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
   if (room.gameMode === 'team') {
     completeTeamForfeit(room, inactivePlayer, 'inactivity');
     saveStore();
+    void persistLiveRoom(room).catch(error => console.error(`Failed to persist completed room ${room.id}:`, error));
     broadcastToRoom(room.id, 'game_update', room);
     return;
   }
@@ -2239,9 +2260,11 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
           room.gameState.rakeAmount = Number(rakeAmount.toFixed(2));
           room.gameState.winnerPayout = payoutAmount;
 
-          winnerProfile.balance += payoutAmount;
-          winnerProfile.winCount += 1;
-          addTransaction(winner.userId, 'win_payout', payoutAmount, room.id, `Win by opponent inactivity forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+          if (!hasMatchPayout(winner.userId, room.id)) {
+            winnerProfile.balance += payoutAmount;
+            winnerProfile.winCount += 1;
+            addTransaction(winner.userId, 'win_payout', payoutAmount, room.id, `Win by opponent inactivity forfeit (Rake: $${rakeAmount.toFixed(2)}).`);
+          }
           broadcastUserUpdate(winner.userId);
 
           recordHouseRevenue('forfeit_rake', rakeAmount, room.id, `Rake from forfeit match ${room.id} (${(effectiveRakePercentage * 100).toFixed(1)}%).`);
@@ -2265,6 +2288,9 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
   }
 
   saveStore();
+  if (room.status === 'completed' || room.status === 'cancelled') {
+    void persistLiveRoom(room).catch(error => console.error(`Failed to persist completed room ${room.id}:`, error));
+  }
   broadcastToRoom(room.id, 'game_update', room);
 }
 
@@ -3810,7 +3836,12 @@ app.use('/api/rooms', async (req, res, next) => {
       rooms.forEach(room => { if (room?.id) store.rooms[room.id] = room; });
     } else if (roomId) {
       const room = await loadMySqlGameRoom(roomId);
-      if (room) store.rooms[roomId] = room;
+      const localRoom = store.rooms[roomId];
+      // A lagging shared snapshot must never resurrect a settled room. Doing so
+      // replays the winning move/forfeit and can credit the same match repeatedly.
+      if (room && !(localRoom && (localRoom.status === 'completed' || localRoom.status === 'cancelled'))) {
+        store.rooms[roomId] = room;
+      }
     }
 
     const userIds = [
@@ -4797,7 +4828,7 @@ app.post('/api/rooms/change-team', (req, res) => {
 });
 
 // Start Match (Host only)
-app.post('/api/rooms/start', (req, res) => {
+app.post('/api/rooms/start', async (req, res) => {
   const { userId, roomId } = req.body;
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -4906,13 +4937,14 @@ app.post('/api/rooms/start', (req, res) => {
   addLog(room, `⚔️ Ciyaartu waa ay bilaabatay! Ciyaartoyda: ${room.players.length}. Bet: $${bet}. Escrow Locked: $${totalEscrow}`);
 
   saveStore();
+  await persistLiveRoom(room);
   broadcastToRoom(room.id, 'game_update', room);
 
   res.json(room);
 });
 
 // Dice Roll Action
-app.post('/api/rooms/roll-dice', (req, res) => {
+app.post('/api/rooms/roll-dice', async (req, res) => {
   const { userId, roomId } = req.body;
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -4958,6 +4990,7 @@ app.post('/api/rooms/roll-dice', (req, res) => {
     // Advance turn synchronously
     advanceTurn(room);
     saveStore();
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, 'game_update', room);
     executeBotTurnIfActive(room);
 
@@ -4974,6 +5007,7 @@ app.post('/api/rooms/roll-dice', (req, res) => {
     // FIRST, broadcast the result of the roll so all clients can see the animation.
     addLog(room, `${activePlayer.username} has no valid moves with roll ${d}. Turn passes.`);
     saveStore();
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, 'game_update', room);
     res.json(room); // Respond to the roller immediately.
 
@@ -4984,6 +5018,7 @@ app.post('/api/rooms/roll-dice', (req, res) => {
       if (currentRoom && currentRoom.status === 'playing') {
         advanceTurn(currentRoom);
         saveStore();
+        void persistLiveRoom(currentRoom).catch(error => console.error(`Failed to persist room ${currentRoom.id}:`, error));
         broadcastToRoom(currentRoom.id, 'game_update', currentRoom);
         executeBotTurnIfActive(currentRoom);
       }
@@ -4992,12 +5027,13 @@ app.post('/api/rooms/roll-dice', (req, res) => {
   } else {
     // There are valid moves, so we just update the state and wait for the player's move.
     saveStore();
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, 'game_update', room);
     res.json(room);
   }
 });
 // Token Move Action
-app.post('/api/rooms/move-token', (req, res) => {
+app.post('/api/rooms/move-token', async (req, res) => {
   const { userId, roomId, tokenId } = req.body;
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -5029,6 +5065,8 @@ app.post('/api/rooms/move-token', (req, res) => {
 
   // Execute Move
   moveTokenLogic(room, tokenId, gs.diceRoll);
+  saveStore();
+  await persistLiveRoom(room);
   broadcastToRoom(room.id, 'game_update', room);
   
   // Trigger bot turn if needed
@@ -5365,27 +5403,62 @@ app.post('/api/admin/system/data-cleanup', async (req, res) => {
   }
 
   let usersReset = 0;
-  let transactionsRemoved = 0;
+  let txRemoved = 0;
+  let roomsRemoved = 0;
+  let manualRemoved = 0;
 
-  // 1. Reset crazy win/loss counts
+  // 1. Reset crazy win/loss counts (Corrupted by Infinite Win bug)
   Object.values(store.users).forEach(u => {
-    if ((u.winCount || 0) > 500 || (u.lossCount || 0) > 500) {
+    if ((u.winCount || 0) > 200 || (u.lossCount || 0) > 200) {
       u.winCount = Math.floor(Math.random() * 20) + 5;
       u.lossCount = Math.floor(Math.random() * 15) + 3;
-      u.balance = Math.min(u.balance, 100); // Also cap balance if it's crazy
+      // Cap balance for bugged accounts, but leave enough for play
+      if (u.balance > 200) u.balance = 100.0;
       usersReset++;
     }
   });
 
-  // 2. Truncate transactions if the list is too long (> 5000)
-  if (store.transactions.length > 5000) {
+  // 2. Truncate transactions to keep file size small (Latest 500)
+  if (store.transactions.length > 500) {
     const originalCount = store.transactions.length;
-    store.transactions = store.transactions.slice(0, 2000); // Keep only the latest 2000
-    transactionsRemoved = originalCount - store.transactions.length;
+    // Transactions are usually unshifted (latest at index 0)
+    store.transactions = store.transactions.slice(0, 500);
+    txRemoved += (originalCount - store.transactions.length);
   }
 
+  // 3. Truncate agent transactions (Latest 500)
+  if (store.agentTransactions && store.agentTransactions.length > 500) {
+    const originalCount = store.agentTransactions.length;
+    store.agentTransactions = store.agentTransactions.slice(0, 500);
+    txRemoved += (originalCount - store.agentTransactions.length);
+  }
+
+  // 4. Clear old rooms (Not in 'playing' status)
+  const roomKeys = Object.keys(store.rooms);
+  roomKeys.forEach(id => {
+    if (store.rooms[id].status !== 'playing') {
+      delete store.rooms[id];
+      roomsRemoved++;
+    }
+  });
+
+  // 5. Clear old manual transactions (Expired > 7 days)
+  const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  const originalManualCount = store.pendingManualTransactions.length;
+  store.pendingManualTransactions = store.pendingManualTransactions.filter(t =>
+    t.status === 'pending' || t.createdAt > sevenDaysAgo
+  );
+  manualRemoved = originalManualCount - store.pendingManualTransactions.length;
+
   saveStore();
-  res.json({ success: true, usersReset, transactionsRemoved, message: 'Database cleaned successfully.' });
+  res.json({
+    success: true,
+    usersReset,
+    transactionsRemoved: txRemoved,
+    roomsRemoved,
+    manualTransactionsRemoved: manualRemoved,
+    message: 'Database cleaned and optimized successfully.'
+  });
 });
 
 // New Login endpoint for admin
