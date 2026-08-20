@@ -7904,7 +7904,7 @@ app.post('/api/agent/player-requests/:requestId/approve', isAgent, async (req, r
     }
 
     try {
-        if (!db) {
+        if (!db && !isMySqlRuntimePrimary()) {
             throw new Error("Database not initialized");
         }
 

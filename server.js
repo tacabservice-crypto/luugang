@@ -756,11 +756,12 @@ async function approveMySqlAgentPlayerRequest(args) {
   try {
     await connection.beginTransaction();
     const [agentRows] = await connection.execute("SELECT agent_json, float_balance FROM agents WHERE id = ? FOR UPDATE", [args.agent.id]);
-    const [userRows] = await connection.execute("SELECT profile_json, balance FROM app_users WHERE id = ? FOR UPDATE", [args.user.id]);
-    const [requestRows] = await connection.execute("SELECT request_json, status FROM manual_transaction_requests WHERE id = ? FOR UPDATE", [args.request.id]);
+    const [requestRows] = await connection.execute("SELECT request_json, status, user_id FROM manual_transaction_requests WHERE id = ? FOR UPDATE", [args.request.id]);
     if (!agentRows.length) throw new Error("Agent not found.");
-    if (!userRows.length) throw new Error("User not found.");
     if (!requestRows.length || requestRows[0].status !== "pending") throw new Error("Request was already processed.");
+    const databaseUserId = String(requestRows[0].user_id || args.user.id);
+    const [userRows] = await connection.execute("SELECT profile_json, balance FROM app_users WHERE id = ? FOR UPDATE", [databaseUserId]);
+    if (!userRows.length) throw new Error("User not found.");
     const agent = { ...parseJson(agentRows[0].agent_json), ...args.agent };
     const user = { ...parseJson(userRows[0].profile_json), ...args.user };
     const request = { ...parseJson(requestRows[0].request_json), ...args.request };
@@ -798,12 +799,12 @@ async function approveMySqlAgentPlayerRequest(args) {
     request.resolverUsername = agent.username;
     request.resolvedAt = Date.now();
     await connection.execute("UPDATE agents SET float_balance = ?, agent_json = ?, updated_at = ? WHERE id = ?", [nextFloat, JSON.stringify(agent), agent.updatedAt, agent.id]);
-    await connection.execute("UPDATE app_users SET balance = ?, profile_json = ?, updated_at = ?, version = version + 1 WHERE id = ?", [nextBalance, JSON.stringify(user), Date.now(), user.id]);
+    await connection.execute("UPDATE app_users SET balance = ?, profile_json = ?, updated_at = ?, version = version + 1 WHERE id = ?", [nextBalance, JSON.stringify(user), Date.now(), databaseUserId]);
     await connection.execute("UPDATE manual_transaction_requests SET status = ?, resolved_at = ?, request_json = ? WHERE id = ?", ["approved", request.resolvedAt, JSON.stringify(request), request.id]);
     await connection.execute(
       `INSERT INTO agent_transactions (id, agent_id, player_id, transaction_type, amount, discount_amount, created_at, transaction_json)
        VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-      [args.agentTransaction.id, agent.id, user.id, args.agentTransaction.type, amount, args.agentTransaction.timestamp, JSON.stringify(args.agentTransaction)]
+      [args.agentTransaction.id, agent.id, databaseUserId, args.agentTransaction.type, amount, args.agentTransaction.timestamp, JSON.stringify(args.agentTransaction)]
     );
     await connection.commit();
     return { agent, user, request, agentTransaction: args.agentTransaction };
@@ -7099,7 +7100,7 @@ app.post("/api/agent/player-requests/:requestId/approve", isAgent, async (req, r
     return res.status(400).json({ error: "This player is locked to a different agent via promo code." });
   }
   try {
-    if (!db) {
+    if (!db && !isMySqlRuntimePrimary()) {
       throw new Error("Database not initialized");
     }
     let approvedUserBalance = user.balance;
