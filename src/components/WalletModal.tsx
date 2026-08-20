@@ -9,6 +9,7 @@ import { UserProfile, WalletTransaction, Agent, PlayerAgentRequest } from '../ty
 import { useLanguage } from '../context/LanguageContext';
 import { formatCurrency } from '../utils/number';
 import { userErrorMessage } from '../utils/userError';
+import LocationPicker from './LocationPicker';
 
 interface WalletModalProps {
   user: UserProfile;
@@ -33,6 +34,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [linkedAgentId, setLinkedAgentId] = useState(user.linkedAgentId || '');
+  const [playerLocation, setPlayerLocation] = useState(user.location || '');
   const [profileLoading, setProfileLoading] = useState(true);
   
   const [provider, setProvider] = useState<'evc' | 'edahab' | 'sahal' | 'zaad' | 'premier'>('evc');
@@ -64,6 +66,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
           const currentProfile: UserProfile = await profileRes.json();
           currentLinkedAgentId = currentProfile.linkedAgentId || '';
           setLinkedAgentId(currentLinkedAgentId);
+          setPlayerLocation(currentProfile.location || '');
         }
       } catch (err) {
         console.error('Failed to refresh wallet profile', err);
@@ -138,6 +141,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 senderPhone: activeTab === 'deposit' ? senderPhone : undefined,
                 provider: provider,
                 transactionType: activeTab,
+                location: playerLocation,
             }),
         });
         const data = await response.json().catch(() => ({}));
@@ -169,6 +173,13 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     const amtFloat = parseFloat(amount);
     if (isNaN(amtFloat) || amtFloat <= 0) {
       setError(language === 'so' ? 'Fadlan geli lacag sax ah oo togan.' : 'Please enter a valid positive amount.');
+      return;
+    }
+
+    if (!linkedAgentId && !playerLocation.trim()) {
+      setError(language === 'so'
+        ? 'Fadlan dooro magaalada aad joogto si codsiga loogu diro cashier-ka magaaladaas.'
+        : 'Please select your city so the request reaches the cashier serving that location.');
       return;
     }
 
@@ -407,15 +418,14 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                 )}
 
                 {!profileLoading && (activeTab === 'deposit' || activeTab === 'withdraw') && !linkedAgentId && (
-                  <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
-                    <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">
-                      {language === 'so' ? 'Admin Review' : 'Admin Review'}
-                    </p>
+                  <div className="space-y-3 rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
+                    <div><p className="text-xs font-bold text-blue-300 uppercase tracking-wider">{language === 'so' ? 'Cashier-ka deegaankaaga' : 'Your local cashier'}</p>
                     <p className="mt-1 text-[11px] text-slate-300">
                       {language === 'so'
-                        ? 'Koontadan agent kuma xirna. Codsigaaga admin-ka ayaa si toos ah u hubinaya.'
-                        : 'This account is not linked to an agent. Your request will be reviewed directly by an administrator.'}
-                    </p>
+                        ? 'Dooro magaalada aad joogto. Codsiga waxaa helaya cashier-ka loo xilsaaray isla magaaladaas.'
+                        : 'Select your city. The request will be assigned to a cashier serving the same city.'}
+                    </p></div>
+                    <LocationPicker value={playerLocation} onChange={setPlayerLocation} clearOnInput={false} className="w-full rounded-xl border border-blue-400/40 bg-slate-950 px-4 py-2.5 text-sm text-white" />
                   </div>
                 )}
                 

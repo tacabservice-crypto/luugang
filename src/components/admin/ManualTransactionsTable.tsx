@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, Clock3, Eye, Search, ShieldCheck, UserCog, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Eye, MapPin, Search, ShieldCheck, UserCog, XCircle } from 'lucide-react';
 import { ManualTransaction } from '../../types/game';
 
 interface ManualTransactionsTableProps {
@@ -38,7 +38,7 @@ const ManualTransactionsTable: React.FC<ManualTransactionsTableProps> = ({ trans
     return source.filter(tx => {
       if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
       if (!term) return true;
-      return [tx.username, tx.userId, tx.agentUsername, tx.agentId, tx.provider, tx.phone, tx.senderPhone]
+      return [tx.username, tx.userId, tx.agentUsername, tx.agentId, tx.provider, tx.phone, tx.senderPhone, tx.cashierCity]
         .some(value => String(value || '').toLowerCase().includes(term));
     });
   }, [activeTab, adminTransactions, agentTransactions, search, statusFilter]);
@@ -140,6 +140,7 @@ const ManualTransactionsTable: React.FC<ManualTransactionsTableProps> = ({ trans
                   <td className="px-4 py-4">
                     <span className="block font-semibold text-white">{tx.username}</span>
                     <span className="text-xs text-slate-500">{tx.userId}</span>
+                    {tx.cashierCity && <span className="mt-1 flex items-center gap-1 text-xs font-semibold capitalize text-blue-300"><MapPin size={12} />{tx.cashierCity}</span>}
                   </td>
                   {activeTab === 'agents' && (
                     <td className="px-4 py-4">

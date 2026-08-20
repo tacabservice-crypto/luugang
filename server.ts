@@ -3498,6 +3498,14 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
   }
 
 
+  const requestCity = normalizedCity(req.body.location || user.location);
+  if (!assignedAgentId && !requestCity) {
+    return res.status(400).json({ error: 'Select your city/location so the request can be assigned to a local cashier.' });
+  }
+  if (!assignedAgentId && String(req.body.location || '').trim() && user.location !== String(req.body.location).trim()) {
+    user.location = String(req.body.location).trim();
+  }
+
   const newRequest: ManualTransactionRequest = {
     id: `req_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     userId,
@@ -3505,6 +3513,7 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
     agentId: assignedAgentId,
     agentUsername: assignedAgentUsername,
     managedBy: assignedAgentId ? 'agent' : 'admin',
+    cashierCity: assignedAgentId ? undefined : requestCity,
     amount: requestAmount,
     ...(transactionType === 'withdraw' ? getWithdrawalQuote(user.id, requestAmount) : {}),
     phone, // This will be the destination for withdrawals
