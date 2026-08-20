@@ -2381,6 +2381,7 @@ function handleInactivityForfeit(room: GameRoom, inactivePlayer: LudoPlayer) {
 // host runs multiple Node workers.
 let gameTimerTickRunning = false;
 let lastSharedTimerPersistAt = 0;
+const roomTurnTimerAnchors = new Map<string, { turn: number; lastActivity: number; checkedAt: number }>();
 setInterval(async () => {
   if (gameTimerTickRunning) return;
   gameTimerTickRunning = true;
@@ -2462,8 +2463,23 @@ setInterval(async () => {
 
       // Short Turn Timer Logic (30 seconds)
       if (gs.turnTimer > 0) {
-        gs.turnTimer -= 1;
-        changed = true;
+        const now = Date.now();
+        const activityRevision = Number(gs.lastActivity || 0);
+        let timerAnchor = roomTurnTimerAnchors.get(roomId);
+        if (!timerAnchor || timerAnchor.turn !== gs.turn || timerAnchor.lastActivity !== activityRevision) {
+          timerAnchor = {
+            turn: gs.turn,
+            lastActivity: activityRevision,
+            checkedAt: activityRevision > 0 && activityRevision <= now ? activityRevision : now,
+          };
+          roomTurnTimerAnchors.set(roomId, timerAnchor);
+        }
+        const elapsedSeconds = Math.floor((now - timerAnchor.checkedAt) / 1000);
+        if (elapsedSeconds > 0) {
+          gs.turnTimer = Math.max(0, gs.turnTimer - elapsedSeconds);
+          timerAnchor.checkedAt += elapsedSeconds * 1000;
+          changed = true;
+        }
 
         if (gs.turnTimer === 0) {
           // 30-second turn timer is up.

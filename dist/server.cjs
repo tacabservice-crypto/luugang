@@ -2613,6 +2613,7 @@ function handleInactivityForfeit(room, inactivePlayer) {
 }
 var gameTimerTickRunning = false;
 var lastSharedTimerPersistAt = 0;
+var roomTurnTimerAnchors = /* @__PURE__ */ new Map();
 setInterval(async () => {
   if (gameTimerTickRunning) return;
   gameTimerTickRunning = true;
@@ -2671,8 +2672,23 @@ setInterval(async () => {
           }
         }
         if (gs.turnTimer > 0) {
-          gs.turnTimer -= 1;
-          changed = true;
+          const now2 = Date.now();
+          const activityRevision = Number(gs.lastActivity || 0);
+          let timerAnchor = roomTurnTimerAnchors.get(roomId);
+          if (!timerAnchor || timerAnchor.turn !== gs.turn || timerAnchor.lastActivity !== activityRevision) {
+            timerAnchor = {
+              turn: gs.turn,
+              lastActivity: activityRevision,
+              checkedAt: activityRevision > 0 && activityRevision <= now2 ? activityRevision : now2
+            };
+            roomTurnTimerAnchors.set(roomId, timerAnchor);
+          }
+          const elapsedSeconds = Math.floor((now2 - timerAnchor.checkedAt) / 1e3);
+          if (elapsedSeconds > 0) {
+            gs.turnTimer = Math.max(0, gs.turnTimer - elapsedSeconds);
+            timerAnchor.checkedAt += elapsedSeconds * 1e3;
+            changed = true;
+          }
           if (gs.turnTimer === 0) {
             addLog(room, `\u23F1\uFE0F Waqtiga 30-ka ilbiriqsi wuu dhamaaday ${activePlayer.username}. Ganaaxa daahitaanka ayaa bilaabanaya.`);
             broadcastToRoom(room.id, "game_update", room);

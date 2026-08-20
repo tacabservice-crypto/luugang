@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import Confetti from 'react-confetti';
 import { GameRoom, PlayerColor, ChatMessage, GameLog, LudoToken, UserProfile } from '../types/game';
 import LudoBoard from './LudoBoard';
@@ -93,6 +93,24 @@ function PlayerAvatar({ avatar, className = 'h-8 w-8 text-2xl' }: { avatar?: str
   );
 }
 
+function usePersistentAudio(source: string) {
+  const [audio] = useState<HTMLAudioElement | null>(() => {
+    if (typeof Audio === 'undefined') return null;
+    const instance = new Audio(source);
+    instance.preload = 'auto';
+    return instance;
+  });
+  const ref = useRef<HTMLAudioElement | null>(audio);
+  useEffect(() => {
+    audio?.load();
+    return () => {
+      audio?.pause();
+      if (audio) audio.currentTime = 0;
+    };
+  }, [audio]);
+  return ref;
+}
+
 // Custom hook to get window size
 function useWindowSize() {
   const [size, setSize] = useState([0, 0]);
@@ -128,6 +146,7 @@ export default function GameRoomView({
   const isUtilityPanelOpen = activePanel !== null;
   const [isRolling, setIsRolling] = useState(false);
   const [isRollRequestPending, setIsRollRequestPending] = useState(false);
+  const [displayTurnTimer, setDisplayTurnTimer] = useState(room.gameState.turnTimer);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
   const [panelDragY, setPanelDragY] = useState(0);
@@ -139,13 +158,23 @@ export default function GameRoomView({
   const panelTouchStartYRef = useRef<number | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const voiceControlsRef = useRef<HTMLDivElement>(null); // New ref for voice controls popover
-  const diceAudioRef = useRef<HTMLAudioElement>(null);
-  const winAudioRef = useRef<HTMLAudioElement>(null);
-  const forfeitAudioRef = useRef<HTMLAudioElement>(null);
-  const captureAudioRef = useRef<HTMLAudioElement>(null);
-  const tokenOutAudioRef = useRef<HTMLAudioElement>(null);
+  // Keep audio instances mounted for the entire room session. Conditional
+  // result rendering must not recreate and re-download them after game over.
+  const diceAudioRef = usePersistentAudio(diceAudioSrc);
+  const winAudioRef = usePersistentAudio(winAudioSrc);
+  const forfeitAudioRef = usePersistentAudio(forfeitAudioSrc);
+  const captureAudioRef = usePersistentAudio(captureAudioSrc);
+  const tokenOutAudioRef = usePersistentAudio(tokenOutAudioSrc);
+  const resultSoundPlayedRef = useRef<string | null>(null);
   const onRollDiceRef = useRef(onRollDice);
   const rollRequestInFlightRef = useRef(false);
+  const optimisticRollRef = useRef(false);
+  const optimisticRollTimeoutRef = useRef<number | null>(null);
+  const timerAnchorRef = useRef({
+    turn: room.gameState.turn,
+    seconds: room.gameState.turnTimer,
+    receivedAt: Date.now(),
+  });
   const prevTokensRef = useRef<LudoToken[]>(room.gameState.tokens);
   const hasPlayedFirstTokenOutSound = useRef<string[]>([]);
   const { width, height } = useWindowSize();
@@ -158,6 +187,7 @@ export default function GameRoomView({
     isSpeakerOn, 
     toggleSpeaker 
   } = useVoiceChat();
+  const speakerOnRef = useRef(isSpeakerOn);
 
   // Freeze the page behind the floating chat/log panel. Touch gestures may
   // move the panel itself, but the game board must remain at the exact same
@@ -204,17 +234,63 @@ export default function GameRoomView({
   const isSpectator = queryParams.get('spectate') === 'true';
 
   onRollDiceRef.current = onRollDice;
+  speakerOnRef.current = isSpeakerOn;
 
   const requestDiceRoll = useCallback(async () => {
     if (rollRequestInFlightRef.current) return;
     rollRequestInFlightRef.current = true;
     setIsRollRequestPending(true);
+    // Give immediate tactile feedback from the user's tap. The authoritative
+    // result still comes from the server, but database/network latency should
+    // never make the dice look unresponsive.
+    optimisticRollRef.current = true;
+    setIsRolling(true);
+    if (speakerOnRef.current && diceAudioRef.current) {
+      diceAudioRef.current.volume = 0.5;
+      diceAudioRef.current.currentTime = 0;
+      void diceAudioRef.current.play().catch(() => undefined);
+    }
     try {
       await onRollDiceRef.current();
     } finally {
       rollRequestInFlightRef.current = false;
       setIsRollRequestPending(false);
+      if (optimisticRollTimeoutRef.current) window.clearTimeout(optimisticRollTimeoutRef.current);
+      optimisticRollTimeoutRef.current = window.setTimeout(() => {
+        if (optimisticRollRef.current) {
+          optimisticRollRef.current = false;
+          setIsRolling(false);
+        }
+      }, 2500);
     }
+  }, []);
+
+  // Render the countdown continuously between authoritative server updates.
+  // This removes the visible freezes for clients connected to a non-leader
+  // production worker while preserving the server as the source of truth.
+  useEffect(() => {
+    timerAnchorRef.current = {
+      turn: room.gameState.turn,
+      seconds: room.gameState.turnTimer,
+      receivedAt: Date.now(),
+    };
+    setDisplayTurnTimer(room.gameState.turnTimer);
+  }, [room.gameState.turn, room.gameState.turnTimer, room.gameState.lastActivity]);
+
+  useEffect(() => {
+    const updateDisplayTimer = () => {
+      const anchor = timerAnchorRef.current;
+      const elapsed = Math.floor((Date.now() - anchor.receivedAt) / 1000);
+      const next = Math.max(0, anchor.seconds - elapsed);
+      setDisplayTurnTimer(current => current === next ? current : next);
+    };
+    const interval = window.setInterval(updateDisplayTimer, 250);
+    document.addEventListener('visibilitychange', updateDisplayTimer);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', updateDisplayTimer);
+      if (optimisticRollTimeoutRef.current) window.clearTimeout(optimisticRollTimeoutRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -344,8 +420,14 @@ export default function GameRoomView({
   // Dice roll trigger animation & sound
   useEffect(() => {
     if (room.gameState.diceRoll !== null && room.gameState.hasRolled) {
+      const alreadyStartedFromTap = optimisticRollRef.current;
+      optimisticRollRef.current = false;
+      if (optimisticRollTimeoutRef.current) {
+        window.clearTimeout(optimisticRollTimeoutRef.current);
+        optimisticRollTimeoutRef.current = null;
+      }
       setIsRolling(true);
-      if (isSpeakerOn && diceAudioRef.current) {
+      if (!alreadyStartedFromTap && isSpeakerOn && diceAudioRef.current) {
         diceAudioRef.current.volume = 0.5;
         diceAudioRef.current.currentTime = 0;
         diceAudioRef.current.play().catch(e => console.error("Error playing dice sound:", e));
@@ -359,8 +441,12 @@ export default function GameRoomView({
   }, [room.gameState.diceRoll, room.gameState.hasRolled, room.gameState.turn, activePlayer?.userId, isSpeakerOn]);
 
   // Win/Loss sound effect
-  useEffect(() => {
-    if (room.status === 'completed' && room.gameState.winnerId && isSpeakerOn) {
+  useLayoutEffect(() => {
+    if (room.status === 'completed' && room.gameState.winnerId) {
+      const resultKey = `${room.id}:${room.gameState.winnerId}`;
+      if (resultSoundPlayedRef.current === resultKey) return;
+      resultSoundPlayedRef.current = resultKey;
+      if (!isSpeakerOn) return;
       const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : [room.gameState.winnerId];
       if (winnerIds.includes(userId)) {
         // I am the winner
@@ -749,12 +835,6 @@ export default function GameRoomView({
           </button>
         </div>
 
-        {/* Audio elements for sound effects */}
-        <audio ref={diceAudioRef} src={diceAudioSrc} preload="auto" />
-        <audio ref={winAudioRef} src={winAudioSrc} preload="auto" />
-        <audio ref={forfeitAudioRef} src={forfeitAudioSrc} preload="auto" />
-        <audio ref={captureAudioRef} src={captureAudioSrc} preload="auto" />
-        <audio ref={tokenOutAudioRef} src={tokenOutAudioSrc} preload="auto" />
       </div>
     );
   }
@@ -894,7 +974,7 @@ export default function GameRoomView({
         {/* Timer */}
         <div className="flex items-center justify-center gap-1.5 font-bold text-slate-400">
             <Timer className="w-4 h-4" />
-            <span>{room.gameState.turnTimer}s</span>
+            <span>{displayTurnTimer}s</span>
         </div>
         {/* Spectators */}
         <div className="flex items-center justify-end gap-1.5 font-bold text-slate-400">
@@ -1530,12 +1610,6 @@ export default function GameRoomView({
           onSave={handleSaveProfile}
         />
       )}
-      {/* Audio elements for sound effects */}
-      <audio ref={diceAudioRef} src={diceAudioSrc} preload="auto" />
-      <audio ref={winAudioRef} src={winAudioSrc} preload="auto" />
-      <audio ref={forfeitAudioRef} src={forfeitAudioSrc} preload="auto" />
-      <audio ref={captureAudioRef} src={captureAudioSrc} preload="auto" />
-      <audio ref={tokenOutAudioRef} src={tokenOutAudioSrc} preload="auto" />
     </div></>
   );
 }
