@@ -175,15 +175,38 @@ const allowedOrigins = Array.from(new Set([
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'https://localhost',
+  'http://localhost',
   'capacitor://localhost',
+  'ionic://localhost',
   ...configuredAllowedOrigins,
 ]));
 
+function isAllowedCorsOrigin(origin: string): boolean {
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    if (parsed.protocol === 'https:' && (hostname === 'ludosom.com' || hostname.endsWith('.ludosom.com'))) {
+      return true;
+    }
+    if (hostname === 'localhost') {
+      return parsed.protocol === 'http:'
+        || parsed.protocol === 'https:'
+        || parsed.protocol === 'capacitor:'
+        || parsed.protocol === 'ionic:';
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || isAllowedCorsOrigin(origin)) {
       callback(null, true);
     } else {
+      console.warn(`Blocked CORS origin: ${origin}`);
       callback(new Error('Origin is not allowed by LudoSom CORS policy.'));
     }
   },
@@ -270,7 +293,7 @@ function isTrustedCapacitorAndroidRequest(req: express.Request): boolean {
   const origin = String(req.headers.origin || '').toLowerCase();
   const platform = String(req.headers['x-ludosom-platform'] || '').toLowerCase();
   const userAgent = String(req.headers['user-agent'] || '');
-  return (origin === 'https://localhost' || origin === 'capacitor://localhost' || origin === 'https://ludosom.com' || origin === 'https://www.ludosom.com')
+  return isAllowedCorsOrigin(origin)
     && platform === 'android'
     && /android/i.test(userAgent)
     && /;\s*wv\)|version\/\d+\.\d+.*chrome/i.test(userAgent);
