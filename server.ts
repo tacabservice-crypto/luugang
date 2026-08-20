@@ -5591,23 +5591,36 @@ app.post('/api/rooms/nudge', (req, res) => {
   res.json(room);
 });
 
-// Interactive Emoji Broadcast
+const reactionCooldowns = new Map<string, number>();
+const ALLOWED_GAME_REACTIONS = new Set(['laugh', 'love', 'shock', 'angry', 'clap', 'fire', 'hammer']);
+
+// Interactive targeted reaction broadcast
 app.post('/api/rooms/emoji', (req, res) => {
-  const { userId, roomId, emoji } = req.body;
+  const { userId, roomId, reactionId, targetId } = req.body;
   const room = store.rooms[roomId];
   if (!room) return res.status(404).json({ error: 'Room not found' });
 
   const p = room.players.find(pl => pl.userId === userId);
   if (!p) return res.status(403).json({ error: 'You are not in this room.' });
+  if (!ALLOWED_GAME_REACTIONS.has(String(reactionId))) return res.status(400).json({ error: 'Invalid reaction.' });
+  const target = room.players.find(pl => pl.userId === targetId && pl.status !== 'left');
+  if (!target || target.userId === userId) return res.status(400).json({ error: 'Choose another active player.' });
 
-  // Broadcast emoji event to all players in the room
+  const cooldownKey = `${roomId}:${userId}`;
+  const now = Date.now();
+  if (now - Number(reactionCooldowns.get(cooldownKey) || 0) < 800) {
+    return res.status(429).json({ error: 'Wait a moment before sending another reaction.' });
+  }
+  reactionCooldowns.set(cooldownKey, now);
+
+  const payload = {
+    id: crypto.randomUUID(), senderId: userId, senderName: p.username, senderColor: p.color,
+    targetId: target.userId, targetName: target.username, reactionId: String(reactionId),
+  };
+
   room.players.forEach(pl => {
-    sendEventToUser(pl.userId, 'player_emoji', {
-      senderId: userId,
-      senderName: p.username,
-      senderColor: p.color,
-      emoji
-    });
+    sendEventToUser(pl.userId, 'player_emoji', payload);
+    publishRealtimeEvent('user', pl.userId, 'player_emoji', payload);
   });
 
   res.json({ success: true });

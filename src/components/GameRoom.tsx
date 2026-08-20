@@ -44,6 +44,16 @@ import { useVoiceChat } from '../context/VoiceChatContext';
 import { formatCurrency } from '../utils/number';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+const QUICK_REACTIONS = [
+  { id: 'laugh', emoji: '\u{1F602}', label: 'Qosol' },
+  { id: 'love', emoji: '\u{1F60D}', label: 'Jacayl' },
+  { id: 'shock', emoji: '\u{1F631}', label: 'Yaab' },
+  { id: 'angry', emoji: '\u{1F621}', label: 'Xanaaq' },
+  { id: 'clap', emoji: '\u{1F44F}', label: 'Sacab' },
+  { id: 'fire', emoji: '\u{1F525}', label: 'Dab' },
+  { id: 'hammer', emoji: '\u{1F528}', label: 'Buruus' },
+] as const;
+
 // Import audio assets directly
 import diceAudioSrc from '../assets/dice.mp3';
 import winAudioSrc from '../assets/win.mp3';
@@ -411,6 +421,13 @@ export default function GameRoomView({
   const isActiveTurn = canPlay && room.status === 'playing' && room.players[room.gameState.turn]?.userId === userId;
   const inactivityStrikes = Number(myPlayer?.inactivityStrikes || 0);
   const activePlayer = room.status === 'playing' ? room.players[room.gameState.turn] : null;
+  const reactionTargets = room.players.filter(player => player.userId !== userId && player.status !== 'left');
+  const teammateColor = myPlayer?.color === 'red' ? 'yellow'
+    : myPlayer?.color === 'yellow' ? 'red'
+      : myPlayer?.color === 'green' ? 'blue' : 'green';
+  const defaultReactionTarget = activePlayer?.userId !== userId
+    ? activePlayer
+    : reactionTargets.find(player => room.gameMode !== 'team' || player.color !== teammateColor) || reactionTargets[0];
   const host = room.players.find(p => p.isHost);
   const lobbyCapacity = room.capacity || 2;
   const getLobbyTeam = (color: PlayerColor): 'A' | 'B' => color === 'red' || color === 'yellow' ? 'A' : 'B';
@@ -1251,25 +1268,32 @@ export default function GameRoomView({
 
             {/* Interactive Somali Quick Reactions */}
             <div className="w-full border-t border-white/5 pt-2 mt-2 text-center">
-              <span className="text-[8px] text-slate-400 font-black uppercase tracking-widest block mb-1">Dareeno Degdeg Ah (Quick Reactions)</span>
-              <div className="flex items-center justify-center gap-2">
-                {['😂', '😍', '😱', '😡', '👍', '🔥'].map((emo) => (
+              <span className="mb-2 block text-[9px] font-black uppercase tracking-widest text-slate-400">
+                Dareeno Degdeg Ah {defaultReactionTarget ? `→ ${defaultReactionTarget.username}` : ''}
+              </span>
+              <div className="flex items-center justify-start gap-2 overflow-x-auto px-1 pb-1 sm:justify-center">
+                {QUICK_REACTIONS.map((reaction) => (
                   <button
-                    key={emo}
+                    key={reaction.id}
+                    type="button"
+                    title={`${reaction.label}${defaultReactionTarget ? ` → ${defaultReactionTarget.username}` : ''}`}
+                    disabled={!defaultReactionTarget}
                     onClick={async () => {
+                      if (!defaultReactionTarget) return;
                       try {
                         await fetch('/api/rooms/emoji', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ userId, roomId: room.id, emoji: emo })
+                          body: JSON.stringify({ userId, roomId: room.id, reactionId: reaction.id, targetId: defaultReactionTarget.userId })
                         });
                       } catch (err) {
                         console.error(err);
                       }
                     }}
-                    className="text-lg p-1 bg-black/30 hover:bg-white/5 rounded-lg border border-white/5 active:scale-90 transition-all cursor-pointer"
+                    className="group flex min-w-12 flex-col items-center rounded-xl border border-white/10 bg-gradient-to-b from-white/10 to-black/30 px-2 py-1.5 shadow-lg transition-all hover:-translate-y-1 hover:border-purple-400/50 hover:bg-purple-500/15 active:scale-90 disabled:opacity-40"
                   >
-                    {emo}
+                    <span className="text-2xl drop-shadow-lg transition-transform group-hover:scale-125">{reaction.emoji}</span>
+                    <span className="text-[7px] font-black uppercase text-slate-400">{reaction.label}</span>
                   </button>
                 ))}
               </div>

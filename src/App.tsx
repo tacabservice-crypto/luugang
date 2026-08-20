@@ -38,6 +38,39 @@ function shouldAcceptRoomUpdate(current: GameRoom | null, incoming: GameRoom): b
   return true;
 }
 
+const REACTION_META: Record<string, { emoji: string; label: string; tone: number }> = {
+  laugh: { emoji: '\u{1F602}', label: 'Qosol!', tone: 720 },
+  love: { emoji: '\u{1F60D}', label: 'Wuu ka helay!', tone: 880 },
+  shock: { emoji: '\u{1F631}', label: 'Yaab!', tone: 1040 },
+  angry: { emoji: '\u{1F621}', label: 'Xanaaq!', tone: 180 },
+  clap: { emoji: '\u{1F44F}', label: 'Sacab!', tone: 560 },
+  fire: { emoji: '\u{1F525}', label: 'Waa dab!', tone: 420 },
+  hammer: { emoji: '\u{1F528}', label: 'Buruus!', tone: 110 },
+};
+
+function playReactionSound(reactionId: string) {
+  const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+    const tone = REACTION_META[reactionId]?.tone || 440;
+    oscillator.type = reactionId === 'hammer' || reactionId === 'angry' ? 'square' : 'sine';
+    oscillator.frequency.setValueAtTime(tone, now);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(55, tone / 2), now + 0.22);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(reactionId === 'hammer' ? 0.32 : 0.16, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.3);
+    oscillator.addEventListener('ended', () => void context.close());
+  } catch { /* Audio can be blocked before the first user gesture. */ }
+}
+
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
@@ -145,7 +178,10 @@ export default function App() {
 
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [showConfirmLeave, setShowConfirmLeave] = useState(false);
-  const [activeReaction, setActiveReaction] = useState<{ senderName: string; emoji: string } | null>(null);
+  const [activeReaction, setActiveReaction] = useState<{
+    id: string; senderName: string; targetId: string; targetName: string; reactionId: string; emoji: string;
+  } | null>(null);
+  const reactionTimeoutRef = useRef<number | null>(null);
   const [incomingInvite, setIncomingInvite] = useState<{
     senderId: string;
     senderName: string;
@@ -472,12 +508,11 @@ export default function App() {
 
     eventSource.addEventListener('player_emoji', (e: any) => {
       try {
-        const data = JSON.parse(e.data) as { senderName: string, emoji: string };
-        setActiveReaction({ senderName: data.senderName, emoji: data.emoji });
-        // Auto clear reaction after 3 seconds
-        setTimeout(() => {
-          setActiveReaction(null);
-        }, 3000);
+        const data = JSON.parse(e.data) as { id: string; senderName: string; targetId: string; targetName: string; reactionId: string };
+        setActiveReaction({ ...data, emoji: REACTION_META[data.reactionId]?.emoji || '\u{2728}' });
+        playReactionSound(data.reactionId);
+        if (reactionTimeoutRef.current) window.clearTimeout(reactionTimeoutRef.current);
+        reactionTimeoutRef.current = window.setTimeout(() => setActiveReaction(null), 2400);
       } catch (err) {
         console.error('Failed to parse player emoji', err);
       }
@@ -1173,8 +1208,8 @@ export default function App() {
         </div>
       )}
       {activeReaction && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] bg-[#1A0C40]/90 border border-purple-500/40 p-3 px-5 rounded-2xl flex items-center gap-3 shadow-2xl animate-bounce backdrop-blur-md">
-          <span className="text-3xl animate-pulse">{activeReaction.emoji}</span>
+        <div className={`reaction-stage fixed inset-0 z-[110] flex items-center justify-center pointer-events-none ${activeReaction.reactionId === 'hammer' ? 'reaction-stage-hammer' : ''}`}>
+          <span className={`reaction-emoji reaction-${activeReaction.reactionId}`}>{activeReaction.emoji}</span>
           <p className="text-xs font-black text-slate-100 whitespace-nowrap">
             <span className="text-purple-400 font-extrabold">{activeReaction.senderName}</span>: {activeReaction.emoji === '😂' ? 'Wuu qoslay!' : activeReaction.emoji === '😍' ? 'Aad buu u helay!' : activeReaction.emoji === '😱' ? 'Wuu la yaabay!' : activeReaction.emoji === '😡' ? 'Wuu carooday!' : activeReaction.emoji === '👍' ? 'Waa sax!' : 'Waa gubtay!'}
           </p>
