@@ -6117,6 +6117,19 @@ app.get("/api/admin/transactions", hasPermission("transactions"), (req, res) => 
   res.json(store.transactions);
 });
 app.get("/api/admin/manual-transactions", hasAnyPermission("transactions", "cashier"), async (req, res) => {
+  const permissions = req.adminPermissions || [];
+  const cashierOnly = permissions.includes("cashier") && !permissions.includes("transactions") && !permissions.includes("all");
+  const adminId = String(req.query.userId || "");
+  if (cashierOnly) {
+    const currentAdmin = req.adminUser;
+    const cashierOnlineAt = Date.now();
+    adminUsersCache.set(adminId, { ...currentAdmin, cashierOnlineAt });
+    if (isMySqlRuntimePrimary()) {
+      await updateMySqlCashierHeartbeat(adminId, cashierOnlineAt);
+    } else if (db) {
+      await db.collection("adminUsers").doc(adminId).update({ cashierOnlineAt });
+    }
+  }
   await reassignExpiredCashierRequests();
   const agentNames = new Map(Object.values(store.agents).map((agent) => [agent.id, agent.username]));
   const transactions = (store.pendingManualTransactions || []).map((tx) => {
@@ -6129,9 +6142,6 @@ app.get("/api/admin/manual-transactions", hasAnyPermission("transactions", "cash
       managedBy: tx.managedBy || (linkedAgentId ? "agent" : "admin")
     };
   });
-  const permissions = req.adminPermissions || [];
-  const cashierOnly = permissions.includes("cashier") && !permissions.includes("transactions") && !permissions.includes("all");
-  const adminId = String(req.query.userId || "");
   res.json(cashierOnly ? transactions.filter((tx) => tx.managedBy !== "agent" && tx.assignedCashierId === adminId) : transactions);
 });
 function cashierPeriod(now2 = /* @__PURE__ */ new Date()) {

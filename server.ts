@@ -6691,6 +6691,23 @@ app.get('/api/admin/transactions', hasPermission('transactions'), (req, res) => 
 
 // Get all pending manual transactions
 app.get('/api/admin/manual-transactions', hasAnyPermission('transactions', 'cashier'), async (req, res) => {
+    const permissions = (req as any).adminPermissions as string[] || [];
+    const cashierOnly = permissions.includes('cashier') && !permissions.includes('transactions') && !permissions.includes('all');
+    const adminId = String(req.query.userId || '');
+
+    // Listing the cashier queue is itself proof that this cashier is online.
+    // Register it before assignment so the first queue request cannot race the
+    // separate heartbeat request and incorrectly return an empty list.
+    if (cashierOnly) {
+        const currentAdmin = (req as any).adminUser as AdminUser;
+        const cashierOnlineAt = Date.now();
+        adminUsersCache.set(adminId, { ...currentAdmin, cashierOnlineAt });
+        if (isMySqlRuntimePrimary()) {
+            await updateMySqlCashierHeartbeat(adminId, cashierOnlineAt);
+        } else if (db) {
+            await db.collection('adminUsers').doc(adminId).update({ cashierOnlineAt });
+        }
+    }
     await reassignExpiredCashierRequests();
     const agentNames = new Map(Object.values(store.agents).map(agent => [agent.id, agent.username]));
 
@@ -6704,9 +6721,6 @@ app.get('/api/admin/manual-transactions', hasAnyPermission('transactions', 'cash
             managedBy: tx.managedBy || (linkedAgentId ? 'agent' : 'admin'),
         };
     });
-    const permissions = (req as any).adminPermissions as string[] || [];
-    const cashierOnly = permissions.includes('cashier') && !permissions.includes('transactions') && !permissions.includes('all');
-    const adminId = String(req.query.userId || '');
     res.json(cashierOnly ? transactions.filter(tx => tx.managedBy !== 'agent' && tx.assignedCashierId === adminId) : transactions);
 });
 
