@@ -1188,6 +1188,12 @@ function cashierCities(admin: { location?: string; cashierLocations?: string[] }
     .filter(Boolean))].slice(0, 2);
 }
 
+function cashierCanServeRequest(admin: { location?: string; cashierLocations?: string[] }, request: ManualTransactionRequest): boolean {
+  const user = store.users[request.userId];
+  const requestCity = normalizedCity(request.cashierCity || user?.location);
+  return Boolean(requestCity && cashierCities(admin).includes(requestCity));
+}
+
 async function assignCashierToRequest(request: ManualTransactionRequest, now = Date.now()): Promise<boolean> {
   if ((!db && !isMySqlConfigured()) || request.managedBy === 'agent' || request.status !== 'pending') return false;
   const user = store.users[request.userId];
@@ -6732,7 +6738,10 @@ app.get('/api/admin/manual-transactions', hasAnyPermission('transactions', 'cash
             managedBy: tx.managedBy || (linkedAgentId ? 'agent' : 'admin'),
         };
     });
-    res.json(cashierOnly ? transactions.filter(tx => tx.managedBy !== 'agent' && tx.assignedCashierId === adminId) : transactions);
+    const currentAdmin = (req as any).adminUser as AdminUser;
+    res.json(cashierOnly
+        ? transactions.filter(tx => tx.managedBy !== 'agent' && cashierCanServeRequest(currentAdmin, tx))
+        : transactions);
 });
 
 function cashierPeriod(now = new Date()) {
@@ -6901,9 +6910,15 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', hasAnyPermissi
     if (cashierOnly && (tx.managedBy === 'agent' || Boolean(tx.agentId))) {
         return res.status(403).json({ error: 'Agent-managed requests are viewable only by transaction administrators.' });
     }
+    if (cashierOnly && !cashierCanServeRequest((req as any).adminUser, tx)) {
+        return res.status(403).json({ error: 'This request belongs to a cashier serving another location.' });
+    }
     if (cashierOnly && (tx.assignedCashierId !== String(req.query.userId || '') || Number(tx.assignmentExpiresAt || 0) <= Date.now())) {
-        await assignCashierToRequest(tx);
-        return res.status(409).json({ error: 'This request is no longer assigned to you.' });
+        tx.assignedCashierId = String(req.query.userId || '');
+        tx.assignedCashierName = String((req as any).adminUser?.name || (req as any).adminUser?.username || 'Cashier');
+        tx.assignedCashierAt = Date.now();
+        tx.assignmentExpiresAt = Date.now() + CASHIER_ASSIGNMENT_MS;
+        await saveManualRequestToFirestore(tx);
     }
 
     const user = store.users[tx.userId];
@@ -6963,9 +6978,15 @@ app.post('/api/admin/manual-transactions/:transactionId/reject', hasAnyPermissio
     if (cashierOnly && (tx.managedBy === 'agent' || Boolean(tx.agentId))) {
         return res.status(403).json({ error: 'Agent-managed requests are viewable only by transaction administrators.' });
     }
+    if (cashierOnly && !cashierCanServeRequest((req as any).adminUser, tx)) {
+        return res.status(403).json({ error: 'This request belongs to a cashier serving another location.' });
+    }
     if (cashierOnly && (tx.assignedCashierId !== String(req.query.userId || '') || Number(tx.assignmentExpiresAt || 0) <= Date.now())) {
-        await assignCashierToRequest(tx);
-        return res.status(409).json({ error: 'This request is no longer assigned to you.' });
+        tx.assignedCashierId = String(req.query.userId || '');
+        tx.assignedCashierName = String((req as any).adminUser?.name || (req as any).adminUser?.username || 'Cashier');
+        tx.assignedCashierAt = Date.now();
+        tx.assignmentExpiresAt = Date.now() + CASHIER_ASSIGNMENT_MS;
+        await saveManualRequestToFirestore(tx);
     }
 
 
