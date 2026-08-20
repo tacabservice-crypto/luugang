@@ -29,7 +29,7 @@ const VIEW_PERMISSIONS: Record<string, string> = {
     'cashier-overview': 'cashier', 'manual-transactions': 'cashier', cashiers: 'settings', agents: 'agents', 'agent-requests': 'agents',
     tournaments: 'tournaments', settings: 'settings', 'my-settings': 'self',
 };
-const VIEW_ORDER = ['cashier-overview', 'stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'cashiers', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
+const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'cashiers', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
 
 const canAccessView = (user: { username: string; role?: string; permissions?: string[] }, targetView: string) => {
     const permissions = user.permissions || [];
@@ -41,8 +41,10 @@ const canAccessView = (user: { username: string; role?: string; permissions?: st
         || (targetView === 'manual-transactions' && permissions.includes('transactions'));
 };
 
-const getInitialView = (user: { username: string; role?: string; permissions?: string[] }) =>
-    VIEW_ORDER.find(candidate => canAccessView(user, candidate)) || 'my-settings';
+const getInitialView = (user: { username: string; role?: string; permissions?: string[] }, cashierMode = false) =>
+    cashierMode && canAccessView(user, 'cashier-overview')
+        ? 'cashier-overview'
+        : VIEW_ORDER.find(candidate => canAccessView(user, candidate)) || 'my-settings';
 
 const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = false }) => {
     // Define AdminUser interface to match backend
@@ -77,7 +79,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
     const [view, setView] = useState<'cashier-overview' | 'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>(() => {
         const storedUser = localStorage.getItem('admin_user');
         try {
-            return storedUser ? getInitialView(JSON.parse(storedUser)) as typeof view : 'my-settings';
+            return storedUser ? getInitialView(JSON.parse(storedUser), cashierMode) as typeof view : 'my-settings';
         } catch {
             return 'my-settings';
         }
@@ -99,9 +101,10 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
 
     useEffect(() => {
         if (!adminUser) return;
-        if (canAccessView(adminUser, view)) return;
-        setView(getInitialView(adminUser) as typeof view);
-    }, [adminUser, view]);
+        if ((!cashierMode && view === 'cashier-overview') || !canAccessView(adminUser, view)) {
+            setView(getInitialView(adminUser, cashierMode) as typeof view);
+        }
+    }, [adminUser, view, cashierMode]);
 
     // Modal state
     const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -137,7 +140,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
                     setAdminUser(data.user);
                     setView(current => canAccessView(data.user, current)
                         ? current
-                        : getInitialView(data.user) as typeof current);
+                        : getInitialView(data.user, cashierMode) as typeof current);
                 }
             } catch {
                 // Keep the existing session during temporary network interruptions.
@@ -287,7 +290,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
             const data = await response.json();
             if (data.success && data.user) {
                 localStorage.setItem('admin_user', JSON.stringify(data.user));
-                setView(getInitialView(data.user) as typeof view);
+                setView(getInitialView(data.user, cashierMode) as typeof view);
                 setAdminUser(data.user);
             } else {
                 throw new Error(data.error || 'Login failed');
@@ -899,6 +902,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
             view={view} 
             setView={setView}
             hasPermission={hasPermission}
+            cashierMode={cashierMode}
         >
             <Toaster />
             <div className="w-full min-w-0 p-3 sm:p-4 lg:p-6">

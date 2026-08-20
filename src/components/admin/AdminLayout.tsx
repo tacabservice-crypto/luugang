@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards, UserCog, BadgeDollarSign, Gauge } from 'lucide-react';
 
-const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children }) => {
+const AdminLayout = ({ user, onLogout, view, setView, hasPermission, cashierMode = false, children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigationItems = [
     { name: 'cashier-overview', label: 'My Cashier Dashboard', icon: Gauge, permission: 'cashier' },
@@ -27,7 +27,7 @@ const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children })
         <button onClick={() => setMobileOpen(false)} className="rounded-lg p-2 hover:bg-gray-800 lg:hidden" aria-label="Close menu"><X size={20} /></button>
       </div>
       <nav className="flex-1 overflow-y-auto p-2">
-        {navigationItems.map(item => hasPermission(item.permission) && (
+        {navigationItems.map(item => (!cashierMode && item.name === 'cashier-overview' ? false : hasPermission(item.permission)) && (
           <button key={item.name} onClick={() => setView(item.name)} className={`my-1 flex w-full items-center rounded-lg p-3 text-left transition-colors ${view === item.name ? 'bg-purple-600' : 'hover:bg-gray-800'}`}>
             <item.icon className="mr-3 shrink-0" size={20} /><span className="truncate">{item.label}</span>
           </button>
@@ -51,7 +51,7 @@ const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children })
         <header className="sticky top-0 z-30 border-b border-gray-200 bg-white shadow-sm">
           <div className="flex items-center gap-3 px-3 py-3 sm:px-5">
             <button onClick={() => setMobileOpen(true)} className="rounded-lg border border-gray-200 p-2 text-gray-700 lg:hidden" aria-label="Open menu"><Menu size={22}/></button>
-            <div className="min-w-0"><h1 className="truncate text-lg font-bold capitalize text-gray-800 sm:text-2xl">{view.replaceAll('-', ' ')}</h1><p className="hidden text-xs text-gray-500 sm:block">Manage and monitor your platform</p></div>
+            <div className="min-w-0"><h1 className="truncate text-lg font-bold capitalize text-gray-800 sm:text-2xl">{view.replaceAll('-', ' ')}</h1><p className="hidden text-xs text-gray-500 sm:block">{cashierMode ? 'Track your cashier work, requests and target' : 'Manage and monitor your platform'}</p></div>
           </div>
         </header>
         <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-gray-100">{children}</main>
