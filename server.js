@@ -5424,8 +5424,14 @@ var hasPermission = (requiredPermission) => {
       if (!adminUser) {
         return res.status(403).json({ error: "Access denied. Invalid admin user." });
       }
-      if (adminUser.permissions.includes("all") || adminUser.permissions.includes(requiredPermission)) {
-        req.adminUser = adminUser;
+      if (adminUser.status === "suspended") {
+        return res.status(403).json({ error: "Access denied. This admin account is suspended." });
+      }
+      const permissions = normalizeAdminPermissions(adminUser.permissions);
+      if (permissions.includes("all") || permissions.includes(requiredPermission)) {
+        const canonicalAdmin = { ...adminUser, permissions };
+        req.adminUser = canonicalAdmin;
+        req.adminPermissions = permissions;
         next();
       } else {
         res.status(403).json({ error: "Access denied. You do not have permission for this action." });
