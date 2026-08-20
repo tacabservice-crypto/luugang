@@ -46,7 +46,7 @@ import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
-import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
+import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -1073,7 +1073,15 @@ async function saveUserProfileToFirestore(user: UserProfile) {
 }
 
 async function saveManualRequestToFirestore(request: ManualTransactionRequest) {
-  if (isMySqlRuntimePrimary()) return saveMySqlManualRequest(request);
+  if (isMySqlRuntimePrimary()) {
+    // manual_transaction_requests.user_id has a foreign key to app_users.
+    // Older Firebase/local users may not have been mirrored to MySQL yet, so
+    // always upsert the owner before inserting their payment request.
+    const requestUser = store.users[request.userId];
+    if (!requestUser) throw new Error(`Cannot persist manual request for missing user ${request.userId}`);
+    await saveMySqlUserProfile(requestUser);
+    return saveMySqlManualRequest(request);
+  }
   if (db) {
     try {
       await db.collection('manualTransactionRequests').doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
@@ -3072,6 +3080,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
       foundUser.linkedAgentId = linkedAgent.id;
+      foundUser.appliedPromoCode = normalizePromoCode(promoCode);
     }
     await saveUserProfileToFirestore(foundUser);
     return res.json(foundUser);
@@ -3089,6 +3098,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
       persistedUser.linkedAgentId = linkedAgent.id;
+      persistedUser.appliedPromoCode = normalizePromoCode(promoCode);
     }
     store.users[persistedUser.id] = persistedUser;
     await saveUserProfileToFirestore(persistedUser);
@@ -3110,6 +3120,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
         const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
         if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
         userByEmail.linkedAgentId = linkedAgent.id;
+        userByEmail.appliedPromoCode = normalizePromoCode(promoCode);
       }
       await saveUserProfileToFirestore(userByEmail);
       await saveStoreAndWait();
@@ -3127,6 +3138,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
         const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
         if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
         userByPhone.linkedAgentId = linkedAgent.id;
+        userByPhone.appliedPromoCode = normalizePromoCode(promoCode);
       }
       await saveUserProfileToFirestore(userByPhone);
       await saveStoreAndWait();
@@ -3174,7 +3186,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
   // If a promo code is provided, validate it and find the agent.
   const normalizedPromoCode = normalizePromoCode(promoCode);
   if (normalizedPromoCode) {
-    if (!db) {
+    if (!db && !isMySqlRuntimePrimary()) {
         return res.status(503).json({ error: 'Promo code validation is temporarily unavailable.' });
     }
     const agent = await resolveActiveAgentByPromoCode(normalizedPromoCode);
@@ -3196,6 +3208,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     winCount: 0,
     lossCount: 0,
     linkedAgentId: linkedAgentId, // Add the linked agent ID
+    appliedPromoCode: normalizedPromoCode || undefined,
     emailOtpVerifiedAt: isOtpEnabled() ? Date.now() : undefined,
   };
 
@@ -3495,7 +3508,14 @@ app.post('/api/wallet/request-manual-confirmation', async (req, res) => {
       console.error(`Initial cashier assignment failed for ${newRequest.id}:`, error);
     }
   }
-  await saveStoreAndWait();
+  // The request itself is already durably stored above. A legacy aggregate
+  // snapshot failure must not tell the player that a successfully-created
+  // request failed (or encourage duplicate submissions).
+  try {
+    await saveStoreAndWait();
+  } catch (error) {
+    console.error(`Manual request ${newRequest.id} was saved, but the aggregate store snapshot failed:`, error);
+  }
 
   res.json({ success: true, message: 'Your request has been submitted for review.' });
 });
@@ -8038,18 +8058,36 @@ app.get('/api/agent/payment-instructions', isAgent, (req, res) => {
 });
 
 // Agent gets a list of their linked players
-app.get('/api/agent/my-players', isAgent, (req, res) => {
+app.get('/api/agent/my-players', isAgent, async (req, res) => {
     const agent: Agent = (req as any).agent;
+    try {
+      const normalizedAgentPromo = normalizePromoCode(agent.promoCode);
+      const linkedPlayers = isMySqlRuntimePrimary()
+        ? await listMySqlUsersByAgent(agent.id, normalizedAgentPromo)
+        : Object.values(store.users).filter(user => user.linkedAgentId === agent.id
+          || (!user.linkedAgentId && normalizePromoCode(user.appliedPromoCode) === normalizedAgentPromo));
 
-    const linkedPlayers = Object.values(store.users).filter(user => user.linkedAgentId === agent.id);
+      // Repair legacy profiles that recorded the promo code but missed the
+      // linkedAgentId field. Never overwrite a link to another agent.
+      await Promise.all(linkedPlayers.map(async player => {
+        if (!player.linkedAgentId) {
+          player.linkedAgentId = agent.id;
+          player.appliedPromoCode = normalizedAgentPromo;
+          await saveUserProfileToFirestore(player);
+        }
+      }));
 
-    // Return a sanitized version of the user profiles
-    const sanitizedPlayers = linkedPlayers.map(p => {
-        const { password, ...playerData } = p;
-        return playerData;
-    });
-
-    res.json(sanitizedPlayers);
+      // Keep memory in sync for deposit requests and other agent operations.
+      linkedPlayers.forEach(player => { store.users[player.id] = player; });
+      const sanitizedPlayers = linkedPlayers.map(p => {
+          const { password, ...playerData } = p;
+          return playerData;
+      });
+      res.json(sanitizedPlayers);
+    } catch (error) {
+      console.error(`Failed to load linked players for agent ${agent.id}:`, error);
+      res.status(500).json({ error: 'Linked players could not be loaded.' });
+    }
 });
 
 

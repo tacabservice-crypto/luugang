@@ -15,6 +15,25 @@ export async function saveMySqlUserProfile(user: any) {
   );
 }
 
+export async function listMySqlUsersByAgent(agentId: string, promoCode: string) {
+  const [rows] = await getMySqlPool().execute<any[]>(
+    `SELECT profile_json, id, linked_agent_id, balance, win_count, loss_count
+     FROM app_users
+     WHERE linked_agent_id = ?
+        OR (linked_agent_id IS NULL AND UPPER(TRIM(applied_promo_code)) = ?)
+     ORDER BY updated_at DESC`,
+    [agentId, promoCode],
+  );
+  return rows.map(row => ({
+    ...parseJson<any>(row.profile_json),
+    id: row.id,
+    linkedAgentId: row.linked_agent_id,
+    balance: Number(row.balance || 0),
+    winCount: Number(row.win_count || 0),
+    lossCount: Number(row.loss_count || 0),
+  }));
+}
+
 export async function saveMySqlManualRequest(request: any) {
   await getMySqlPool().execute(
     `INSERT INTO manual_transaction_requests (id, user_id, agent_id, managed_by, transaction_type, amount, status, assigned_cashier_id, created_at, resolved_at, request_json)

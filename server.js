@@ -557,6 +557,24 @@ async function saveMySqlUserProfile(user) {
     [user.id, user.firebaseUid || null, user.email || null, user.phone || null, user.username, user.avatar || null, Number(user.balance || 0), Number(user.winCount || 0), Number(user.lossCount || 0), user.linkedAgentId || null, user.appliedPromoCode || null, Boolean(user.emailOtpVerifiedAt), user.status || "active", Number(user.createdAt || now2), now2, JSON.stringify(user)]
   );
 }
+async function listMySqlUsersByAgent(agentId, promoCode) {
+  const [rows] = await getMySqlPool().execute(
+    `SELECT profile_json, id, linked_agent_id, balance, win_count, loss_count
+     FROM app_users
+     WHERE linked_agent_id = ?
+        OR (linked_agent_id IS NULL AND UPPER(TRIM(applied_promo_code)) = ?)
+     ORDER BY updated_at DESC`,
+    [agentId, promoCode]
+  );
+  return rows.map((row) => ({
+    ...parseJson(row.profile_json),
+    id: row.id,
+    linkedAgentId: row.linked_agent_id,
+    balance: Number(row.balance || 0),
+    winCount: Number(row.win_count || 0),
+    lossCount: Number(row.loss_count || 0)
+  }));
+}
 async function saveMySqlManualRequest(request) {
   await getMySqlPool().execute(
     `INSERT INTO manual_transaction_requests (id, user_id, agent_id, managed_by, transaction_type, amount, status, assigned_cashier_id, created_at, resolved_at, request_json)
@@ -1586,7 +1604,12 @@ async function saveUserProfileToFirestore(user) {
   persistedUserProfiles.set(documentId, serializeUserProfile(user));
 }
 async function saveManualRequestToFirestore(request) {
-  if (isMySqlRuntimePrimary()) return saveMySqlManualRequest(request);
+  if (isMySqlRuntimePrimary()) {
+    const requestUser = store.users[request.userId];
+    if (!requestUser) throw new Error(`Cannot persist manual request for missing user ${request.userId}`);
+    await saveMySqlUserProfile(requestUser);
+    return saveMySqlManualRequest(request);
+  }
   if (db) {
     try {
       await db.collection("manualTransactionRequests").doc(request.id).set(JSON.parse(JSON.stringify(request)), { merge: true });
@@ -3144,6 +3167,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
       foundUser.linkedAgentId = linkedAgent.id;
+      foundUser.appliedPromoCode = normalizePromoCode(promoCode);
     }
     await saveUserProfileToFirestore(foundUser);
     return res.json(foundUser);
@@ -3158,6 +3182,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
       persistedUser.linkedAgentId = linkedAgent.id;
+      persistedUser.appliedPromoCode = normalizePromoCode(promoCode);
     }
     store.users[persistedUser.id] = persistedUser;
     await saveUserProfileToFirestore(persistedUser);
@@ -3177,6 +3202,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
         const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
         if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
         userByEmail.linkedAgentId = linkedAgent.id;
+        userByEmail.appliedPromoCode = normalizePromoCode(promoCode);
       }
       await saveUserProfileToFirestore(userByEmail);
       await saveStoreAndWait();
@@ -3193,6 +3219,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
         const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
         if (!linkedAgent) return res.status(400).json({ error: "Invalid, expired, or inactive promo code." });
         userByPhone.linkedAgentId = linkedAgent.id;
+        userByPhone.appliedPromoCode = normalizePromoCode(promoCode);
       }
       await saveUserProfileToFirestore(userByPhone);
       await saveStoreAndWait();
@@ -3228,7 +3255,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   let linkedAgentId = void 0;
   const normalizedPromoCode = normalizePromoCode(promoCode);
   if (normalizedPromoCode) {
-    if (!db) {
+    if (!db && !isMySqlRuntimePrimary()) {
       return res.status(503).json({ error: "Promo code validation is temporarily unavailable." });
     }
     const agent = await resolveActiveAgentByPromoCode(normalizedPromoCode);
@@ -3250,6 +3277,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     lossCount: 0,
     linkedAgentId,
     // Add the linked agent ID
+    appliedPromoCode: normalizedPromoCode || void 0,
     emailOtpVerifiedAt: isOtpEnabled() ? Date.now() : void 0
   };
   store.users[userId] = newUser;
@@ -3478,7 +3506,11 @@ app.post("/api/wallet/request-manual-confirmation", async (req, res) => {
       console.error(`Initial cashier assignment failed for ${newRequest.id}:`, error);
     }
   }
-  await saveStoreAndWait();
+  try {
+    await saveStoreAndWait();
+  } catch (error) {
+    console.error(`Manual request ${newRequest.id} was saved, but the aggregate store snapshot failed:`, error);
+  }
   res.json({ success: true, message: "Your request has been submitted for review." });
 });
 app.get("/api/wallet/withdrawal-quote/:userId", async (req, res) => {
@@ -7153,14 +7185,30 @@ app.get("/api/agent/payment-instructions", isAgent, (req, res) => {
   const instructions = store.agentFloatInstructions || "";
   res.json({ instructions });
 });
-app.get("/api/agent/my-players", isAgent, (req, res) => {
+app.get("/api/agent/my-players", isAgent, async (req, res) => {
   const agent = req.agent;
-  const linkedPlayers = Object.values(store.users).filter((user) => user.linkedAgentId === agent.id);
-  const sanitizedPlayers = linkedPlayers.map((p) => {
-    const { password, ...playerData } = p;
-    return playerData;
-  });
-  res.json(sanitizedPlayers);
+  try {
+    const normalizedAgentPromo = normalizePromoCode(agent.promoCode);
+    const linkedPlayers = isMySqlRuntimePrimary() ? await listMySqlUsersByAgent(agent.id, normalizedAgentPromo) : Object.values(store.users).filter((user) => user.linkedAgentId === agent.id || !user.linkedAgentId && normalizePromoCode(user.appliedPromoCode) === normalizedAgentPromo);
+    await Promise.all(linkedPlayers.map(async (player) => {
+      if (!player.linkedAgentId) {
+        player.linkedAgentId = agent.id;
+        player.appliedPromoCode = normalizedAgentPromo;
+        await saveUserProfileToFirestore(player);
+      }
+    }));
+    linkedPlayers.forEach((player) => {
+      store.users[player.id] = player;
+    });
+    const sanitizedPlayers = linkedPlayers.map((p) => {
+      const { password, ...playerData } = p;
+      return playerData;
+    });
+    res.json(sanitizedPlayers);
+  } catch (error) {
+    console.error(`Failed to load linked players for agent ${agent.id}:`, error);
+    res.status(500).json({ error: "Linked players could not be loaded." });
+  }
 });
 app.get("/agent", (req, res) => {
   const distPath = getDistDirectory();
