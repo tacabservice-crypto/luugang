@@ -46,7 +46,7 @@ import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
-import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlManualRequests, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
+import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlManualRequests, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, resolveMySqlManualRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
 // import { initializeFirebase, validateAndGetDb } from './src/firebase-utils';
 // const { db, auth } = initializeFirebase();
@@ -6980,6 +6980,31 @@ app.post('/api/admin/manual-transactions/:transactionId/approve', hasAnyPermissi
         return res.status(403).json({ error: 'This transaction is assigned to an agent and is read-only for administrators.' });
     }
 
+    if (isMySqlRuntimePrimary()) {
+        if (tx.transactionType === 'withdraw') {
+            const eligibilityError = withdrawalEligibilityError(user, tx.amount, tx.id);
+            if (eligibilityError) return res.status(400).json({ error: eligibilityError });
+        }
+        try {
+            const result = await resolveMySqlManualRequest({ requestId: tx.id, admin: (req as any).adminUser, approved: true });
+            Object.assign(tx, result.request);
+            if (result.user) {
+                store.users[tx.userId] = { ...store.users[tx.userId], ...result.user };
+                const description = tx.transactionType === 'deposit'
+                    ? `Manual deposit approved by cashier/admin. Request ID: ${tx.id}`
+                    : `Manual withdrawal approved by cashier/admin. Request ID: ${tx.id}`;
+                addTransaction(tx.userId, tx.transactionType === 'deposit' ? 'deposit' : 'withdrawal', tx.amount, undefined, description);
+                if (tx.transactionType === 'withdraw') recordWithdrawalFee(tx.userId, Number(tx.fee || 0), tx.id);
+                broadcastUserUpdate(tx.userId);
+            }
+            await saveStoreAndWait();
+            return res.json({ success: true, transaction: tx });
+        } catch (error: any) {
+            const message = String(error?.message || 'Request could not be approved.');
+            return res.status(/already been processed/i.test(message) ? 409 : 400).json({ error: message });
+        }
+    }
+
     if (tx.transactionType === 'deposit') {
         user.balance += tx.amount;
         addTransaction(user.id, 'deposit', tx.amount, undefined, `Manual deposit approved by admin. Request ID: ${tx.id}`);
@@ -7043,6 +7068,19 @@ app.post('/api/admin/manual-transactions/:transactionId/reject', hasAnyPermissio
     const user = store.users[tx.userId];
     if (tx.managedBy === 'agent' || user?.linkedAgentId) {
         return res.status(403).json({ error: 'This transaction is assigned to an agent and is read-only for administrators.' });
+    }
+
+    if (isMySqlRuntimePrimary()) {
+        try {
+            const result = await resolveMySqlManualRequest({ requestId: tx.id, admin: (req as any).adminUser, approved: false });
+            Object.assign(tx, result.request);
+            await saveStoreAndWait();
+            if (user) sendEventToUser(user.id, 'user_notification', { type: 'info', message: `Your ${tx.transactionType} request for $${tx.amount} was rejected.` });
+            return res.json({ success: true, transaction: tx });
+        } catch (error: any) {
+            const message = String(error?.message || 'Request could not be rejected.');
+            return res.status(/already been processed/i.test(message) ? 409 : 400).json({ error: message });
+        }
     }
 
     if (!user) {

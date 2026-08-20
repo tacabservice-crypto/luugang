@@ -93,6 +93,55 @@ export async function listMySqlManualRequests(): Promise<any[]> {
   return rows.map(row => parseJson<any>(row.request_json));
 }
 
+export async function resolveMySqlManualRequest(args: { requestId: string; admin: any; approved: boolean }) {
+  await ensureManualRequestSchema();
+  const connection = await getMySqlPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [requestRows] = await connection.execute<any[]>(
+      'SELECT request_json, status, user_id FROM manual_transaction_requests WHERE id = ? FOR UPDATE',
+      [args.requestId],
+    );
+    if (!requestRows.length) throw new Error('Request not found.');
+    if (requestRows[0].status !== 'pending') throw new Error('This request has already been processed.');
+    const request = parseJson<any>(requestRows[0].request_json);
+    const databaseUserId = String(requestRows[0].user_id || request.userId);
+    let user: any;
+    if (args.approved) {
+      const [userRows] = await connection.execute<any[]>(
+        'SELECT profile_json, balance FROM app_users WHERE id = ? FOR UPDATE',
+        [databaseUserId],
+      );
+      if (!userRows.length) throw new Error('User associated with transaction not found.');
+      user = parseJson<any>(userRows[0].profile_json);
+      const balance = Number(userRows[0].balance || 0);
+      const amount = Number(request.amount || 0);
+      if (request.transactionType === 'withdraw' && balance < amount) throw new Error('Insufficient balance to approve this withdrawal request.');
+      user.balance = request.transactionType === 'deposit' ? balance + amount : balance - amount;
+      await connection.execute(
+        'UPDATE app_users SET balance = ?, profile_json = ?, updated_at = ?, version = version + 1 WHERE id = ?',
+        [user.balance, JSON.stringify(user), Date.now(), databaseUserId],
+      );
+    }
+    request.status = args.approved ? 'approved' : 'rejected';
+    request.managedBy = 'admin';
+    request.resolvedBy = args.admin.id;
+    request.resolverUsername = args.admin.name || args.admin.username || 'Admin';
+    request.resolvedAt = Date.now();
+    await connection.execute(
+      'UPDATE manual_transaction_requests SET status = ?, resolved_at = ?, request_json = ? WHERE id = ?',
+      [request.status, request.resolvedAt, JSON.stringify(request), args.requestId],
+    );
+    await connection.commit();
+    return { request, user, databaseUserId };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 export async function saveMySqlAgent(agent: any) {
   const now = Date.now();
   await getMySqlPool().execute(
