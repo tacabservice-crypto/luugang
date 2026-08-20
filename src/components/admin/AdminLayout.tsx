@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards, UserCog, BadgeDollarSign } from 'lucide-react';
+import { ShieldCheck, Users, Home, BarChart2, Settings, LogOut, Code, Edit, Trophy, Menu, X, WalletCards, UserCog, BadgeDollarSign, Gauge } from 'lucide-react';
 
 const AdminLayout = ({ user, onLogout, view, setView, hasPermission, children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigationItems = [
+    { name: 'cashier-overview', label: 'My Cashier Dashboard', icon: Gauge, permission: 'cashier' },
     { name: 'stats', label: 'Stats', icon: BarChart2, permission: 'stats' },
     { name: 'users', label: 'Users', icon: Users, permission: 'users' },
     { name: 'rooms', label: 'Rooms', icon: Home, permission: 'rooms' },

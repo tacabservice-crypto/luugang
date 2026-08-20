@@ -6751,6 +6751,56 @@ function cashierPeriod(now = new Date()) {
   return { key, start: Date.UTC(year, month, 1), end: Date.UTC(year, month + 1, 1) };
 }
 
+app.get('/api/admin/cashier-overview', hasPermission('cashier'), async (req, res) => {
+  const cashier = (req as any).adminUser as AdminUser;
+  const now = Date.now();
+  const period = cashierPeriod();
+  if (isMySqlRuntimePrimary()) {
+    const persistedRequests = await listMySqlManualRequests();
+    const merged = new Map(store.pendingManualTransactions.map(request => [request.id, request]));
+    persistedRequests.forEach(request => merged.set(request.id, request));
+    store.pendingManualTransactions = [...merged.values()];
+  }
+  const cityRequests = store.pendingManualTransactions.filter(request =>
+    request.managedBy !== 'agent' && cashierCanServeRequest(cashier, request));
+  const periodRequests = cityRequests.filter(request => request.createdAt >= period.start && request.createdAt < period.end);
+  const resolved = periodRequests.filter(request => request.resolvedBy === cashier.id);
+  const approved = resolved.filter(request => request.status === 'approved');
+  const rejected = resolved.filter(request => request.status === 'rejected');
+  const pending = cityRequests.filter(request => request.status === 'pending').length;
+  const monthlyTarget = Math.max(0, Number(cashier.cashierMonthlyTarget || 0));
+  const remainingTarget = Math.max(0, monthlyTarget - approved.length);
+  const targetReached = monthlyTarget > 0 && remainingTarget === 0;
+  const monthlySalary = Math.max(0, Number(cashier.cashierMonthlySalary || 0));
+  const targetBonus = Math.max(0, Number(cashier.cashierTargetBonus || 0));
+  const earnedBonus = targetReached ? targetBonus : 0;
+  const payment = [...cashierPaymentsCache.values()].find(item => item.cashierId === cashier.id && item.period === period.key);
+  const peopleServed = new Set(resolved.map(request => request.userId)).size;
+  return res.json({
+    period: period.key,
+    name: cashier.name || cashier.username,
+    username: cashier.username,
+    locations: cashierCities(cashier),
+    online: Number(cashier.cashierOnlineAt || 0) >= now - CASHIER_ONLINE_WINDOW_MS,
+    pending,
+    approved: approved.length,
+    rejected: rejected.length,
+    completed: resolved.length,
+    peopleServed,
+    handledAmount: Number(approved.reduce((sum, request) => sum + Number(request.amount || 0), 0).toFixed(2)),
+    monthlyTarget,
+    remainingTarget,
+    targetProgress: monthlyTarget > 0 ? Math.min(100, approved.length / monthlyTarget * 100) : 0,
+    targetReached,
+    monthlySalary,
+    targetBonus,
+    earnedBonus,
+    currentEarnings: Number((monthlySalary + earnedBonus).toFixed(2)),
+    salaryStatus: payment ? 'paid' : (Number(cashier.cashierNextSalaryDate || 0) <= now ? 'due' : 'pending'),
+    paidAt: payment?.paidAt,
+  });
+});
+
 app.get('/api/admin/cashiers', hasPermission('settings'), async (_req, res) => {
   const now = Date.now();
   const period = cashierPeriod();

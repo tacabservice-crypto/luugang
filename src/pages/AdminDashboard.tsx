@@ -17,6 +17,7 @@ import AgentRequestsTable from '../components/admin/AgentRequestsTable';
 import { TournamentsTable } from '../components/admin/TournamentsTable';
 import toast, { Toaster } from 'react-hot-toast';
 import CashierManagement from '../components/admin/CashierManagement';
+import CashierOverview from '../components/admin/CashierOverview';
 import { isFullAdmin } from '../utils/admin';
 import ChangePasswordForm from '../components/ChangePasswordForm';
 import { userErrorMessage } from '../utils/userError';
@@ -25,10 +26,10 @@ const GameRoomComponent = React.lazy(() => import('../components/GameRoom'));
 
 const VIEW_PERMISSIONS: Record<string, string> = {
     stats: 'stats', users: 'users', rooms: 'rooms', transactions: 'transactions',
-    'manual-transactions': 'cashier', cashiers: 'settings', agents: 'agents', 'agent-requests': 'agents',
+    'cashier-overview': 'cashier', 'manual-transactions': 'cashier', cashiers: 'settings', agents: 'agents', 'agent-requests': 'agents',
     tournaments: 'tournaments', settings: 'settings', 'my-settings': 'self',
 };
-const VIEW_ORDER = ['stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'cashiers', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
+const VIEW_ORDER = ['cashier-overview', 'stats', 'users', 'rooms', 'transactions', 'manual-transactions', 'cashiers', 'agents', 'agent-requests', 'tournaments', 'settings', 'my-settings'];
 
 const canAccessView = (user: { username: string; role?: string; permissions?: string[] }, targetView: string) => {
     const permissions = user.permissions || [];
@@ -73,7 +74,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
     const adminId = adminUser?.id;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>(() => {
+    const [view, setView] = useState<'cashier-overview' | 'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>(() => {
         const storedUser = localStorage.getItem('admin_user');
         try {
             return storedUser ? getInitialView(JSON.parse(storedUser)) as typeof view : 'my-settings';
@@ -300,7 +301,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
     useEffect(() => {
         if (adminUser) {
             if (!canAccessView(adminUser, view)) return;
-            if (view !== 'my-settings' && view !== 'cashiers') fetchData(view);
+            if (view !== 'my-settings' && view !== 'cashiers' && view !== 'cashier-overview') fetchData(view);
             if (view === 'settings') {
                 fetchData('payment-settings', false);
                 fetchData('settings', false);
@@ -774,6 +775,7 @@ const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = fal
         }, {});
 
         switch (view) {
+            case 'cashier-overview': return <CashierOverview adminId={adminUser.id} openQueue={() => setView('manual-transactions')} />;
             case 'stats': return <StatsGrid stats={stats} rooms={rooms} manualTransactions={manualTransactions} setView={setView} />;
             case 'users': return <UsersTable users={users} onEdit={setEditingUser} onDelete={handleDeleteUser} onImpersonate={handleImpersonate} />;
             case 'rooms': return <RoomsTable rooms={rooms} onCancel={handleCancelGame} onSpectate={handleSpectate} />;
