@@ -1115,6 +1115,10 @@ export default function App() {
     return <AdminDashboard />;
   }
 
+  if (window.location.pathname === '/cashier') {
+    return <AdminDashboard cashierMode />;
+  }
+
   if (window.location.pathname === '/vip') {
     return <BecomeVip />;
   }

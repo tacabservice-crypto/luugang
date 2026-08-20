@@ -43,7 +43,7 @@ const canAccessView = (user: { username: string; role?: string; permissions?: st
 const getInitialView = (user: { username: string; role?: string; permissions?: string[] }) =>
     VIEW_ORDER.find(candidate => canAccessView(user, candidate)) || 'my-settings';
 
-const AdminDashboard: React.FC = () => {
+const AdminDashboard: React.FC<{ cashierMode?: boolean }> = ({ cashierMode = false }) => {
     // Define AdminUser interface to match backend
     interface AdminUser {
         id: string;
@@ -64,7 +64,11 @@ const AdminDashboard: React.FC = () => {
     const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
         const storedUser = localStorage.getItem('admin_user');
         try {
-            return storedUser ? JSON.parse(storedUser) : null;
+            const parsed = storedUser ? JSON.parse(storedUser) as AdminUser : null;
+            if (cashierMode && parsed && !parsed.permissions?.includes('cashier') && !parsed.permissions?.includes('all')) {
+                return null;
+            }
+            return parsed;
         } catch {
             return null;
         }
@@ -72,7 +76,8 @@ const AdminDashboard: React.FC = () => {
     const adminId = adminUser?.id;
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>('stats');
+    const [view, setView] = useState<'stats' | 'users' | 'rooms' | 'transactions' | 'manual-transactions' | 'cashiers' | 'agents' | 'tournaments' | 'settings' | 'agent-requests' | 'my-settings'>(() =>
+        cashierMode ? 'manual-transactions' : 'stats');
     const [error, setError] = useState<string | null>(null);
     
     // Data states
@@ -250,8 +255,12 @@ const AdminDashboard: React.FC = () => {
             }
             const data = await response.json();
             if (data.success && data.user) {
+                const loginPermissions: string[] = Array.isArray(data.user.permissions) ? data.user.permissions : [];
+                if (cashierMode && !loginPermissions.includes('cashier') && !loginPermissions.includes('all')) {
+                    throw new Error('Koontadan ma laha cashier permission. Fadlan isticmaal cashier role sax ah.');
+                }
                 localStorage.setItem('admin_user', JSON.stringify(data.user));
-                setView(getInitialView(data.user) as typeof view);
+                setView(cashierMode ? 'manual-transactions' : getInitialView(data.user) as typeof view);
                 setAdminUser(data.user);
             } else {
                 throw new Error(data.error || 'Login failed');
@@ -696,8 +705,8 @@ const AdminDashboard: React.FC = () => {
         return (
             <div className="bg-gray-900 text-white min-h-screen flex items-center justify-center">
                 <div className="bg-gray-800 p-8 rounded-lg shadow-lg text-center w-full max-w-sm">
-                    <h1 className="text-2xl font-bold mb-4">Admin Login</h1>
-                    <p className="text-gray-400 mb-6">Restricted Access</p>
+                    <h1 className="text-2xl font-bold mb-4">{cashierMode ? 'Cashier Login' : 'Admin Login'}</h1>
+                    <p className="text-gray-400 mb-6">{cashierMode ? 'LudoSom Cashier Portal' : 'Restricted Access'}</p>
                     <input
                         type="text"
                         value={username}
