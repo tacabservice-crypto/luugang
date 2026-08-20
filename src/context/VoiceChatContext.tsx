@@ -60,7 +60,7 @@ const getIceServers = (): RTCIceServer[] => {
 export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }) => {
   const localStreamRef = useRef<MediaStream | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [speakingPlayers, setSpeakingPlayers] = useState<Record<string, boolean>>({});
   const [peerIds, setPeerIds] = useState<string[]>([]);
@@ -69,6 +69,22 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
   const remoteAudioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const localUserIdRef = useRef<string | null>(null);
   const roomIdRef = useRef<string | null>(null);
+  const initializedRef = useRef(false);
+  const latestPlayersRef = useRef<LudoPlayer[]>([]);
+  const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+
+  const attachRemoteAudio = useStableCallback((peerId: string, stream: MediaStream) => {
+    let audio = remoteAudioRefs.current[peerId];
+    if (!audio) {
+      audio = new Audio();
+      audio.autoplay = true;
+      audio.setAttribute('playsinline', 'true');
+      remoteAudioRefs.current[peerId] = audio;
+    }
+    audio.srcObject = stream;
+    audio.muted = !isSpeakerOn;
+    void audio.play().catch(e => console.warn(`${LOG_PREFIX} Browser deferred remote audio for ${peerId}:`, e));
+  });
 
   const sendSignalingMessage = useStableCallback(async (targetId: string, signal: any) => {
     if (!roomIdRef.current || !localUserIdRef.current) {
@@ -114,12 +130,16 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     Object.keys(peerConnectionsRef.current).forEach(closeSinglePeerConnection);
     localUserIdRef.current = null;
     roomIdRef.current = null;
+    initializedRef.current = false;
+    latestPlayersRef.current = [];
+    pendingCandidatesRef.current = {};
     setIsInitialized(false);
     setPeerIds([]);
   }, [closeSinglePeerConnection]);
 
   const updatePlayers = useStableCallback((players: LudoPlayer[]) => {
-    if (!isInitialized || !localUserIdRef.current) {
+    latestPlayersRef.current = players;
+    if (!initializedRef.current || !localUserIdRef.current) {
       return;
     }
 
@@ -156,12 +176,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
         pc.onicecandidate = (event) => event.candidate && sendSignalingMessage(p.userId, { type: 'candidate', candidate: event.candidate });
         pc.ontrack = (event) => {
           console.log(`${LOG_PREFIX} Received remote track from ${p.userId}`);
-          const audio = remoteAudioRefs.current[p.userId];
-          if (audio) {
-            audio.srcObject = event.streams[0];
-            audio.muted = !isSpeakerOn;
-            audio.play().catch(e => console.error(`${LOG_PREFIX} Failed to play remote audio for ${p.userId}:`, e));
-          }
+          attachRemoteAudio(p.userId, event.streams[0]);
         };
         
         // Resolve glare: only one peer (the one with the "smaller" userId) creates the offer.
@@ -196,15 +211,20 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
 
     if (isSpectator) {
       console.log(`${LOG_PREFIX} Initializing voice chat for SPECTATOR ${userId} in room ${roomId}.`);
+      initializedRef.current = true;
       setIsInitialized(true);
+      updatePlayers(latestPlayersRef.current);
     } else {
       console.log(`${LOG_PREFIX} Initializing voice chat for PLAYER ${userId} in room ${roomId}.`);
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
         console.log(`${LOG_PREFIX} Successfully acquired microphone stream.`);
-        stream.getAudioTracks().forEach(track => track.enabled = !isMuted);
+        stream.getAudioTracks().forEach(track => track.enabled = true);
         localStreamRef.current = stream;
+        initializedRef.current = true;
+        setIsMuted(false);
         setIsInitialized(true);
+        updatePlayers(latestPlayersRef.current);
       } catch (err) {
         console.error(`${LOG_PREFIX} Could not get microphone access:`, err);
         setIsInitialized(false);
@@ -215,7 +235,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
   useEffect(() => {
     const handleVoiceSignal = async (e: any) => {
         const { roomId: signalRoomId, senderId, signal } = e.detail;
-        if (!isInitialized || signalRoomId !== roomIdRef.current) return;
+        if (!initializedRef.current || signalRoomId !== roomIdRef.current) return;
 
         let pc = peerConnectionsRef.current[senderId];
         const isSpectator = !localStreamRef.current;
@@ -239,12 +259,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
             pc.onicecandidate = event => event.candidate && sendSignalingMessage(senderId, { type: 'candidate', candidate: event.candidate });
             pc.ontrack = event => {
                 console.log(`${LOG_PREFIX} Received remote track from ${senderId}`);
-                const audio = remoteAudioRefs.current[senderId];
-                if (audio) {
-                    audio.srcObject = event.streams[0];
-                    audio.muted = !isSpeakerOn;
-                    audio.play().catch(e => console.error(`${LOG_PREFIX} Failed to play remote audio for ${senderId}:`, e));
-                }
+                attachRemoteAudio(senderId, event.streams[0]);
             };
             peerConnectionsRef.current[senderId] = pc;
             setPeerIds(Object.keys(peerConnectionsRef.current));
@@ -255,13 +270,18 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
         try {
             if (signal.type === 'offer') {
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                for (const candidate of pendingCandidatesRef.current[senderId] || []) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                delete pendingCandidatesRef.current[senderId];
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 sendSignalingMessage(senderId, { type: 'answer', sdp: pc.localDescription.toJSON() });
             } else if (signal.type === 'answer') {
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                for (const candidate of pendingCandidatesRef.current[senderId] || []) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                delete pendingCandidatesRef.current[senderId];
             } else if (signal.type === 'candidate') {
-                await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                if (pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                else (pendingCandidatesRef.current[senderId] ||= []).push(signal.candidate);
             }
         } catch (err) {
             console.error(`${LOG_PREFIX} Error handling signal from ${senderId}:`, err);
@@ -272,7 +292,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     return () => {
         window.removeEventListener('voice_signal_received', handleVoiceSignal);
     };
-  }, [isInitialized, isSpeakerOn, sendSignalingMessage]);
+  }, [attachRemoteAudio, sendSignalingMessage]);
 
   const toggleMute = useCallback(() => {
     if (localStreamRef.current) {
@@ -314,4 +334,3 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     </VoiceChatContext.Provider>
   );
 };
-

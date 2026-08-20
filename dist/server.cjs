@@ -4674,6 +4674,7 @@ app.post("/api/rooms/voice-signaling", (req, res) => {
     senderId,
     signal
   });
+  publishRealtimeEvent("user", targetId, "voice_signal", { roomId, senderId, signal });
   res.json({ success: true });
 });
 app.post("/api/rooms/challenge/invite", async (req, res) => {
