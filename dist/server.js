@@ -1736,7 +1736,11 @@ function normalizedCity(location) {
     kismaayo: "kismayo",
     kismayo: "kismayo",
     baydhabo: "baidoa",
-    baidoa: "baidoa"
+    baidoa: "baidoa",
+    garowe: "garowe",
+    garoowe: "garowe",
+    gaarowe: "garowe",
+    nugaal: "garowe"
   };
   return aliases[city] || city;
 }

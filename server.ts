@@ -1177,6 +1177,7 @@ function normalizedCity(location: unknown): string {
     boosaaso: 'bosaso', bosaso: 'bosaso',
     kismaayo: 'kismayo', kismayo: 'kismayo',
     baydhabo: 'baidoa', baidoa: 'baidoa',
+    garowe: 'garowe', garoowe: 'garowe', gaarowe: 'garowe', nugaal: 'garowe',
   };
   return aliases[city] || city;
 }
