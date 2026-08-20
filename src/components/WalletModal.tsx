@@ -9,7 +9,6 @@ import { UserProfile, WalletTransaction, Agent, PlayerAgentRequest } from '../ty
 import { useLanguage } from '../context/LanguageContext';
 import { formatCurrency } from '../utils/number';
 import { userErrorMessage } from '../utils/userError';
-import LocationPicker from './LocationPicker';
 
 interface WalletModalProps {
   user: UserProfile;
@@ -19,6 +18,28 @@ interface WalletModalProps {
 
 const DEPOSIT_PHONE_NUMBER = '907243775'; // Fallback admin number
 const cityOnly = (location?: string) => location?.split(',')[0]?.trim() || 'N/A';
+
+const detectPlayerLocation = (): Promise<string> => new Promise((resolve, reject) => {
+  if (!navigator.geolocation) return reject(new Error('Location is not supported on this device.'));
+  navigator.geolocation.getCurrentPosition(async position => {
+    try {
+      const response = await fetch('/api/locations/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.location) throw new Error(data.error || 'Location could not be identified.');
+      resolve(data.location);
+    } catch (error) {
+      reject(error);
+    }
+  }, () => reject(new Error('Location permission is required.')), {
+    enableHighAccuracy: false,
+    timeout: 12_000,
+    maximumAge: 10 * 60 * 1000,
+  });
+});
 
 export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletModalProps) {
   const { t, language } = useLanguage();
@@ -72,6 +93,15 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
         console.error('Failed to refresh wallet profile', err);
       } finally {
         setProfileLoading(false);
+      }
+      if (!currentLinkedAgentId) {
+        try {
+          const detectedLocation = await detectPlayerLocation();
+          setPlayerLocation(detectedLocation);
+        } catch {
+          // A stored profile location remains usable; otherwise submission will
+          // explain that device location permission is required.
+        }
       }
       try {
         const settingsRes = await fetch('/api/payment/settings');
@@ -177,10 +207,15 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     }
 
     if (!linkedAgentId && !playerLocation.trim()) {
-      setError(language === 'so'
-        ? 'Fadlan dooro magaalada aad joogto si codsiga loogu diro cashier-ka magaaladaas.'
-        : 'Please select your city so the request reaches the cashier serving that location.');
-      return;
+      try {
+        const detectedLocation = await detectPlayerLocation();
+        setPlayerLocation(detectedLocation);
+      } catch {
+        setError(language === 'so'
+          ? 'Fadlan Location/GPS-ka u oggolow app-ka si cashier-ka kuugu dhow si otomaatig ah loo helo.'
+          : 'Please allow Location/GPS access so the nearest cashier can be detected automatically.');
+        return;
+      }
     }
 
     if (activeTab === 'deposit') {
@@ -417,18 +452,6 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
                   </div>
                 )}
 
-                {!profileLoading && (activeTab === 'deposit' || activeTab === 'withdraw') && !linkedAgentId && (
-                  <div className="space-y-3 rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
-                    <div><p className="text-xs font-bold text-blue-300 uppercase tracking-wider">{language === 'so' ? 'Cashier-ka deegaankaaga' : 'Your local cashier'}</p>
-                    <p className="mt-1 text-[11px] text-slate-300">
-                      {language === 'so'
-                        ? 'Dooro magaalada aad joogto. Codsiga waxaa helaya cashier-ka loo xilsaaray isla magaaladaas.'
-                        : 'Select your city. The request will be assigned to a cashier serving the same city.'}
-                    </p></div>
-                    <LocationPicker value={playerLocation} onChange={setPlayerLocation} clearOnInput={false} className="w-full rounded-xl border border-blue-400/40 bg-slate-950 px-4 py-2.5 text-sm text-white" />
-                  </div>
-                )}
-                
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Payment Provider</label>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">

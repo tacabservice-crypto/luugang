@@ -1108,6 +1108,24 @@ app.get("/api/locations/search", async (req, res) => {
     res.status(502).json({ error: "Location search is temporarily unavailable." });
   }
 });
+app.post("/api/locations/detect", async (req, res) => {
+  const latitude = Number(req.body.latitude);
+  const longitude = Number(req.body.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return res.status(400).json({ error: "Invalid location coordinates." });
+  }
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${latitude}&lon=${longitude}`, { headers: { "User-Agent": "LudoSom-Player-Location/1.0" } });
+    if (!response.ok) throw new Error(`Geocoder returned ${response.status}`);
+    const result = await response.json();
+    const location = formatGeocodedLocation(result.address);
+    if (!location) return res.status(422).json({ error: "Could not identify a city for this location." });
+    return res.json({ success: true, location, city: normalizedCity(location) });
+  } catch (error) {
+    console.error("Player location detection failed:", error);
+    return res.status(502).json({ error: "Location service is temporarily unavailable." });
+  }
+});
 app.use(import_express.default.static(import_path.default.join(process.cwd(), "public")));
 app.use(import_express.default.static(getDistDirectory()));
 var db = null;
