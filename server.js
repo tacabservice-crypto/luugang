@@ -602,13 +602,24 @@ async function listMySqlUsersByAgent(agentId, promoCode) {
     lossCount: Number(row.loss_count || 0)
   }));
 }
-async function saveMySqlManualRequest(request) {
+async function saveMySqlManualRequest(request, user) {
   await ensureManualRequestSchema();
+  let databaseUserId = request.userId;
+  if (user?.firebaseUid) {
+    const [ownerRows] = await getMySqlPool().execute(
+      `SELECT id FROM app_users
+       WHERE id = ? OR firebase_uid = ?
+       ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [request.userId, user.firebaseUid, request.userId]
+    );
+    if (ownerRows.length) databaseUserId = ownerRows[0].id;
+  }
   await getMySqlPool().execute(
     `INSERT INTO manual_transaction_requests (id, user_id, agent_id, managed_by, transaction_type, amount, status, assigned_cashier_id, created_at, resolved_at, request_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE agent_id=VALUES(agent_id), managed_by=VALUES(managed_by), transaction_type=VALUES(transaction_type), amount=VALUES(amount), status=VALUES(status), assigned_cashier_id=VALUES(assigned_cashier_id), resolved_at=VALUES(resolved_at), request_json=VALUES(request_json)`,
-    [request.id, request.userId, request.agentId || null, request.managedBy || (request.agentId ? "agent" : "admin"), request.transactionType, Number(request.amount || 0), request.status || "pending", request.assignedCashierId || null, Number(request.createdAt || Date.now()), request.resolvedAt || null, JSON.stringify(request)]
+    [request.id, databaseUserId, request.agentId || null, request.managedBy || (request.agentId ? "agent" : "admin"), request.transactionType, Number(request.amount || 0), request.status || "pending", request.assignedCashierId || null, Number(request.createdAt || Date.now()), request.resolvedAt || null, JSON.stringify(request)]
   );
 }
 async function saveMySqlAgent(agent) {
@@ -1656,7 +1667,7 @@ async function saveManualRequestToFirestore(request) {
     const requestUser = store.users[request.userId];
     if (!requestUser) throw new Error(`Cannot persist manual request for missing user ${request.userId}`);
     await saveMySqlUserProfile(requestUser);
-    return saveMySqlManualRequest(request);
+    return saveMySqlManualRequest(request, requestUser);
   }
   if (db) {
     try {
@@ -1670,7 +1681,7 @@ async function saveManualRequestToFirestore(request) {
   if (isMySqlConfigured()) {
     const requestUser = store.users[request.userId];
     if (requestUser) await saveMySqlUserProfile(requestUser);
-    return saveMySqlManualRequest(request);
+    return saveMySqlManualRequest(request, requestUser);
   }
   throw new Error("Database not initialized");
 }

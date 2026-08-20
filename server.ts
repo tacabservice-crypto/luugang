@@ -1104,7 +1104,7 @@ async function saveManualRequestToFirestore(request: ManualTransactionRequest) {
     const requestUser = store.users[request.userId];
     if (!requestUser) throw new Error(`Cannot persist manual request for missing user ${request.userId}`);
     await saveMySqlUserProfile(requestUser);
-    return saveMySqlManualRequest(request);
+    return saveMySqlManualRequest(request, requestUser);
   }
   if (db) {
     try {
@@ -1118,7 +1118,7 @@ async function saveManualRequestToFirestore(request: ManualTransactionRequest) {
   if (isMySqlConfigured()) {
     const requestUser = store.users[request.userId];
     if (requestUser) await saveMySqlUserProfile(requestUser);
-    return saveMySqlManualRequest(request);
+    return saveMySqlManualRequest(request, requestUser);
   }
   throw new Error('Database not initialized');
 }
