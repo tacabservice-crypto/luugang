@@ -112,8 +112,17 @@ export default function App() {
     if (typeof window === 'undefined') return 'http://localhost:3002';
     return '';
   })();
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [authLoading, setAuthLoading] = useState(true); // Add a loading state for auth
+  const pullRefreshCachedProfile = (() => {
+    if (sessionStorage.getItem('ludosom_pull_refresh_boot') !== '1') return null;
+    try {
+      const cached = JSON.parse(localStorage.getItem('ludosom_cached_profile') || 'null') as UserProfile | null;
+      return cached?.id ? cached : null;
+    } catch {
+      return null;
+    }
+  })();
+  const [user, setUser] = useState<UserProfile | null>(pullRefreshCachedProfile);
+  const [authLoading, setAuthLoading] = useState(!pullRefreshCachedProfile);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
   const [activeRoom, setActiveRoom] = useState<GameRoom | null>(null);
@@ -121,6 +130,9 @@ export default function App() {
   const rejoinableRoomRef = useRef<GameRoom | null>(rejoinableRoom);
   const routedRoomIdRef = useRef<string | null>(roomId || null);
   const suppressNextRoomRestoreRef = useRef(false);
+  useEffect(() => {
+    sessionStorage.removeItem('ludosom_pull_refresh_boot');
+  }, []);
   useEffect(() => {
     rejoinableRoomRef.current = rejoinableRoom;
   }, [rejoinableRoom]);

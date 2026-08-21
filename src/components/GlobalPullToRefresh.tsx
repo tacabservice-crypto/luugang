@@ -22,6 +22,9 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
       try {
         const response = await fetch(`/api/version?pull=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) throw new Error('Update check failed');
+        const versionData = await response.json() as { version?: string };
+        const incomingVersion = String(versionData.version || '').trim();
+        if (incomingVersion) localStorage.setItem('ludosom_deploy_version', incomingVersion);
         if ('caches' in window) {
           const names = await caches.keys();
           await Promise.all(names.map(name => caches.delete(name)));
@@ -31,6 +34,7 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
           await Promise.all(registrations.map(registration => registration.unregister().catch(() => false)));
         }
         await new Promise(resolve => window.setTimeout(resolve, 350));
+        sessionStorage.setItem('ludosom_pull_refresh_boot', '1');
         const nextUrl = new URL(window.location.href);
         nextUrl.searchParams.set('app_refresh', Date.now().toString());
         window.location.replace(nextUrl.toString());
@@ -77,10 +81,10 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
   const visible = distance > 0 || refreshing;
   const rotation = Math.min(300, (distance / REFRESH_THRESHOLD) * 300);
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#020012]">
+    <>
       {visible && (
-        <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] flex h-14 items-center justify-center">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-lg shadow-black/30">
+        <div className="pointer-events-none fixed inset-x-0 top-[62px] z-[200] flex h-10 items-start justify-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md shadow-black/20">
             <div
               className={`h-5 w-5 rounded-full border-[3px] border-blue-500 border-t-transparent ${refreshing ? 'animate-spin' : ''}`}
               style={{ transform: refreshing ? undefined : `rotate(${rotation}deg)` }}
@@ -88,12 +92,7 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
           </div>
         </div>
       )}
-      <div
-        style={{ transform: `translateY(${distance}px)` }}
-        className={refreshing || distance === 0 ? 'transition-transform duration-200 ease-out' : ''}
-      >
-        {children}
-      </div>
-    </div>
+      {children}
+    </>
   );
 }

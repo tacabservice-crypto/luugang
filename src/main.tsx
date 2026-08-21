@@ -52,7 +52,7 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
-      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#020012] text-sm font-bold text-white">Loading LudoSom…</div>}>
+      <Suspense fallback={<div className="fixed inset-x-0 top-[62px] z-[200] flex justify-center"><div className="h-7 w-7 animate-spin rounded-full border-[3px] border-blue-500 border-t-transparent" /></div>}>
         <GlobalPullToRefresh>
           <RouterProvider router={router} />
         </GlobalPullToRefresh>
