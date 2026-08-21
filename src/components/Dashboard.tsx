@@ -250,7 +250,12 @@ export default function Dashboard({
         await fetch('/api/users/presence', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id }),
+          body: JSON.stringify({
+            userId: user.id,
+            username: user.username,
+            avatar: user.avatar,
+            isOfflinePreference: Boolean(user.isOfflinePreference),
+          }),
           keepalive: true,
         });
       } catch { /* The next heartbeat retries automatically. */ }

@@ -489,8 +489,14 @@ function ensureMySqlRealtimeSchema() {
       await getMySqlPool().query(`CREATE TABLE IF NOT EXISTS user_presence (
         user_id VARCHAR(191) PRIMARY KEY,
         last_seen_at BIGINT UNSIGNED NOT NULL,
+        profile_json JSON NULL,
         INDEX idx_user_presence_seen (last_seen_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      try {
+        await getMySqlPool().query("ALTER TABLE user_presence ADD COLUMN profile_json JSON NULL");
+      } catch (error) {
+        if (error?.code !== "ER_DUP_FIELDNAME") throw error;
+      }
     })().catch((error) => {
       schemaReady = null;
       throw error;
@@ -498,22 +504,30 @@ function ensureMySqlRealtimeSchema() {
   }
   return schemaReady;
 }
-async function touchMySqlUserPresence(userIds) {
-  const ids = [...new Set(userIds.map(String).filter(Boolean))];
-  if (!ids.length) return;
+async function touchMySqlUserPresence(users) {
+  const entries = users.map((value) => {
+    const profile = typeof value === "string" ? null : value;
+    const id = String(profile?.id || value || "");
+    return [id, { id, profile }];
+  });
+  const records = [...new Map(entries.filter(([id]) => Boolean(id))).values()];
+  if (!records.length) return;
   await ensureMySqlRealtimeSchema();
   const now2 = Date.now();
   await getMySqlPool().query(
-    `INSERT INTO user_presence (user_id, last_seen_at) VALUES ?
-     ON DUPLICATE KEY UPDATE last_seen_at=VALUES(last_seen_at)`,
-    [ids.map((id) => [id, now2])]
+    `INSERT INTO user_presence (user_id, last_seen_at, profile_json) VALUES ?
+     ON DUPLICATE KEY UPDATE last_seen_at=VALUES(last_seen_at), profile_json=COALESCE(VALUES(profile_json), profile_json)`,
+    [records.map(({ id, profile }) => [id, now2, profile ? JSON.stringify(profile) : null])]
   );
 }
-async function listMySqlOnlineUserIds(windowMs = 45e3) {
+async function listMySqlOnlineUsers(windowMs = 45e3) {
   await ensureMySqlRealtimeSchema();
   const cutoff = Date.now() - windowMs;
-  const [rows] = await getMySqlPool().execute("SELECT user_id FROM user_presence WHERE last_seen_at >= ?", [cutoff]);
-  return rows.map((row) => String(row.user_id));
+  const [rows] = await getMySqlPool().execute("SELECT user_id, profile_json FROM user_presence WHERE last_seen_at >= ?", [cutoff]);
+  return rows.map((row) => ({
+    id: String(row.user_id),
+    profile: typeof row.profile_json === "string" ? JSON.parse(row.profile_json) : row.profile_json || void 0
+  }));
 }
 async function upsertMySqlMatchmaking(record) {
   await ensureMySqlRealtimeSchema();
@@ -3545,12 +3559,21 @@ app.get("/api/users/leaderboard", async (req, res) => {
 });
 app.post("/api/users/presence", async (req, res) => {
   const userId = String(req.body?.userId || "").trim();
-  if (!userId || !store.users[userId]) return res.status(400).json({ error: "Valid userId is required." });
+  if (!userId) return res.status(400).json({ error: "Valid userId is required." });
+  const knownUser = store.users[userId];
+  const profile = {
+    id: userId,
+    username: knownUser?.username || String(req.body?.username || "Player").slice(0, 20),
+    avatar: knownUser?.avatar || req.body?.avatar || "\u{1F3AE}",
+    winCount: knownUser?.winCount || 0,
+    lossCount: knownUser?.lossCount || 0,
+    isOfflinePreference: knownUser?.isOfflinePreference ?? Boolean(req.body?.isOfflinePreference)
+  };
   try {
     if (isMySqlConfigured()) {
-      await touchMySqlUserPresence([userId]);
+      await touchMySqlUserPresence([profile]);
     } else if (db) {
-      await db.collection("userPresence").doc(userId).set({ userId, lastSeenAt: Date.now() }, { merge: true });
+      await db.collection("userPresence").doc(userId).set({ userId, lastSeenAt: Date.now(), profile }, { merge: true });
     }
     res.json({ success: true, lastSeenAt: Date.now() });
   } catch (error) {
@@ -3566,28 +3589,32 @@ app.get("/api/users/online", async (req, res) => {
   cleanupMatchmakingQueues();
   const now2 = Date.now();
   const onlineList = [];
-  let sharedOnlineIds = [];
+  let sharedOnlineUsers = [];
   if (isMySqlConfigured()) {
-    sharedOnlineIds = await listMySqlOnlineUserIds().catch((error) => {
+    sharedOnlineUsers = await listMySqlOnlineUsers().catch((error) => {
       console.error("Shared presence lookup failed:", error);
       return [];
     });
   } else if (db) {
     try {
       const snapshot = await db.collection("userPresence").where("lastSeenAt", ">=", Date.now() - 45e3).get();
-      sharedOnlineIds = snapshot.docs.map((doc) => String(doc.data().userId || doc.id));
+      sharedOnlineUsers = snapshot.docs.map((doc) => ({ id: String(doc.data().userId || doc.id), profile: doc.data().profile }));
     } catch (error) {
       console.error("Firestore presence lookup failed:", error);
     }
   }
-  const connectedUserIds = /* @__PURE__ */ new Set([...activeClients.map((client) => client.userId), ...sharedOnlineIds]);
+  const connectedUserIds = /* @__PURE__ */ new Set([...activeClients.map((client) => client.userId), ...sharedOnlineUsers.map((user) => user.id)]);
+  const candidateUsers = new Map(Object.values(store.users).map((user) => [user.id, user]));
+  sharedOnlineUsers.forEach(({ id, profile }) => {
+    if (!candidateUsers.has(id) && profile) candidateUsers.set(id, profile);
+  });
   const busyUserIds = /* @__PURE__ */ new Set();
   Object.values(store.rooms).forEach((room) => {
     if (room.status !== "waiting" && room.status !== "playing") return;
     room.players.forEach((player) => busyUserIds.add(player.userId));
     if (room.invitedUserId) busyUserIds.add(String(room.invitedUserId));
   });
-  Object.values(store.users).forEach((u) => {
+  candidateUsers.forEach((u) => {
     if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
     let status = "offline";
     let seekingDetails = null;

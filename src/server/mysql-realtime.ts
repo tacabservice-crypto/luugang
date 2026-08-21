@@ -20,8 +20,14 @@ export function ensureMySqlRealtimeSchema(): Promise<void> {
       await getMySqlPool().query(`CREATE TABLE IF NOT EXISTS user_presence (
         user_id VARCHAR(191) PRIMARY KEY,
         last_seen_at BIGINT UNSIGNED NOT NULL,
+        profile_json JSON NULL,
         INDEX idx_user_presence_seen (last_seen_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      try {
+        await getMySqlPool().query('ALTER TABLE user_presence ADD COLUMN profile_json JSON NULL');
+      } catch (error: any) {
+        if (error?.code !== 'ER_DUP_FIELDNAME') throw error;
+      }
     })().catch(error => {
       schemaReady = null;
       throw error;
@@ -30,23 +36,35 @@ export function ensureMySqlRealtimeSchema(): Promise<void> {
   return schemaReady;
 }
 
-export async function touchMySqlUserPresence(userIds: string[]): Promise<void> {
-  const ids = [...new Set(userIds.map(String).filter(Boolean))];
-  if (!ids.length) return;
+export async function touchMySqlUserPresence(users: Array<string | Record<string, any>>): Promise<void> {
+  const entries: Array<[string, { id: string; profile: Record<string, any> | null }]> = users.map(value => {
+    const profile = typeof value === 'string' ? null : value;
+    const id = String(profile?.id || value || '');
+    return [id, { id, profile }];
+  });
+  const records = [...new Map(entries.filter(([id]) => Boolean(id))).values()];
+  if (!records.length) return;
   await ensureMySqlRealtimeSchema();
   const now = Date.now();
   await getMySqlPool().query(
-    `INSERT INTO user_presence (user_id, last_seen_at) VALUES ?
-     ON DUPLICATE KEY UPDATE last_seen_at=VALUES(last_seen_at)`,
-    [ids.map(id => [id, now])],
+    `INSERT INTO user_presence (user_id, last_seen_at, profile_json) VALUES ?
+     ON DUPLICATE KEY UPDATE last_seen_at=VALUES(last_seen_at), profile_json=COALESCE(VALUES(profile_json), profile_json)`,
+    [records.map(({ id, profile }) => [id, now, profile ? JSON.stringify(profile) : null])],
   );
 }
 
-export async function listMySqlOnlineUserIds(windowMs = 45_000): Promise<string[]> {
+export async function listMySqlOnlineUsers(windowMs = 45_000): Promise<Array<{ id: string; profile?: Record<string, any> }>> {
   await ensureMySqlRealtimeSchema();
   const cutoff = Date.now() - windowMs;
-  const [rows] = await getMySqlPool().execute<any[]>('SELECT user_id FROM user_presence WHERE last_seen_at >= ?', [cutoff]);
-  return rows.map(row => String(row.user_id));
+  const [rows] = await getMySqlPool().execute<any[]>('SELECT user_id, profile_json FROM user_presence WHERE last_seen_at >= ?', [cutoff]);
+  return rows.map(row => ({
+    id: String(row.user_id),
+    profile: typeof row.profile_json === 'string' ? JSON.parse(row.profile_json) : (row.profile_json || undefined),
+  }));
+}
+
+export async function listMySqlOnlineUserIds(windowMs = 45_000): Promise<string[]> {
+  return (await listMySqlOnlineUsers(windowMs)).map(user => user.id);
 }
 
 export async function upsertMySqlMatchmaking(record: Record<string, any>): Promise<void> {

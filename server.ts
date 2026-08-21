@@ -44,7 +44,7 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
-import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, listMySqlOnlineUserIds, touchMySqlUserPresence, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
+import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, listMySqlOnlineUsers, touchMySqlUserPresence, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
 import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlManualRequests, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, resolveMySqlManualRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
@@ -3458,12 +3458,21 @@ app.get('/api/users/leaderboard', async (req, res) => {
 // Get active online & registered players (real users)
 app.post('/api/users/presence', async (req, res) => {
   const userId = String(req.body?.userId || '').trim();
-  if (!userId || !store.users[userId]) return res.status(400).json({ error: 'Valid userId is required.' });
+  if (!userId) return res.status(400).json({ error: 'Valid userId is required.' });
+  const knownUser = store.users[userId];
+  const profile = {
+    id: userId,
+    username: knownUser?.username || String(req.body?.username || 'Player').slice(0, 20),
+    avatar: knownUser?.avatar || req.body?.avatar || '🎮',
+    winCount: knownUser?.winCount || 0,
+    lossCount: knownUser?.lossCount || 0,
+    isOfflinePreference: knownUser?.isOfflinePreference ?? Boolean(req.body?.isOfflinePreference),
+  };
   try {
     if (isMySqlConfigured()) {
-      await touchMySqlUserPresence([userId]);
+      await touchMySqlUserPresence([profile]);
     } else if (db) {
-      await db.collection('userPresence').doc(userId).set({ userId, lastSeenAt: Date.now() }, { merge: true });
+      await db.collection('userPresence').doc(userId).set({ userId, lastSeenAt: Date.now(), profile }, { merge: true });
     }
     res.json({ success: true, lastSeenAt: Date.now() });
   } catch (error) {
@@ -3488,18 +3497,22 @@ app.get('/api/users/online', async (req, res) => {
   const onlineList: any[] = [];
 
   // Return Search Live users plus connected players who are available on Home.
-  let sharedOnlineIds: string[] = [];
+  let sharedOnlineUsers: Array<{ id: string; profile?: any }> = [];
   if (isMySqlConfigured()) {
-    sharedOnlineIds = await listMySqlOnlineUserIds().catch(error => { console.error('Shared presence lookup failed:', error); return []; });
+    sharedOnlineUsers = await listMySqlOnlineUsers().catch(error => { console.error('Shared presence lookup failed:', error); return []; });
   } else if (db) {
     try {
       const snapshot = await db.collection('userPresence').where('lastSeenAt', '>=', Date.now() - 45_000).get();
-      sharedOnlineIds = snapshot.docs.map(doc => String(doc.data().userId || doc.id));
+      sharedOnlineUsers = snapshot.docs.map(doc => ({ id: String(doc.data().userId || doc.id), profile: doc.data().profile }));
     } catch (error) {
       console.error('Firestore presence lookup failed:', error);
     }
   }
-  const connectedUserIds = new Set([...activeClients.map(client => client.userId), ...sharedOnlineIds]);
+  const connectedUserIds = new Set([...activeClients.map(client => client.userId), ...sharedOnlineUsers.map(user => user.id)]);
+  const candidateUsers = new Map(Object.values(store.users).map(user => [user.id, user]));
+  sharedOnlineUsers.forEach(({ id, profile }) => {
+    if (!candidateUsers.has(id) && profile) candidateUsers.set(id, profile);
+  });
   const busyUserIds = new Set<string>();
   Object.values(store.rooms).forEach(room => {
     if (room.status !== 'waiting' && room.status !== 'playing') return;
@@ -3507,7 +3520,7 @@ app.get('/api/users/online', async (req, res) => {
     if ((room as any).invitedUserId) busyUserIds.add(String((room as any).invitedUserId));
   });
 
-  Object.values(store.users).forEach(u => {
+  candidateUsers.forEach(u => {
     if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
 
     let status = 'offline';
