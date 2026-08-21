@@ -52,7 +52,7 @@ const MatchmakingRadar: React.FC<MatchmakingRadarProps> = ({
   useEffect(() => {
     let intervalId: NodeJS.Timeout | undefined;
 
-    const otherOnlinePlayers = onlinePlayers.filter(p => p.id !== currentUser.id);
+    const otherOnlinePlayers = onlinePlayers.filter(p => p.status === 'seeking' && p.id !== currentUser.id);
 
     if (otherOnlinePlayers.length <= 4) {
       setDisplayedPlayers(otherOnlinePlayers);
@@ -91,7 +91,7 @@ const MatchmakingRadar: React.FC<MatchmakingRadarProps> = ({
     };
   }, [onlinePlayers, currentUser.id]);
 
-  const playersToList = [...onlinePlayers];
+  const playersToList = onlinePlayers.filter(player => player.status === 'seeking');
   const otherOnlinePlayers = playersToList.filter(p => p.id !== currentUser.id);
 
   if (otherOnlinePlayers.length === 0) {

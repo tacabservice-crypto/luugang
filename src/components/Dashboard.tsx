@@ -984,7 +984,7 @@ export default function Dashboard({
         )}
 
         <MatchmakingRadar 
-          onlinePlayers={onlinePlayers}
+          onlinePlayers={onlinePlayers.filter(player => player.status === 'seeking')}
           currentUser={user}
           matchmakingState={matchmakingState}
           fetchOnlinePlayers={fetchOnlinePlayers}
