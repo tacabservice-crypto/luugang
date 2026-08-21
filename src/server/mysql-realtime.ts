@@ -17,12 +17,36 @@ export function ensureMySqlRealtimeSchema(): Promise<void> {
         INDEX idx_matchmaking_active (status, expires_at),
         INDEX idx_matchmaking_queue (bet_amount, capacity, game_mode, expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      await getMySqlPool().query(`CREATE TABLE IF NOT EXISTS user_presence (
+        user_id VARCHAR(191) PRIMARY KEY,
+        last_seen_at BIGINT UNSIGNED NOT NULL,
+        INDEX idx_user_presence_seen (last_seen_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
     })().catch(error => {
       schemaReady = null;
       throw error;
     });
   }
   return schemaReady;
+}
+
+export async function touchMySqlUserPresence(userIds: string[]): Promise<void> {
+  const ids = [...new Set(userIds.map(String).filter(Boolean))];
+  if (!ids.length) return;
+  await ensureMySqlRealtimeSchema();
+  const now = Date.now();
+  await getMySqlPool().query(
+    `INSERT INTO user_presence (user_id, last_seen_at) VALUES ?
+     ON DUPLICATE KEY UPDATE last_seen_at=VALUES(last_seen_at)`,
+    [ids.map(id => [id, now])],
+  );
+}
+
+export async function listMySqlOnlineUserIds(windowMs = 45_000): Promise<string[]> {
+  await ensureMySqlRealtimeSchema();
+  const cutoff = Date.now() - windowMs;
+  const [rows] = await getMySqlPool().execute<any[]>('SELECT user_id FROM user_presence WHERE last_seen_at >= ?', [cutoff]);
+  return rows.map(row => String(row.user_id));
 }
 
 export async function upsertMySqlMatchmaking(record: Record<string, any>): Promise<void> {

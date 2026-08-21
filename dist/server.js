@@ -486,12 +486,34 @@ function ensureMySqlRealtimeSchema() {
         INDEX idx_matchmaking_active (status, expires_at),
         INDEX idx_matchmaking_queue (bet_amount, capacity, game_mode, expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      await getMySqlPool().query(`CREATE TABLE IF NOT EXISTS user_presence (
+        user_id VARCHAR(191) PRIMARY KEY,
+        last_seen_at BIGINT UNSIGNED NOT NULL,
+        INDEX idx_user_presence_seen (last_seen_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
     })().catch((error) => {
       schemaReady = null;
       throw error;
     });
   }
   return schemaReady;
+}
+async function touchMySqlUserPresence(userIds) {
+  const ids = [...new Set(userIds.map(String).filter(Boolean))];
+  if (!ids.length) return;
+  await ensureMySqlRealtimeSchema();
+  const now2 = Date.now();
+  await getMySqlPool().query(
+    `INSERT INTO user_presence (user_id, last_seen_at) VALUES ?
+     ON DUPLICATE KEY UPDATE last_seen_at=VALUES(last_seen_at)`,
+    [ids.map((id) => [id, now2])]
+  );
+}
+async function listMySqlOnlineUserIds(windowMs = 45e3) {
+  await ensureMySqlRealtimeSchema();
+  const cutoff = Date.now() - windowMs;
+  const [rows] = await getMySqlPool().execute("SELECT user_id FROM user_presence WHERE last_seen_at >= ?", [cutoff]);
+  return rows.map((row) => String(row.user_id));
 }
 async function upsertMySqlMatchmaking(record) {
   await ensureMySqlRealtimeSchema();
@@ -2992,6 +3014,11 @@ setInterval(() => {
   });
 }, 1e4);
 setInterval(() => {
+  if (!isMySqlConfigured()) return;
+  const userIds = [...new Set(activeClients.map((client) => client.userId).filter(Boolean))];
+  if (userIds.length) void touchMySqlUserPresence(userIds).catch((error) => console.error("Presence heartbeat failed:", error));
+}, 25e3).unref?.();
+setInterval(() => {
   cleanupMatchmakingQueues();
   Object.keys(store.matchmakingQueues).forEach((queueKey) => {
     const queueUserIds = store.matchmakingQueues[queueKey];
@@ -3301,6 +3328,7 @@ app.get("/api/updates", (req, res) => {
 `);
   const client = { userId, res };
   activeClients.push(client);
+  if (isMySqlConfigured()) void touchMySqlUserPresence([userId]).catch((error) => console.error("Presence connect update failed:", error));
   const activeRoom = Object.values(store.rooms).find(
     (r) => r.status === "playing" && r.players.some((p) => p.userId === userId && p.status === "offline")
   );
@@ -3523,7 +3551,11 @@ app.get("/api/users/online", async (req, res) => {
   cleanupMatchmakingQueues();
   const now2 = Date.now();
   const onlineList = [];
-  const connectedUserIds = new Set(activeClients.map((client) => client.userId));
+  const sharedOnlineIds = isMySqlConfigured() ? await listMySqlOnlineUserIds().catch((error) => {
+    console.error("Shared presence lookup failed:", error);
+    return [];
+  }) : [];
+  const connectedUserIds = /* @__PURE__ */ new Set([...activeClients.map((client) => client.userId), ...sharedOnlineIds]);
   const busyUserIds = /* @__PURE__ */ new Set();
   Object.values(store.rooms).forEach((room) => {
     if (room.status !== "waiting" && room.status !== "playing") return;

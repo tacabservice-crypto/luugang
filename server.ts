@@ -44,7 +44,7 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
-import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
+import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, listMySqlOnlineUserIds, touchMySqlUserPresence, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
 import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlManualRequests, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, resolveMySqlManualRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
 // Removed the import and declaration below to fix "Cannot redeclare block-scoped variable 'db'"
@@ -2791,6 +2791,14 @@ setInterval(() => {
   });
 }, 10000);
 
+// Share presence across all production processes without polling full user
+// profiles. Stale rows expire naturally in listMySqlOnlineUserIds.
+setInterval(() => {
+  if (!isMySqlConfigured()) return;
+  const userIds = [...new Set(activeClients.map(client => client.userId).filter(Boolean))];
+  if (userIds.length) void touchMySqlUserPresence(userIds).catch(error => console.error('Presence heartbeat failed:', error));
+}, 25_000).unref?.();
+
 // Match full real-player queues only. Automatic bot filling is disabled.
 setInterval(() => {
   cleanupMatchmakingQueues();
@@ -3179,6 +3187,7 @@ app.get('/api/updates', (req, res) => {
 
   const client: SSEClient = { userId, res };
   activeClients.push(client);
+  if (isMySqlConfigured()) void touchMySqlUserPresence([userId]).catch(error => console.error('Presence connect update failed:', error));
 
   // Handle Reconnection: Check if this user is rejoining an active game
   const activeRoom = Object.values(store.rooms).find(r =>
@@ -3463,7 +3472,10 @@ app.get('/api/users/online', async (req, res) => {
   const onlineList: any[] = [];
 
   // Return Search Live users plus connected players who are available on Home.
-  const connectedUserIds = new Set(activeClients.map(client => client.userId));
+  const sharedOnlineIds = isMySqlConfigured()
+    ? await listMySqlOnlineUserIds().catch(error => { console.error('Shared presence lookup failed:', error); return [] as string[]; })
+    : [];
+  const connectedUserIds = new Set([...activeClients.map(client => client.userId), ...sharedOnlineIds]);
   const busyUserIds = new Set<string>();
   Object.values(store.rooms).forEach(room => {
     if (room.status !== 'waiting' && room.status !== 'playing') return;
