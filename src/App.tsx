@@ -957,6 +957,29 @@ export default function App() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        // A realtime event can arrive just after the user taps the dice. The
+        // old room snapshot may still show this player as active while the
+        // authoritative server has already advanced the turn. Reconcile the
+        // room immediately instead of showing a misleading hard error or
+        // leaving the board stuck on the old turn.
+        if (/not your turn to roll/i.test(String(data?.error || ''))) {
+          try {
+            const latestResponse = await fetchWithTimeout(
+              `${API_BASE_URL}/api/rooms/${activeRoom.id}?userId=${encodeURIComponent(user.id)}`,
+              { cache: 'no-store' },
+              6000,
+            );
+            if (latestResponse.ok) {
+              const latestRoom = await latestResponse.json() as GameRoom;
+              if (latestRoom?.id === activeRoom.id) {
+                setActiveRoom(previous => previous && shouldAcceptRoomUpdate(previous, latestRoom)
+                  ? { ...latestRoom, rejectionReason: previous.rejectionReason || latestRoom.rejectionReason }
+                  : previous);
+                return;
+              }
+            }
+          } catch { /* The normal connection error below is shown if refresh fails. */ }
+        }
         throw new Error(data?.error || 'The dice could not be rolled.');
       }
 
