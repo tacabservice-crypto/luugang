@@ -2994,12 +2994,25 @@ setInterval(() => {
     const bet = parseFloat(parts[0]) || 0;
     const cap = parseInt(parts[1]) || 2;
     const mode = parts[2] === "team" ? "team" : "solo";
+    if (connectedQueueUserIds.length >= cap) {
+      const matchedIds = connectedQueueUserIds.slice(0, cap);
+      const matchedUsers = matchedIds.map((id) => store.users[id]).filter(Boolean);
+      if (matchedUsers.length === cap && matchedUsers.every((player) => player.balance >= bet)) {
+        store.matchmakingQueues[queueKey] = queueUserIds.filter((id) => !matchedIds.includes(id));
+        matchedIds.forEach((id) => {
+          if (store.users[id]) delete store.users[id].seekingJoinedAt;
+        });
+        void deleteSharedMatchmakingRecords(...matchedIds).catch((error) => console.error("Failed to delete shared matchmaking records for full queue:", error));
+        startMatchedRoom(matchedUsers, bet, cap, mode);
+        return;
+      }
+    }
     const firstUserId = connectedQueueUserIds[0];
     const firstUser = store.users[firstUserId];
     if (!firstUser) return;
     const joinedAt = firstUser.seekingJoinedAt || Date.now();
     const waitTimeMs = Date.now() - joinedAt;
-    if (waitTimeMs >= 18e4) {
+    if (false) {
       console.log(`Matchmaking timeout for queue ${queueKey}. Auto-filling remaining seats with bots...`);
       const realPlayers = connectedQueueUserIds.map((id) => store.users[id]).filter(Boolean);
       store.matchmakingQueues[queueKey] = [];
@@ -4583,8 +4596,9 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
     if (user.balance < bet) {
       return res.status(400).json({ error: "Insufficient balance to match stake." });
     }
-    const cap = parseInt(capacity) || 2;
     const mode = gameMode === "team" ? "team" : "solo";
+    const requestedCapacity = parseInt(capacity) || 2;
+    const cap = mode === "team" ? 4 : requestedCapacity === 4 ? 4 : 2;
     const queueKey = `${bet}_${cap}_${mode}`;
     if (!store.matchmakingQueues[queueKey]) {
       store.matchmakingQueues[queueKey] = [];
@@ -4695,18 +4709,96 @@ app.post("/api/rooms/create-bot-room", (req, res) => {
   const room = startMatchedRoom(matchedList, bet, cap, mode);
   res.json({ success: true, roomId: room.id });
 });
-app.post("/api/rooms/matchmaking/leave", (req, res) => {
+function sortMatchmakingIdsByJoinTime(ids) {
+  return [...new Set(ids)].sort((leftId, rightId) => {
+    const leftTime = Number(store.users[leftId]?.seekingJoinedAt || Number.MAX_SAFE_INTEGER);
+    const rightTime = Number(store.users[rightId]?.seekingJoinedAt || Number.MAX_SAFE_INTEGER);
+    return leftTime - rightTime || ids.indexOf(leftId) - ids.indexOf(rightId);
+  });
+}
+app.post("/api/rooms/matchmaking/start-partial", async (req, res) => {
+  const { userId } = req.body;
+  if (!userId || !store.users[userId]) return res.status(404).json({ error: "User not found." });
+  if (isMySqlRuntimePrimary()) await refreshMySqlMatchmakingQueues();
+  cleanupMatchmakingQueues();
+  const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+  if (!queueEntry) return res.status(409).json({ error: "Your Search Live queue is no longer active." });
+  const [queueKey, rawQueuedIds] = queueEntry;
+  const queuedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds);
+  const [rawBet, rawCapacity, rawMode] = queueKey.split("_");
+  const requestedCapacity = parseInt(rawCapacity) || 2;
+  if (requestedCapacity !== 4) return res.status(400).json({ error: "Early Start is only available for a 4-player search." });
+  if (queuedIds[0] !== userId) return res.status(403).json({ error: "Only the player who started this search can start the game early." });
+  const participantIds = queuedIds.filter((id) => Boolean(store.users[id])).slice(0, 4);
+  if (participantIds.length < 2) return res.status(409).json({ error: "At least two players are required to start." });
+  const bet = parseFloat(rawBet) || 0;
+  const participants = participantIds.map((id) => store.users[id]);
+  if (participants.some((player) => player.balance < bet)) {
+    return res.status(409).json({ error: "A player no longer has enough balance for this stake." });
+  }
+  store.matchmakingQueues[queueKey] = queuedIds.filter((id) => !participantIds.includes(id));
+  participantIds.forEach((id) => delete store.users[id].seekingJoinedAt);
+  await deleteSharedMatchmakingRecords(...participantIds).catch((error) => {
+    console.error("Failed to delete shared matchmaking records for early start:", error);
+  });
+  const finalMode = rawMode === "team" && participants.length === 4 ? "team" : "solo";
+  const room = startMatchedRoom(participants, bet, participants.length, finalMode);
+  saveStore();
+  res.json({ success: true, roomId: room.id, room, convertedToSolo: rawMode === "team" && finalMode === "solo" });
+});
+app.post("/api/rooms/matchmaking/remove-player", async (req, res) => {
+  const { userId, targetUserId } = req.body;
+  if (!userId || !targetUserId || userId === targetUserId) {
+    return res.status(400).json({ error: "A valid player must be selected." });
+  }
+  if (isMySqlRuntimePrimary()) await refreshMySqlMatchmakingQueues();
+  cleanupMatchmakingQueues();
+  const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+  if (!queueEntry) return res.status(409).json({ error: "Your Search Live queue is no longer active." });
+  const [queueKey, rawQueuedIds] = queueEntry;
+  const queuedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds);
+  if (queuedIds[0] !== userId) return res.status(403).json({ error: "Only the original seeker can remove players." });
+  if (!queuedIds.includes(targetUserId)) return res.status(404).json({ error: "That player is not in your queue." });
+  store.matchmakingQueues[queueKey] = rawQueuedIds.filter((id) => id !== targetUserId);
+  if (store.users[targetUserId]) delete store.users[targetUserId].seekingJoinedAt;
+  await deleteSharedMatchmakingRecords(targetUserId).catch((error) => {
+    console.error("Failed to delete removed matchmaking player record:", error);
+  });
+  saveStore();
+  sendEventToUser(targetUserId, "matchmaker_removed", {
+    message: "The seeker removed you from this Search Live match."
+  });
+  broadcastToAll("matchmaker_seeking_cancelled", { senderId: targetUserId });
+  broadcastToAll("online_players_updated", {});
+  res.json({ success: true });
+});
+app.post("/api/rooms/matchmaking/leave", async (req, res) => {
   const { userId } = req.body;
   if (userId) {
-    if (store.users[userId]) {
-      delete store.users[userId].seekingJoinedAt;
+    const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+    let leavingIds = [userId];
+    if (queueEntry) {
+      const [queueKey, rawQueuedIds] = queueEntry;
+      const orderedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds);
+      const requestedCapacity = parseInt(queueKey.split("_")[1]) || 2;
+      const currentGroupIds = orderedIds.slice(0, requestedCapacity);
+      if (currentGroupIds[0] === userId) leavingIds = currentGroupIds;
+      store.matchmakingQueues[queueKey] = rawQueuedIds.filter((id) => !leavingIds.includes(id));
+    } else {
+      for (const qKey of Object.keys(store.matchmakingQueues)) {
+        store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== userId);
+      }
     }
-    for (const qKey of Object.keys(store.matchmakingQueues)) {
-      store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== userId);
-    }
+    leavingIds.forEach((id) => {
+      if (store.users[id]) delete store.users[id].seekingJoinedAt;
+      broadcastToAll("matchmaker_seeking_cancelled", { senderId: id });
+      if (id !== userId) {
+        sendEventToUser(id, "matchmaker_removed", { message: "The seeker cancelled this Search Live match." });
+      }
+    });
     saveStore();
-    broadcastToAll("matchmaker_seeking_cancelled", { senderId: userId });
-    void deleteSharedMatchmakingRecords(userId).catch((error) => console.error("Failed to delete shared matchmaking record on leave:", error));
+    await deleteSharedMatchmakingRecords(...leavingIds).catch((error) => console.error("Failed to delete shared matchmaking records on leave:", error));
+    broadcastToAll("online_players_updated", {});
   }
   res.json({ success: true });
 });

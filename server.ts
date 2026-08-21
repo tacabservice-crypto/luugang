@@ -4939,6 +4939,9 @@ app.post('/api/rooms/matchmaking/start-partial', async (req, res) => {
   const { userId } = req.body;
   if (!userId || !store.users[userId]) return res.status(404).json({ error: 'User not found.' });
 
+  // A request can land on a different production process from the one that
+  // accepted the player. Refresh the shared queue before authorizing its owner.
+  if (isMySqlRuntimePrimary()) await refreshMySqlMatchmakingQueues();
   cleanupMatchmakingQueues();
   const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
   if (!queueEntry) return res.status(409).json({ error: 'Your Search Live queue is no longer active.' });
@@ -4967,6 +4970,7 @@ app.post('/api/rooms/matchmaking/start-partial', async (req, res) => {
 
   const finalMode: 'solo' | 'team' = rawMode === 'team' && participants.length === 4 ? 'team' : 'solo';
   const room = startMatchedRoom(participants, bet, participants.length, finalMode);
+  saveStore();
   res.json({ success: true, roomId: room.id, room, convertedToSolo: rawMode === 'team' && finalMode === 'solo' });
 });
 
@@ -4977,6 +4981,9 @@ app.post('/api/rooms/matchmaking/remove-player', async (req, res) => {
     return res.status(400).json({ error: 'A valid player must be selected.' });
   }
 
+  // Keep removal correct when the seeker and this API request are handled by
+  // separate production processes.
+  if (isMySqlRuntimePrimary()) await refreshMySqlMatchmakingQueues();
   cleanupMatchmakingQueues();
   const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
   if (!queueEntry) return res.status(409).json({ error: 'Your Search Live queue is no longer active.' });
