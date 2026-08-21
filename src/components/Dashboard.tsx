@@ -23,8 +23,7 @@ import {
   ChevronDown,
   MoreVertical,
   HelpCircle,
-  Download,
-  RefreshCw
+  Download
 } from 'lucide-react';
 import { UserProfile, GameRoom } from '../types/game';
 import { useLanguage } from '../context/LanguageContext';
@@ -39,7 +38,6 @@ import UserEditModal from './UserEditModal';
 import AvatarDisplay from './AvatarDisplay';
 import LiveAdBanner from './LiveAdBanner';
 import { useNavigate } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
 
 interface DashboardProps {
   user: UserProfile;
@@ -82,11 +80,6 @@ export default function Dashboard({
   const [isSettingsDropdownOpen, setIsSettingsDropdownOpen] = useState<boolean>(false);
   const [showAboutUs, setShowAboutUs] = useState<boolean>(false);
   const [showHelp, setShowHelp] = useState<boolean>(false);
-  const [pullDistance, setPullDistance] = useState(0);
-  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
-  const pullStartYRef = useRef<number | null>(null);
-  const pullDistanceRef = useRef(0);
-  const pullRefreshingRef = useRef(false);
 
   const downloadLatestApk = () => {
     const link = document.createElement('a');
@@ -98,69 +91,6 @@ export default function Dashboard({
     link.remove();
     setIsSettingsDropdownOpen(false);
   };
-
-  const refreshNativeHome = async () => {
-    if (pullRefreshingRef.current) return;
-    pullRefreshingRef.current = true;
-    setIsPullRefreshing(true);
-    setPullDistance(86);
-    try {
-      await fetch(`/api/version?pull=${Date.now()}`, { cache: 'no-store' }).catch(() => undefined);
-      if ('caches' in window) {
-        const names = await caches.keys();
-        await Promise.all(names.map(name => caches.delete(name)));
-      }
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map(registration => registration.unregister().catch(() => false)));
-      }
-      const nextUrl = new URL(window.location.href);
-      nextUrl.searchParams.set('app_refresh', Date.now().toString());
-      window.location.replace(nextUrl.toString());
-    } catch {
-      pullRefreshingRef.current = false;
-      setIsPullRefreshing(false);
-      setPullDistance(0);
-    }
-  };
-
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    const onTouchStart = (event: TouchEvent) => {
-      if (window.scrollY <= 0 && event.touches.length === 1) {
-        pullStartYRef.current = event.touches[0].clientY;
-      }
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      if (pullStartYRef.current === null || pullRefreshingRef.current) return;
-      const distance = Math.max(0, event.touches[0].clientY - pullStartYRef.current);
-      if (distance > 0 && window.scrollY <= 0) {
-        event.preventDefault();
-        const nextDistance = Math.min(110, distance * 0.55);
-        pullDistanceRef.current = nextDistance;
-        setPullDistance(nextDistance);
-      }
-    };
-    const onTouchEnd = () => {
-      if (pullStartYRef.current === null) return;
-      pullStartYRef.current = null;
-      if (pullDistanceRef.current >= 70) void refreshNativeHome();
-      else {
-        pullDistanceRef.current = 0;
-        setPullDistance(0);
-      }
-    };
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    window.addEventListener('touchend', onTouchEnd);
-    window.addEventListener('touchcancel', onTouchEnd);
-    return () => {
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
-      window.removeEventListener('touchcancel', onTouchEnd);
-    };
-  }, []);
 
   const STAKE_TIERS = [
     {
@@ -748,17 +678,6 @@ export default function Dashboard({
 
   return (
     <><LiveAdBanner placement="dashboard" />
-    {(pullDistance > 0 || isPullRefreshing) && (
-      <div
-        className="pointer-events-none fixed left-1/2 top-2 z-[120] -translate-x-1/2 rounded-full border border-purple-400/40 bg-slate-950/95 px-4 py-2 text-xs font-black text-white shadow-2xl backdrop-blur-md transition-transform"
-        style={{ transform: `translate(-50%, ${Math.min(54, pullDistance * 0.5)}px)` }}
-      >
-        <span className="flex items-center gap-2">
-          <RefreshCw className={`h-4 w-4 text-purple-300 ${isPullRefreshing ? 'animate-spin' : pullDistance >= 70 ? 'animate-pulse' : ''}`} />
-          {isPullRefreshing ? 'Update-ka waa la hubinayaa...' : pullDistance >= 70 ? 'Sii daa si loo refresh-gareeyo' : 'Hoos u jiid si loo refresh-gareeyo'}
-        </span>
-      </div>
-    )}
     <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col pb-12 selection:bg-purple-500 selection:text-white relative overflow-hidden">
       {/* Concentric ripples background like the image */}
       <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">

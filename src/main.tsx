@@ -6,6 +6,7 @@ import App from './App.tsx';
 import './index.css';
 import { LanguageProvider } from './context/LanguageContext.tsx';
 import ErrorPage from "./pages/ErrorPage";
+import GlobalPullToRefresh from './components/GlobalPullToRefresh';
 
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = lazy(() => import('./pages/BecomeVip'));
@@ -52,7 +53,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
       <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#020012] text-sm font-bold text-white">Loading LudoSom…</div>}>
-        <RouterProvider router={router} />
+        <GlobalPullToRefresh>
+          <RouterProvider router={router} />
+        </GlobalPullToRefresh>
       </Suspense>
     </LanguageProvider>
   </StrictMode>,
