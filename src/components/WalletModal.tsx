@@ -34,7 +34,7 @@ const detectPlayerLocation = (): Promise<string> => new Promise((resolve, reject
     } catch (error) {
       reject(error);
     }
-  }, () => reject(new Error('Location permission is required.')), {
+  }, locationError => reject(new Error(locationError.code === 1 ? 'GPS_PERMISSION_REQUIRED' : 'Location could not be detected.')), {
     enableHighAccuracy: false,
     timeout: 12_000,
     maximumAge: 10 * 60 * 1000,
@@ -48,6 +48,8 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [selectedTx, setSelectedTx] = useState<WalletTransaction | null>(null);
   const [error, setError] = useState('');
+  const [gpsPermissionNeeded, setGpsPermissionNeeded] = useState(false);
+  const [gpsPermissionLoading, setGpsPermissionLoading] = useState(false);
   
   const [phone, setPhone] = useState('');
   const [senderPhone, setSenderPhone] = useState('');
@@ -81,26 +83,32 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   useEffect(() => {
     const fetchPrerequisites = async () => {
       let currentLinkedAgentId = user.linkedAgentId || '';
+      let currentPlayerLocation = user.location || '';
       try {
         const profileRes = await fetch(`/api/users/${user.id}`);
         if (profileRes.ok) {
           const currentProfile: UserProfile = await profileRes.json();
           currentLinkedAgentId = currentProfile.linkedAgentId || '';
+          currentPlayerLocation = currentProfile.location || '';
           setLinkedAgentId(currentLinkedAgentId);
-          setPlayerLocation(currentProfile.location || '');
+          setPlayerLocation(currentPlayerLocation);
         }
       } catch (err) {
         console.error('Failed to refresh wallet profile', err);
       } finally {
         setProfileLoading(false);
       }
-      if (!currentLinkedAgentId) {
+      if (!currentLinkedAgentId && !currentPlayerLocation) {
         try {
           const detectedLocation = await detectPlayerLocation();
           setPlayerLocation(detectedLocation);
-        } catch {
+        } catch (locationError) {
           // A stored profile location remains usable; otherwise submission will
           // explain that device location permission is required.
+          if (locationError instanceof Error && locationError.message === 'GPS_PERMISSION_REQUIRED') {
+            setGpsPermissionNeeded(true);
+            setError(language === 'so' ? 'GPS-ka oggolow.' : 'GPS access is required.');
+          }
         }
       }
       try {
@@ -210,10 +218,9 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
       try {
         const detectedLocation = await detectPlayerLocation();
         setPlayerLocation(detectedLocation);
-      } catch {
-        setError(language === 'so'
-          ? 'Fadlan Location/GPS-ka u oggolow app-ka si cashier-ka kuugu dhow si otomaatig ah loo helo.'
-          : 'Please allow Location/GPS access so the nearest cashier can be detected automatically.');
+      } catch (locationError) {
+        setGpsPermissionNeeded(true);
+        setError(language === 'so' ? 'GPS-ka oggolow.' : 'GPS access is required.');
         return;
       }
     }
@@ -292,7 +299,24 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     setApiMessage('');
     setConfirmationRequested(false);
     setDepositAwaitingConfirmation(false);
+    setGpsPermissionNeeded(false);
   }
+
+  const handleAllowGps = async () => {
+    if (gpsPermissionLoading) return;
+    try {
+      setGpsPermissionLoading(true);
+      const detectedLocation = await detectPlayerLocation();
+      setPlayerLocation(detectedLocation);
+      setGpsPermissionNeeded(false);
+      setError('');
+    } catch {
+      setGpsPermissionNeeded(true);
+      setError(language === 'so' ? 'GPS-ka oggolow.' : 'GPS access is required.');
+    } finally {
+      setGpsPermissionLoading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -336,7 +360,17 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
           {error && (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
+              <span className="min-w-0 flex-1">{error}</span>
+              {gpsPermissionNeeded && (
+                <button
+                  type="button"
+                  onClick={handleAllowGps}
+                  disabled={gpsPermissionLoading}
+                  className="shrink-0 rounded-lg border border-blue-400/40 bg-blue-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white disabled:opacity-50"
+                >
+                  {gpsPermissionLoading ? 'Opening…' : 'Allow GPS'}
+                </button>
+              )}
             </div>
           )}
 
