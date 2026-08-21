@@ -4924,6 +4924,43 @@ app.post('/api/rooms/create-bot-room', (req, res) => {
   res.json({ success: true, roomId: room.id });
 });
 
+// Let the original 4-player Search Live seeker start early with 2 or 3 real
+// players. An incomplete 2v2 queue becomes Solo because teams cannot be
+// balanced until all four seats are occupied.
+app.post('/api/rooms/matchmaking/start-partial', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId || !store.users[userId]) return res.status(404).json({ error: 'User not found.' });
+
+  cleanupMatchmakingQueues();
+  const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+  if (!queueEntry) return res.status(409).json({ error: 'Your Search Live queue is no longer active.' });
+
+  const [queueKey, queuedIds] = queueEntry;
+  const [rawBet, rawCapacity, rawMode] = queueKey.split('_');
+  const requestedCapacity = parseInt(rawCapacity) || 2;
+  if (requestedCapacity !== 4) return res.status(400).json({ error: 'Early Start is only available for a 4-player search.' });
+  if (queuedIds[0] !== userId) return res.status(403).json({ error: 'Only the player who started this search can start the game early.' });
+
+  const participantIds = queuedIds.filter(id => Boolean(store.users[id])).slice(0, 4);
+  if (participantIds.length < 2) return res.status(409).json({ error: 'At least two players are required to start.' });
+
+  const bet = parseFloat(rawBet) || 0;
+  const participants = participantIds.map(id => store.users[id]);
+  if (participants.some(player => player.balance < bet)) {
+    return res.status(409).json({ error: 'A player no longer has enough balance for this stake.' });
+  }
+
+  store.matchmakingQueues[queueKey] = queuedIds.filter(id => !participantIds.includes(id));
+  participantIds.forEach(id => delete (store.users[id] as any).seekingJoinedAt);
+  await deleteSharedMatchmakingRecords(...participantIds).catch(error => {
+    console.error('Failed to delete shared matchmaking records for early start:', error);
+  });
+
+  const finalMode: 'solo' | 'team' = rawMode === 'team' && participants.length === 4 ? 'team' : 'solo';
+  const room = startMatchedRoom(participants, bet, participants.length, finalMode);
+  res.json({ success: true, roomId: room.id, room, convertedToSolo: rawMode === 'team' && finalMode === 'solo' });
+});
+
 // Leave Matchmaking Queue
 app.post('/api/rooms/matchmaking/leave', (req, res) => {
   const { userId } = req.body;

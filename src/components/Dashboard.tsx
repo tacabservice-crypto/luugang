@@ -314,6 +314,7 @@ export default function Dashboard({
   };
 
   const [matchmakingSeconds, setMatchmakingSeconds] = useState(0);
+  const [isStartingPartialMatch, setIsStartingPartialMatch] = useState(false);
 
   useEffect(() => {
     if (!matchmakingState.isQueued) {
@@ -330,6 +331,25 @@ export default function Dashboard({
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleStartPartialMatch = async () => {
+    if (isStartingPartialMatch) return;
+    try {
+      setIsStartingPartialMatch(true);
+      const response = await fetch('/api/rooms/matchmaking/start-partial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'The game could not be started.');
+      if (data.roomId) onJoinPrivateRoom(data.roomId);
+    } catch (error) {
+      alert(userErrorMessage(error, 'The game could not be started.'));
+    } finally {
+      setIsStartingPartialMatch(false);
+    }
   };
 
   const handleChallengePlayer = async (targetUserId: string, betAmount: number) => {
@@ -493,6 +513,13 @@ export default function Dashboard({
         && (details?.gameMode || 'solo') === selectedMode;
     }).slice(0, Math.max(1, selectedCapacity - 1));
     const joinedCount = Math.min(selectedCapacity, 1 + otherSeekingPlayers.length);
+    const compatibleQueueMembers = allSeekingPlayers.filter(player => {
+      const details = player.seekingDetails;
+      return Number(details?.betAmount ?? 0) === Number(matchmakingState.betAmount || 0)
+        && Number(details?.capacity ?? 2) === selectedCapacity
+        && (details?.gameMode || 'solo') === selectedMode;
+    }).sort((a, b) => Number(a.seekingJoinedAt || 0) - Number(b.seekingJoinedAt || 0));
+    const isOriginalSeeker = compatibleQueueMembers[0]?.id === user.id;
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center py-8 px-4 selection:bg-purple-500 selection:text-white relative overflow-y-auto">
@@ -662,10 +689,19 @@ export default function Dashboard({
           </div>
         )}
 
-        <div className="w-full max-w-xs z-10 mt-2">
+        <div className="grid w-full max-w-xs grid-cols-2 gap-2 z-10 mt-2">
+          {selectedCapacity === 4 && isOriginalSeeker && joinedCount >= 2 && (
+            <button
+              onClick={handleStartPartialMatch}
+              disabled={isStartingPartialMatch}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 border border-emerald-300/50 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider disabled:opacity-50"
+            >
+              {isStartingPartialMatch ? 'Starting…' : `Start Game (${joinedCount}P)`}
+            </button>
+          )}
           <button
             onClick={() => onLeaveMatchmaking(matchmakingState.betAmount, matchmakingState.capacity, matchmakingState.gameMode)}
-            className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+            className={`${selectedCapacity === 4 && isOriginalSeeker && joinedCount >= 2 ? 'w-full' : 'col-span-2 w-full'} bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider`}
           >
             Cancel Radar (Ka Bax Radiyaha)
           </button>
