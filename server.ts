@@ -3511,7 +3511,12 @@ app.get('/api/users/online', async (req, res) => {
   const connectedUserIds = new Set([...activeClients.map(client => client.userId), ...sharedOnlineUsers.map(user => user.id)]);
   const candidateUsers = new Map(Object.values(store.users).map(user => [user.id, user]));
   sharedOnlineUsers.forEach(({ id, profile }) => {
-    if (!candidateUsers.has(id) && profile) candidateUsers.set(id, profile);
+    // Presence is the freshest source for Home. Merge it even when the user
+    // already exists in the local store; otherwise a stale cached profile can
+    // keep an online user hidden (especially after changing offline preference).
+    if (profile) {
+      candidateUsers.set(id, { ...(candidateUsers.get(id) || {}), ...profile, id });
+    }
   });
   const busyUserIds = new Set<string>();
   Object.values(store.rooms).forEach(room => {
