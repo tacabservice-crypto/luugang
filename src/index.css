@@ -6,7 +6,10 @@
 
 html, body, #root {
   min-height: 100%;
-  background: #020012;
+}
+
+html, body {
+  overscroll-behavior-y: none;
 }
 
 body {

@@ -24,7 +24,20 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
         if (!response.ok) throw new Error('Update check failed');
         const versionData = await response.json() as { version?: string };
         const incomingVersion = String(versionData.version || '').trim();
-        if (incomingVersion) localStorage.setItem('ludosom_deploy_version', incomingVersion);
+        const currentVersion = String(localStorage.getItem('ludosom_deploy_version') || '').trim();
+
+        // A normal pull should only refresh the current view. Reloading the
+        // WebView when nothing changed causes a blank-page flash on Android.
+        if (!incomingVersion || incomingVersion === currentVersion) {
+          refreshingRef.current = false;
+          setRefreshing(false);
+          distanceRef.current = 0;
+          setDistance(0);
+          window.dispatchEvent(new Event('ludosom:pull-refresh'));
+          return;
+        }
+
+        localStorage.setItem('ludosom_deploy_version', incomingVersion);
         if ('caches' in window) {
           const names = await caches.keys();
           await Promise.all(names.map(name => caches.delete(name)));
@@ -33,7 +46,11 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
           const registrations = await navigator.serviceWorker.getRegistrations();
           await Promise.all(registrations.map(registration => registration.unregister().catch(() => false)));
         }
-        await new Promise(resolve => window.setTimeout(resolve, 350));
+        // Close the pull surface before applying an actual new deployment so
+        // no exposed strip can cover the sticky header during navigation.
+        distanceRef.current = 0;
+        setDistance(0);
+        await new Promise(resolve => window.setTimeout(resolve, 300));
         sessionStorage.setItem('ludosom_pull_refresh_boot', '1');
         const nextUrl = new URL(window.location.href);
         nextUrl.searchParams.set('app_refresh', Date.now().toString());
