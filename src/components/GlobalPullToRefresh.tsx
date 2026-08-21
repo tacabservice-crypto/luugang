@@ -1,8 +1,8 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 
-const REFRESH_THRESHOLD = 64;
-const MAX_PULL = 96;
+const REFRESH_THRESHOLD = 58;
+const MAX_PULL = 82;
 
 export default function GlobalPullToRefresh({ children }: { children: ReactNode }) {
   const [distance, setDistance] = useState(0);
@@ -17,8 +17,8 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
       if (refreshingRef.current) return;
       refreshingRef.current = true;
       setRefreshing(true);
-      distanceRef.current = 58;
-      setDistance(58);
+      distanceRef.current = 54;
+      setDistance(54);
       try {
         const response = await fetch(`/api/version?pull=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) throw new Error('Update check failed');
@@ -53,7 +53,8 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
       const rawDistance = event.touches[0].clientY - startYRef.current;
       if (rawDistance <= 0 || window.scrollY > 0) return;
       event.preventDefault();
-      const nextDistance = Math.min(MAX_PULL, rawDistance * 0.46);
+      // Progressive resistance keeps the motion light and native-feeling.
+      const nextDistance = Math.min(MAX_PULL, Math.pow(rawDistance, 0.82) * 0.72);
       distanceRef.current = nextDistance;
       setDistance(nextDistance);
     };
@@ -80,19 +81,40 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
 
   const visible = distance > 0 || refreshing;
   const rotation = Math.min(300, (distance / REFRESH_THRESHOLD) * 300);
+  const pageOffset = Math.min(42, distance * 0.58);
+  const pullStyle = {
+    '--ludosom-pull-offset': `${pageOffset}px`,
+    transform: `translateY(${pageOffset}px)`,
+  } as CSSProperties;
   return (
     <>
+      <style>{`
+        .ludosom-pull-surface header.sticky {
+          transform: translateY(calc(var(--ludosom-pull-offset) * -1));
+        }
+      `}</style>
       {visible && (
-        <div className="pointer-events-none fixed inset-x-0 top-[62px] z-[200] flex h-10 items-start justify-center">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-md shadow-black/20">
-            <div
-              className={`h-5 w-5 rounded-full border-[3px] border-blue-500 border-t-transparent ${refreshing ? 'animate-spin' : ''}`}
-              style={{ transform: refreshing ? undefined : `rotate(${rotation}deg)` }}
-            />
-          </div>
+        <div
+          className="pointer-events-none fixed inset-x-0 top-[66px] z-[200] flex h-9 items-start justify-center"
+          style={{ opacity: Math.min(1, distance / 24) }}
+        >
+          <div
+            className={`h-7 w-7 rounded-full drop-shadow-[0_0_7px_rgba(168,85,247,0.75)] ${refreshing ? 'animate-spin' : ''}`}
+            style={{
+              background: 'conic-gradient(from 20deg, #facc15, #a855f7, #3b82f6, transparent 82%)',
+              WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0)',
+              mask: 'radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0)',
+              transform: refreshing ? undefined : `rotate(${rotation}deg)`,
+            }}
+          />
         </div>
       )}
-      {children}
+      <div
+        className={`ludosom-pull-surface ${refreshing || distance === 0 ? 'transition-transform duration-300 ease-out' : ''}`}
+        style={pullStyle}
+      >
+        {children}
+      </div>
     </>
   );
 }
