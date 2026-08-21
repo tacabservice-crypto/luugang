@@ -1222,7 +1222,10 @@ export default function GameRoomView({
             {/* 3D Physical Dice Controller */}
             <div className="flex flex-col items-center justify-center w-full">
               <PhysicalDice
-                value={room.gameState.diceRoll ?? room.gameState.lastDiceRoll}
+                // Do not replay the previous player's number after the turn
+                // has advanced. That stale fallback made a passed/no-move
+                // turn look frozen and caused users to tap the old dice again.
+                value={room.gameState.hasRolled ? (room.gameState.diceRoll ?? room.gameState.lastDiceRoll) : null}
                 isRolling={isRolling}
                 onClick={canPlay ? requestDiceRoll : () => {}}
                 disabled={!canPlay || !isActiveTurn || room.gameState.hasRolled || isRollRequestPending}
