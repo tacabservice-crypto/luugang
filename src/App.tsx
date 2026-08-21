@@ -9,6 +9,7 @@ import { useLanguage } from './context/LanguageContext';
 import { auth } from './firebase-client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { userErrorMessage } from './utils/userError';
+import playGameReminderAudioSrc from './assets/play_the_game.mp3';
 
 // Gameplay actions must never wait forever on a slow mobile connection.
 // The server remains authoritative; this only releases the UI and allows a
@@ -215,6 +216,37 @@ export default function App() {
   const reactionTimeoutRef = useRef<number | null>(null);
   const [activePlayNudge, setActivePlayNudge] = useState<{ nudgedBy: string } | null>(null);
   const playNudgeTimeoutRef = useRef<number | null>(null);
+  const playGameReminderAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio(playGameReminderAudioSrc);
+    audio.preload = 'auto';
+    audio.volume = 1;
+    playGameReminderAudioRef.current = audio;
+
+    // Unlock media playback on the first normal interaction. Android WebView
+    // can otherwise reject audio that arrives later through a realtime event.
+    const unlockAudio = () => {
+      audio.muted = true;
+      void audio.play().then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+      }).catch(() => {
+        audio.muted = false;
+      });
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    window.addEventListener('touchstart', unlockAudio, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+      audio.pause();
+      playGameReminderAudioRef.current = null;
+    };
+  }, []);
   const [incomingInvite, setIncomingInvite] = useState<{
     senderId: string;
     senderName: string;
@@ -557,7 +589,13 @@ export default function App() {
       try {
         const data = JSON.parse(e.data) as { nudgedBy: string };
         setActivePlayNudge(data);
-        playGameReminderVoice();
+        const reminderAudio = playGameReminderAudioRef.current;
+        if (reminderAudio) {
+          reminderAudio.currentTime = 0;
+          void reminderAudio.play().catch(() => playGameReminderVoice());
+        } else {
+          playGameReminderVoice();
+        }
         if (playNudgeTimeoutRef.current) window.clearTimeout(playNudgeTimeoutRef.current);
         playNudgeTimeoutRef.current = window.setTimeout(() => setActivePlayNudge(null), 3500);
       } catch (err) {
