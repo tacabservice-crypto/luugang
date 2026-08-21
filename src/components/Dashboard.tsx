@@ -22,7 +22,8 @@ import {
   LogOut,
   ChevronDown,
   MoreVertical,
-  HelpCircle
+  HelpCircle,
+  Download
 } from 'lucide-react';
 import { UserProfile, GameRoom } from '../types/game';
 import { useLanguage } from '../context/LanguageContext';
@@ -79,6 +80,17 @@ export default function Dashboard({
   const [isSettingsDropdownOpen, setIsSettingsDropdownOpen] = useState<boolean>(false);
   const [showAboutUs, setShowAboutUs] = useState<boolean>(false);
   const [showHelp, setShowHelp] = useState<boolean>(false);
+
+  const downloadLatestApk = () => {
+    const link = document.createElement('a');
+    link.href = `/downloads/LudoSom.apk?update=${Date.now()}`;
+    link.download = 'LudoSom-latest.apk';
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setIsSettingsDropdownOpen(false);
+  };
 
   const STAKE_TIERS = [
     {
@@ -766,6 +778,13 @@ export default function Dashboard({
                   >
                     <HelpCircle className="w-4 h-4" />
                     <span>{t('help')}</span>
+                  </button>
+                  <button
+                    onClick={downloadLatestApk}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 rounded-md"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download APK Update</span>
                   </button>
                   <button
                     onClick={() => {
