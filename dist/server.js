@@ -2994,6 +2994,19 @@ setInterval(() => {
     const bet = parseFloat(parts[0]) || 0;
     const cap = parseInt(parts[1]) || 2;
     const mode = parts[2] === "team" ? "team" : "solo";
+    if (connectedQueueUserIds.length >= cap) {
+      const matchedIds = connectedQueueUserIds.slice(0, cap);
+      const matchedUsers = matchedIds.map((id) => store.users[id]).filter(Boolean);
+      if (matchedUsers.length === cap && matchedUsers.every((player) => player.balance >= bet)) {
+        store.matchmakingQueues[queueKey] = queueUserIds.filter((id) => !matchedIds.includes(id));
+        matchedIds.forEach((id) => {
+          if (store.users[id]) delete store.users[id].seekingJoinedAt;
+        });
+        void deleteSharedMatchmakingRecords(...matchedIds).catch((error) => console.error("Failed to delete shared matchmaking records for full queue:", error));
+        startMatchedRoom(matchedUsers, bet, cap, mode);
+        return;
+      }
+    }
     const firstUserId = connectedQueueUserIds[0];
     const firstUser = store.users[firstUserId];
     if (!firstUser) return;
@@ -4583,8 +4596,9 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
     if (user.balance < bet) {
       return res.status(400).json({ error: "Insufficient balance to match stake." });
     }
-    const cap = parseInt(capacity) || 2;
     const mode = gameMode === "team" ? "team" : "solo";
+    const requestedCapacity = parseInt(capacity) || 2;
+    const cap = mode === "team" ? 4 : requestedCapacity === 4 ? 4 : 2;
     const queueKey = `${bet}_${cap}_${mode}`;
     if (!store.matchmakingQueues[queueKey]) {
       store.matchmakingQueues[queueKey] = [];

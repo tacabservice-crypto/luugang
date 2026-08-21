@@ -483,7 +483,16 @@ export default function Dashboard({
       ];
     }
 
-    const otherSeekingPlayers = allSeekingPlayers.filter(p => p.id !== user.id);
+    const selectedCapacity = matchmakingState.gameMode === 'team' ? 4 : (matchmakingState.capacity || 2);
+    const selectedMode = matchmakingState.gameMode || 'solo';
+    const otherSeekingPlayers = allSeekingPlayers.filter(player => {
+      if (player.id === user.id) return false;
+      const details = player.seekingDetails;
+      return Number(details?.betAmount ?? 0) === Number(matchmakingState.betAmount || 0)
+        && Number(details?.capacity ?? 2) === selectedCapacity
+        && (details?.gameMode || 'solo') === selectedMode;
+    }).slice(0, Math.max(1, selectedCapacity - 1));
+    const joinedCount = Math.min(selectedCapacity, 1 + otherSeekingPlayers.length);
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center py-8 px-4 selection:bg-purple-500 selection:text-white relative overflow-y-auto">
@@ -508,7 +517,7 @@ export default function Dashboard({
           </h1>
           <p className="text-[10px] font-black text-purple-400 tracking-wider uppercase">{t('searchingPlayers')}</p>
           <div className="inline-block bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest mt-1">
-            Stake: ${matchmakingState.betAmount}
+            Stake: ${matchmakingState.betAmount} · {selectedMode === 'team' ? '2v2' : `Solo ${selectedCapacity}P`} · {joinedCount}/{selectedCapacity}
           </div>
         </div>
 
@@ -575,7 +584,7 @@ export default function Dashboard({
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-ping" />
                   <span className="text-xs font-black uppercase tracking-wider text-purple-100 flex items-center gap-1.5">
-                    {t('matchmakingRadar')} ({otherSeekingPlayers.length})
+                    {t('matchmakingRadar')} ({joinedCount}/{selectedCapacity})
                   </span>
                 </div>
                 <button 
@@ -603,7 +612,6 @@ export default function Dashboard({
                   </div>
                 ) : (
                   otherSeekingPlayers.map((player) => {
-                    const isSelf = player.id === user.id;
                     return (
                       <div key={player.id} className="p-2.5 flex items-center justify-between text-xs transition-colors bg-purple-900/20 border-l-2 border-purple-400 hover:bg-purple-900/30">
                         <div className="flex items-center gap-2">
@@ -625,18 +633,8 @@ export default function Dashboard({
                             </p>
                           </div>
                         </div>
-                        <div>
-                          <button
-                            onClick={() => {
-                              const bet = player.seekingDetails?.betAmount ?? 0;
-                              const cap = player.seekingDetails?.capacity ?? 2;
-                              const mode = player.seekingDetails?.gameMode ?? 'solo';
-                              onStartMatchmaking(bet, cap, mode, player.id);
-                            }}
-                            className="bg-green-500 hover:bg-green-400 text-black font-black text-[9.5px] px-2.5 py-1 rounded-lg active:scale-95 transition-all uppercase tracking-wider cursor-pointer shadow-md shadow-green-500/25 animate-bounce flex items-center gap-1"
-                          >
-                            Challenge ⚔️ (Tartan)
-                          </button>
+                        <div className="rounded-lg border border-green-400/30 bg-green-500/10 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider text-green-300">
+                          Joined {joinedCount}/{selectedCapacity}
                         </div>
                       </div>
                     );
