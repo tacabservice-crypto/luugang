@@ -84,6 +84,23 @@ function playReactionSound(reactionId: string) {
   } catch { /* Audio can be blocked before the first user gesture. */ }
 }
 
+function playGameReminderVoice() {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const message = new SpeechSynthesisUtterance('Play the game!');
+    message.lang = 'en-US';
+    message.rate = 0.92;
+    message.pitch = 0.82;
+    message.volume = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const announcerVoice = voices.find(voice => voice.lang.toLowerCase().startsWith('en-us'))
+      || voices.find(voice => voice.lang.toLowerCase().startsWith('en'));
+    if (announcerVoice) message.voice = announcerVoice;
+    window.speechSynthesis.speak(message);
+  } catch { /* Speech can be unavailable or blocked on some devices. */ }
+}
+
 export default function App() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
@@ -540,6 +557,7 @@ export default function App() {
       try {
         const data = JSON.parse(e.data) as { nudgedBy: string };
         setActivePlayNudge(data);
+        playGameReminderVoice();
         if (playNudgeTimeoutRef.current) window.clearTimeout(playNudgeTimeoutRef.current);
         playNudgeTimeoutRef.current = window.setTimeout(() => setActivePlayNudge(null), 3500);
       } catch (err) {
