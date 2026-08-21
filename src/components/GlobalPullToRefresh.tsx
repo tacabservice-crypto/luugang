@@ -1,4 +1,4 @@
-import { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 
 const REFRESH_THRESHOLD = 58;
@@ -98,18 +98,8 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
 
   const visible = distance > 0 || refreshing;
   const rotation = Math.min(300, (distance / REFRESH_THRESHOLD) * 300);
-  const pageOffset = Math.min(42, distance * 0.58);
-  const pullStyle = {
-    '--ludosom-pull-offset': `${pageOffset}px`,
-    transform: `translateY(${pageOffset}px)`,
-  } as CSSProperties;
   return (
     <>
-      <style>{`
-        .ludosom-pull-surface header.sticky {
-          transform: translateY(calc(var(--ludosom-pull-offset) * -1));
-        }
-      `}</style>
       {visible && (
         <div
           className="pointer-events-none fixed inset-x-0 top-[66px] z-[200] flex h-9 items-start justify-center"
@@ -126,12 +116,7 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
           />
         </div>
       )}
-      <div
-        className={`ludosom-pull-surface ${refreshing || distance === 0 ? 'transition-transform duration-300 ease-out' : ''}`}
-        style={pullStyle}
-      >
-        {children}
-      </div>
+      {children}
     </>
   );
 }
