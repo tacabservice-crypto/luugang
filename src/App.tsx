@@ -27,7 +27,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}
 const AuthScreen = React.lazy(() => import('./components/AuthScreen'));
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const GameRoomView = React.lazy(() => import('./components/GameRoom'));
-const WalletModal = React.lazy(() => import('./components/WalletModal'));
+import WalletModal from './components/WalletModal';
 const RejoinPrompt = React.lazy(() => import('./components/RejoinPrompt'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
