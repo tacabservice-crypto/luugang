@@ -987,6 +987,10 @@ export default function App() {
       setActiveRoom(data);
     } catch (err) {
       console.error(err);
+      // This is a stale-client synchronization response, not a user-facing
+      // failure. The authoritative room refresh above has already reconciled
+      // the turn; never show the confusing English error over the game.
+      if (/not your turn to roll/i.test(String((err as any)?.message || err || ''))) return;
       setErrorToast(userErrorMessage(err, 'Xiriirka server-ka wuu gaabtay. Ciyaartu ma lumin; fadlan sug ilbiriqsiyo yar oo mar kale tuur.'));
     }
   };
