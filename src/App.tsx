@@ -196,6 +196,8 @@ export default function App() {
     id: string; senderName: string; targetId: string; targetName: string; reactionId: string; emoji: string;
   } | null>(null);
   const reactionTimeoutRef = useRef<number | null>(null);
+  const [activePlayNudge, setActivePlayNudge] = useState<{ nudgedBy: string } | null>(null);
+  const playNudgeTimeoutRef = useRef<number | null>(null);
   const [incomingInvite, setIncomingInvite] = useState<{
     senderId: string;
     senderName: string;
@@ -537,7 +539,9 @@ export default function App() {
     eventSource.addEventListener('player_nudged', (e: any) => {
       try {
         const data = JSON.parse(e.data) as { nudgedBy: string };
-        setErrorToast(`⏰ ${data.nudgedBy} ku dhiirigeliyay inaad dhaqaaqdo! (Nudged you to play!)`);
+        setActivePlayNudge(data);
+        if (playNudgeTimeoutRef.current) window.clearTimeout(playNudgeTimeoutRef.current);
+        playNudgeTimeoutRef.current = window.setTimeout(() => setActivePlayNudge(null), 3500);
       } catch (err) {
         console.error('Failed to parse player nudge', err);
       }
@@ -1302,6 +1306,15 @@ export default function App() {
           <p className="text-xs font-black text-slate-100 whitespace-nowrap">
             <span className="text-purple-400 font-extrabold">{activeReaction.senderName}</span>: {activeReaction.emoji === '😂' ? 'Wuu qoslay!' : activeReaction.emoji === '😍' ? 'Aad buu u helay!' : activeReaction.emoji === '😱' ? 'Wuu la yaabay!' : activeReaction.emoji === '😡' ? 'Wuu carooday!' : activeReaction.emoji === '👍' ? 'Waa sax!' : 'Waa gubtay!'}
           </p>
+        </div>
+      )}
+
+      {activePlayNudge && (
+        <div className="pointer-events-none fixed inset-0 z-[115] flex items-center justify-center px-4" aria-live="assertive">
+          <div className="ludosom-play-reminder rounded-2xl border-2 border-yellow-300 bg-slate-950/95 px-10 py-5 text-center shadow-[0_0_45px_rgba(250,204,21,0.75)]">
+            <div className="text-4xl font-black tracking-[0.2em] text-yellow-300 sm:text-6xl">CIYAAR</div>
+            <div className="mt-2 text-xs font-bold text-white">{activePlayNudge.nudgedBy} ayaa ku xusuusinaya</div>
+          </div>
         </div>
       )}
 

@@ -159,6 +159,8 @@ export default function GameRoomView({
   const [displayTurnTimer, setDisplayTurnTimer] = useState(room.gameState.turnTimer);
   const [autoRoll, setAutoRoll] = useState(false);
   const [showDicePrompt, setShowDicePrompt] = useState(false);
+  const [showOpponentNudge, setShowOpponentNudge] = useState(false);
+  const [isNudgePending, setIsNudgePending] = useState(false);
   const [playReminderStrike, setPlayReminderStrike] = useState<number | null>(null);
   const [panelDragY, setPanelDragY] = useState(0);
   const [isPanelDragging, setIsPanelDragging] = useState(false);
@@ -593,6 +595,32 @@ export default function GameRoomView({
     const promptDelay = setTimeout(() => setShowDicePrompt(true), 5000);
     return () => clearTimeout(promptDelay);
   }, [isActiveTurn, room.gameState.turn, room.gameState.hasRolled, isRolling]);
+
+  useEffect(() => {
+    setShowOpponentNudge(false);
+    if (!canPlay || isActiveTurn || room.status !== 'playing' || !activePlayer) return;
+    if (/^(bot_|user_sim_|sim_)/.test(activePlayer.userId)) return;
+    const timer = window.setTimeout(() => setShowOpponentNudge(true), 7000);
+    return () => window.clearTimeout(timer);
+  }, [canPlay, isActiveTurn, room.status, room.gameState.turn, room.gameState.lastActivity, room.gameState.hasRolled, activePlayer?.userId]);
+
+  const nudgeActivePlayer = useCallback(async () => {
+    if (!activePlayer || isNudgePending) return;
+    setIsNudgePending(true);
+    try {
+      const response = await fetch('/api/rooms/nudge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, roomId: room.id }),
+      });
+      if (!response.ok) throw new Error('Nudge request failed');
+      setShowOpponentNudge(false);
+    } catch (error) {
+      console.error('Failed to remind active player:', error);
+    } finally {
+      setIsNudgePending(false);
+    }
+  }, [activePlayer, isNudgePending, room.id, userId]);
 
   // Handle the case where the player has been rejected by the host.
   if (hasBeenRejected) {
@@ -1259,6 +1287,17 @@ export default function GameRoomView({
                 <span className="absolute right-2 top-2 z-10 animate-pulse text-[10px] font-black uppercase tracking-wide text-yellow-400 sm:right-3 sm:top-3">
                   Taabo Laadhuuda
                 </span>
+              )}
+
+              {showOpponentNudge && !isActiveTurn && activePlayer && (
+                <button
+                  type="button"
+                  disabled={isNudgePending}
+                  onClick={() => void nudgeActivePlayer()}
+                  className="absolute right-2 top-2 z-10 animate-pulse rounded-lg border border-yellow-300/70 bg-yellow-400 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-950 shadow-[0_0_18px_rgba(250,204,21,0.45)] transition active:scale-95 disabled:opacity-60 sm:right-3 sm:top-3"
+                >
+                  {isNudgePending ? 'Sug...' : `Ciyaar ${activePlayer.username}`}
+                </button>
               )}
             </div>
 

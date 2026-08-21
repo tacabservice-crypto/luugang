@@ -5722,6 +5722,8 @@ app.post('/api/rooms/decline-player', (req, res) => {
   res.json(room);
 });
 
+const playerNudgeCooldowns = new Map<string, number>();
+
 // Nudge Slow Player
 app.post('/api/rooms/nudge', (req, res) => {
   const { userId, roomId } = req.body;
@@ -5735,10 +5737,26 @@ app.post('/api/rooms/nudge', (req, res) => {
   const activePlayer = room.players[gs.turn];
   if (!activePlayer) return res.status(400).json({ error: 'No active player to nudge.' });
 
+  if (room.status !== 'playing') return res.status(400).json({ error: 'The game is not active.' });
+  if (activePlayer.userId === userId) return res.status(400).json({ error: 'You cannot nudge yourself.' });
+  if (isBotPlayer(activePlayer.userId)) return res.status(400).json({ error: 'Bots do not need reminders.' });
+
+  const now = Date.now();
+  if (now - Number(gs.lastActivity || 0) < 7000) {
+    return res.status(429).json({ error: 'Please wait seven seconds before reminding this player.' });
+  }
+  const cooldownKey = `${room.id}:${userId}:${activePlayer.userId}`;
+  if (now - Number(playerNudgeCooldowns.get(cooldownKey) || 0) < 7000) {
+    return res.status(429).json({ error: 'Please wait before sending another reminder.' });
+  }
+  playerNudgeCooldowns.set(cooldownKey, now);
+
   addLog(room, `⏰ ${p.username} nudged ${activePlayer.username} to make a move!`);
   
   // Send nudge event to the active player's screen
-  sendEventToUser(activePlayer.userId, 'player_nudged', { nudgedBy: p.username });
+  const payload = { nudgedBy: p.username, roomId: room.id, sentAt: now };
+  sendEventToUser(activePlayer.userId, 'player_nudged', payload);
+  publishRealtimeEvent('user', activePlayer.userId, 'player_nudged', payload);
   
   // Broadcast game update with updated logs
   broadcastToRoom(room.id, 'game_update', room);
