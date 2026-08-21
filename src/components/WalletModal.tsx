@@ -9,6 +9,8 @@ import { UserProfile, WalletTransaction, Agent, PlayerAgentRequest } from '../ty
 import { useLanguage } from '../context/LanguageContext';
 import { formatCurrency } from '../utils/number';
 import { userErrorMessage } from '../utils/userError';
+import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
 
 interface WalletModalProps {
   user: UserProfile;
@@ -19,27 +21,48 @@ interface WalletModalProps {
 const DEPOSIT_PHONE_NUMBER = '907243775'; // Fallback admin number
 const cityOnly = (location?: string) => location?.split(',')[0]?.trim() || 'N/A';
 
-const detectPlayerLocation = (): Promise<string> => new Promise((resolve, reject) => {
-  if (!navigator.geolocation) return reject(new Error('Location is not supported on this device.'));
-  navigator.geolocation.getCurrentPosition(async position => {
-    try {
-      const response = await fetch('/api/locations/detect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.location) throw new Error(data.error || 'Location could not be identified.');
-      resolve(data.location);
-    } catch (error) {
-      reject(error);
-    }
-  }, locationError => reject(new Error(locationError.code === 1 ? 'GPS_PERMISSION_REQUIRED' : 'Location could not be detected.')), {
-    enableHighAccuracy: false,
-    timeout: 12_000,
-    maximumAge: 10 * 60 * 1000,
+const resolveLocationName = async (latitude: number, longitude: number): Promise<string> => {
+  const response = await fetch('/api/locations/detect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ latitude, longitude }),
   });
-});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.location) throw new Error(data.error || 'Location could not be identified.');
+  return data.location;
+};
+
+const detectPlayerLocation = async (requestNativePermission = false): Promise<string> => {
+  if (Capacitor.isNativePlatform()) {
+    let permission = await Geolocation.checkPermissions();
+    const isGranted = permission.location === 'granted' || permission.coarseLocation === 'granted';
+    if (!isGranted && requestNativePermission) permission = await Geolocation.requestPermissions();
+    if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
+      throw new Error('GPS_PERMISSION_REQUIRED');
+    }
+    try {
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: false,
+        timeout: 12_000,
+        maximumAge: 10 * 60 * 1000,
+      });
+      return resolveLocationName(position.coords.latitude, position.coords.longitude);
+    } catch (error) {
+      const message = String((error as Error)?.message || '');
+      if (/disabled|location services|gps/i.test(message)) throw new Error('GPS_SERVICE_DISABLED');
+      throw error;
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('Location is not supported on this device.'));
+    navigator.geolocation.getCurrentPosition(
+      position => void resolveLocationName(position.coords.latitude, position.coords.longitude).then(resolve, reject),
+      locationError => reject(new Error(locationError.code === 1 ? 'GPS_PERMISSION_REQUIRED' : 'Location could not be detected.')),
+      { enableHighAccuracy: false, timeout: 12_000, maximumAge: 10 * 60 * 1000 },
+    );
+  });
+};
 
 export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletModalProps) {
   const { t, language } = useLanguage();
@@ -306,13 +329,16 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
     if (gpsPermissionLoading) return;
     try {
       setGpsPermissionLoading(true);
-      const detectedLocation = await detectPlayerLocation();
+      const detectedLocation = await detectPlayerLocation(true);
       setPlayerLocation(detectedLocation);
       setGpsPermissionNeeded(false);
       setError('');
-    } catch {
+    } catch (gpsError) {
       setGpsPermissionNeeded(true);
-      setError(language === 'so' ? 'GPS-ka oggolow.' : 'GPS access is required.');
+      const gpsDisabled = gpsError instanceof Error && gpsError.message === 'GPS_SERVICE_DISABLED';
+      setError(gpsDisabled
+        ? (language === 'so' ? 'GPS-ka telefoonka shid.' : 'Turn on your phone GPS.')
+        : (language === 'so' ? 'GPS-ka oggolow.' : 'GPS access is required.'));
     } finally {
       setGpsPermissionLoading(false);
     }
