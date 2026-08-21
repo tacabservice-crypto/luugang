@@ -614,7 +614,6 @@ export default function GameRoomView({
         body: JSON.stringify({ userId, roomId: room.id }),
       });
       if (!response.ok) throw new Error('Nudge request failed');
-      setShowOpponentNudge(false);
     } catch (error) {
       console.error('Failed to remind active player:', error);
     } finally {
