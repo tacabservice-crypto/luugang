@@ -784,7 +784,7 @@ export default function Dashboard({
                     className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 rounded-md"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Download APK Update</span>
+                    <span>Download App</span>
                   </button>
                   <button
                     onClick={() => {

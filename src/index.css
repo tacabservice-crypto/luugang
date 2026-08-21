@@ -4,7 +4,13 @@
   --font-sans: "Plus Jakarta Sans", sans-serif;
 }
 
+html, body, #root {
+  min-height: 100%;
+  background: #020012;
+}
+
 body {
+  margin: 0;
   font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
