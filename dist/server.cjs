@@ -2444,6 +2444,7 @@ function executeBotTurnIfActive(room) {
     if (!room.gameState.hasRolled) {
       const d = Math.floor(Math.random() * 6) + 1;
       room.gameState.diceRoll = d;
+      room.gameState.lastDiceRoll = d;
       room.gameState.hasRolled = true;
       touchRoom(room);
       broadcastToRoom(room.id, "game_update", room);
@@ -5109,7 +5110,7 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
     gs.hasRolled = false;
     advanceTurn(room);
     saveStore();
-    await persistLiveRoom(room);
+    void persistLiveRoom(room).catch((error) => console.error(`Failed to persist room ${room.id}:`, error));
     broadcastToRoom(room.id, "game_update", room);
     executeBotTurnIfActive(room);
     return res.json(room);
@@ -5120,7 +5121,7 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
   if (validTokens.length === 0) {
     addLog(room, `${activePlayer.username} has no valid moves with roll ${d}. Turn passes.`);
     saveStore();
-    await persistLiveRoom(room);
+    void persistLiveRoom(room).catch((error) => console.error(`Failed to persist room ${room.id}:`, error));
     broadcastToRoom(room.id, "game_update", room);
     res.json(room);
     setTimeout(() => {
@@ -5135,7 +5136,7 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
     }, 1500);
   } else {
     saveStore();
-    await persistLiveRoom(room);
+    void persistLiveRoom(room).catch((error) => console.error(`Failed to persist room ${room.id}:`, error));
     broadcastToRoom(room.id, "game_update", room);
     res.json(room);
   }
@@ -5165,7 +5166,7 @@ app.post("/api/rooms/move-token", async (req, res) => {
   gs.turnTimer = 30;
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
+  void Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]).catch((error) => console.error(`Failed to persist move for room ${room.id}:`, error));
   broadcastToRoom(room.id, "game_update", room);
   executeBotTurnIfActive(room);
   res.json(room);

@@ -10,6 +10,19 @@ import { auth } from './firebase-client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { userErrorMessage } from './utils/userError';
 
+// Gameplay actions must never wait forever on a slow mobile connection.
+// The server remains authoritative; this only releases the UI and allows a
+// safe retry/reconnect when the response is delayed.
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 const AuthScreen = React.lazy(() => import('./components/AuthScreen'));
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const GameRoomView = React.lazy(() => import('./components/GameRoom'));
@@ -84,6 +97,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true); // Add a loading state for auth
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
   const [activeRoom, setActiveRoom] = useState<GameRoom | null>(null);
   const [rejoinableRoom, setRejoinableRoom] = useState<GameRoom | null>(null);
   const rejoinableRoomRef = useRef<GameRoom | null>(rejoinableRoom);
@@ -398,13 +412,13 @@ export default function App() {
       }
     };
 
-    const timer = window.setInterval(refreshActiveRoom, 10000);
+    const timer = window.setInterval(refreshActiveRoom, isRealtimeConnected ? 10000 : 2500);
     void refreshActiveRoom();
     return () => {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [activeRoom?.id, user?.id]);
+  }, [activeRoom?.id, user?.id, isRealtimeConnected]);
 
 
   const userIdRef = useRef(user?.id);
@@ -418,9 +432,11 @@ export default function App() {
 
     const sseUrl = `${API_BASE_URL}/api/updates?userId=${user.id}`;
     const eventSource = new EventSource(sseUrl);
+    setIsRealtimeConnected(false);
 
     eventSource.addEventListener('init', () => {
       console.log('SSE Real-time connection established for user:', user.username);
+      setIsRealtimeConnected(true);
     });
 
     eventSource.addEventListener('user_update', (e: any) => {
@@ -613,6 +629,7 @@ export default function App() {
     });
 
     eventSource.onerror = (err) => {
+      setIsRealtimeConnected(false);
       if (eventSource.readyState === EventSource.CLOSED) {
         console.warn('SSE Connection closed.', err);
       } else if (eventSource.readyState === EventSource.CONNECTING) {
@@ -624,6 +641,7 @@ export default function App() {
 
     return () => {
       eventSource.close();
+      setIsRealtimeConnected(false);
     };
   }, [user?.id]);
 
@@ -932,7 +950,7 @@ export default function App() {
   const handleRollDice = async () => {
     if (!user || !activeRoom) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/rooms/roll-dice`, {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/rooms/roll-dice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, roomId: activeRoom.id })
@@ -946,14 +964,14 @@ export default function App() {
       setActiveRoom(data);
     } catch (err) {
       console.error(err);
-      setErrorToast(userErrorMessage(err, 'The dice could not be rolled. Please try again.'));
+      setErrorToast(userErrorMessage(err, 'Xiriirka server-ka wuu gaabtay. Ciyaartu ma lumin; fadlan sug ilbiriqsiyo yar oo mar kale tuur.'));
     }
   };
 
   const handleMoveToken = async (tokenId: string) => {
     if (!user || !activeRoom) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/rooms/move-token`, {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/rooms/move-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id, roomId: activeRoom.id, tokenId })
@@ -963,7 +981,7 @@ export default function App() {
       setActiveRoom(data);
     } catch (err) {
       console.error(err);
-      setErrorToast(userErrorMessage(err, 'The token could not be moved. Please try again.'));
+      setErrorToast(userErrorMessage(err, 'Xiriirka server-ka wuu gaabtay. Landhuhu ma lumin; fadlan isku day mar kale.'));
     }
   };
 

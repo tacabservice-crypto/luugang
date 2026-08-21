@@ -1990,6 +1990,10 @@ function executeBotTurnIfActive(room: GameRoom) {
     if (!room.gameState.hasRolled) {
       const d = Math.floor(Math.random() * 6) + 1;
       room.gameState.diceRoll = d;
+      // Keep both fields in sync. The client uses lastDiceRoll as the
+      // fallback after the bot completes its move, so omitting this made the
+      // bot appear to repeat the human player's previous result.
+      room.gameState.lastDiceRoll = d;
       room.gameState.hasRolled = true;
       touchRoom(room);
       // Broadcast the roll before resolving the bot's move so clients can run
@@ -5353,7 +5357,7 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
     // Advance turn synchronously
     advanceTurn(room);
     saveStore();
-    await persistLiveRoom(room);
+    void persistLiveRoom(room).catch(error => console.error(`Failed to persist room ${room.id}:`, error));
     broadcastToRoom(room.id, 'game_update', room);
     executeBotTurnIfActive(room);
 
@@ -5370,7 +5374,7 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
     // FIRST, broadcast the result of the roll so all clients can see the animation.
     addLog(room, `${activePlayer.username} has no valid moves with roll ${d}. Turn passes.`);
     saveStore();
-    await persistLiveRoom(room);
+    void persistLiveRoom(room).catch(error => console.error(`Failed to persist room ${room.id}:`, error));
     broadcastToRoom(room.id, 'game_update', room);
     res.json(room); // Respond to the roller immediately.
 
@@ -5390,7 +5394,7 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
   } else {
     // There are valid moves, so we just update the state and wait for the player's move.
     saveStore();
-    await persistLiveRoom(room);
+    void persistLiveRoom(room).catch(error => console.error(`Failed to persist room ${room.id}:`, error));
     broadcastToRoom(room.id, 'game_update', room);
     res.json(room);
   }
@@ -5429,7 +5433,7 @@ app.post('/api/rooms/move-token', async (req, res) => {
   // Execute Move
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
+  void Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]).catch(error => console.error(`Failed to persist move for room ${room.id}:`, error));
   broadcastToRoom(room.id, 'game_update', room);
   
   // Trigger bot turn if needed
