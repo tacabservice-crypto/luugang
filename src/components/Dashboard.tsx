@@ -366,7 +366,10 @@ export default function Dashboard({
       if (!response.ok) throw new Error(data.error || 'The player could not be removed.');
       await fetchOnlinePlayers();
     } catch (error) {
-      alert(userErrorMessage(error, 'The player could not be removed.'));
+      const message = error instanceof Error && error.message
+        ? error.message
+        : userErrorMessage(error, 'The player could not be removed.');
+      alert(message);
     } finally {
       setRemovingPlayerId(null);
     }

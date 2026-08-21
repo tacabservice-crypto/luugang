@@ -4731,13 +4731,21 @@ app.post("/api/rooms/create-bot-room", (req, res) => {
   const room = startMatchedRoom(matchedList, bet, cap, mode);
   res.json({ success: true, roomId: room.id });
 });
+function sortMatchmakingIdsByJoinTime(ids) {
+  return [...new Set(ids)].sort((leftId, rightId) => {
+    const leftTime = Number(store.users[leftId]?.seekingJoinedAt || Number.MAX_SAFE_INTEGER);
+    const rightTime = Number(store.users[rightId]?.seekingJoinedAt || Number.MAX_SAFE_INTEGER);
+    return leftTime - rightTime || ids.indexOf(leftId) - ids.indexOf(rightId);
+  });
+}
 app.post("/api/rooms/matchmaking/start-partial", async (req, res) => {
   const { userId } = req.body;
   if (!userId || !store.users[userId]) return res.status(404).json({ error: "User not found." });
   cleanupMatchmakingQueues();
   const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
   if (!queueEntry) return res.status(409).json({ error: "Your Search Live queue is no longer active." });
-  const [queueKey, queuedIds] = queueEntry;
+  const [queueKey, rawQueuedIds] = queueEntry;
+  const queuedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds);
   const [rawBet, rawCapacity, rawMode] = queueKey.split("_");
   const requestedCapacity = parseInt(rawCapacity) || 2;
   if (requestedCapacity !== 4) return res.status(400).json({ error: "Early Start is only available for a 4-player search." });
@@ -4766,10 +4774,11 @@ app.post("/api/rooms/matchmaking/remove-player", async (req, res) => {
   cleanupMatchmakingQueues();
   const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
   if (!queueEntry) return res.status(409).json({ error: "Your Search Live queue is no longer active." });
-  const [queueKey, queuedIds] = queueEntry;
+  const [queueKey, rawQueuedIds] = queueEntry;
+  const queuedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds);
   if (queuedIds[0] !== userId) return res.status(403).json({ error: "Only the original seeker can remove players." });
   if (!queuedIds.includes(targetUserId)) return res.status(404).json({ error: "That player is not in your queue." });
-  store.matchmakingQueues[queueKey] = queuedIds.filter((id) => id !== targetUserId);
+  store.matchmakingQueues[queueKey] = rawQueuedIds.filter((id) => id !== targetUserId);
   if (store.users[targetUserId]) delete store.users[targetUserId].seekingJoinedAt;
   await deleteSharedMatchmakingRecords(targetUserId).catch((error) => {
     console.error("Failed to delete removed matchmaking player record:", error);
@@ -4782,18 +4791,33 @@ app.post("/api/rooms/matchmaking/remove-player", async (req, res) => {
   broadcastToAll("online_players_updated", {});
   res.json({ success: true });
 });
-app.post("/api/rooms/matchmaking/leave", (req, res) => {
+app.post("/api/rooms/matchmaking/leave", async (req, res) => {
   const { userId } = req.body;
   if (userId) {
-    if (store.users[userId]) {
-      delete store.users[userId].seekingJoinedAt;
+    const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+    let leavingIds = [userId];
+    if (queueEntry) {
+      const [queueKey, rawQueuedIds] = queueEntry;
+      const orderedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds);
+      const requestedCapacity = parseInt(queueKey.split("_")[1]) || 2;
+      const currentGroupIds = orderedIds.slice(0, requestedCapacity);
+      if (currentGroupIds[0] === userId) leavingIds = currentGroupIds;
+      store.matchmakingQueues[queueKey] = rawQueuedIds.filter((id) => !leavingIds.includes(id));
+    } else {
+      for (const qKey of Object.keys(store.matchmakingQueues)) {
+        store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== userId);
+      }
     }
-    for (const qKey of Object.keys(store.matchmakingQueues)) {
-      store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== userId);
-    }
+    leavingIds.forEach((id) => {
+      if (store.users[id]) delete store.users[id].seekingJoinedAt;
+      broadcastToAll("matchmaker_seeking_cancelled", { senderId: id });
+      if (id !== userId) {
+        sendEventToUser(id, "matchmaker_removed", { message: "The seeker cancelled this Search Live match." });
+      }
+    });
     saveStore();
-    broadcastToAll("matchmaker_seeking_cancelled", { senderId: userId });
-    void deleteSharedMatchmakingRecords(userId).catch((error) => console.error("Failed to delete shared matchmaking record on leave:", error));
+    await deleteSharedMatchmakingRecords(...leavingIds).catch((error) => console.error("Failed to delete shared matchmaking records on leave:", error));
+    broadcastToAll("online_players_updated", {});
   }
   res.json({ success: true });
 });
