@@ -671,6 +671,17 @@ export default function App() {
       window.dispatchEvent(new Event('refresh_online_players'));
     });
 
+    eventSource.addEventListener('matchmaker_removed', (e: any) => {
+      try {
+        const data = JSON.parse(e.data) as { message?: string };
+        setMatchmakingState({ isQueued: false, betAmount: 0 });
+        setErrorToast(data.message || 'The seeker removed you from this Search Live match.');
+        window.dispatchEvent(new Event('refresh_online_players'));
+      } catch (err) {
+        console.error('Failed to parse matchmaker_removed event', err);
+      }
+    });
+
     eventSource.addEventListener('matchmaker_seeking_cancelled', (e: any) => {
       try {
         const data = JSON.parse(e.data);

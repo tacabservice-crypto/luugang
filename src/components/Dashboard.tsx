@@ -315,6 +315,7 @@ export default function Dashboard({
 
   const [matchmakingSeconds, setMatchmakingSeconds] = useState(0);
   const [isStartingPartialMatch, setIsStartingPartialMatch] = useState(false);
+  const [removingPlayerId, setRemovingPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!matchmakingState.isQueued) {
@@ -349,6 +350,25 @@ export default function Dashboard({
       alert(userErrorMessage(error, 'The game could not be started.'));
     } finally {
       setIsStartingPartialMatch(false);
+    }
+  };
+
+  const handleRemoveMatchedPlayer = async (targetUserId: string) => {
+    if (removingPlayerId) return;
+    try {
+      setRemovingPlayerId(targetUserId);
+      const response = await fetch('/api/rooms/matchmaking/remove-player', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, targetUserId })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'The player could not be removed.');
+      await fetchOnlinePlayers();
+    } catch (error) {
+      alert(userErrorMessage(error, 'The player could not be removed.'));
+    } finally {
+      setRemovingPlayerId(null);
     }
   };
 
@@ -660,9 +680,20 @@ export default function Dashboard({
                             </p>
                           </div>
                         </div>
-                        <div className="rounded-lg border border-green-400/30 bg-green-500/10 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider text-green-300">
-                          Joined {joinedCount}/{selectedCapacity}
-                        </div>
+                        {isOriginalSeeker ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMatchedPlayer(player.id)}
+                            disabled={removingPlayerId === player.id}
+                            className="rounded-lg border border-red-400/30 bg-red-500/10 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider text-red-300 disabled:opacity-50"
+                          >
+                            {removingPlayerId === player.id ? 'Removing…' : 'Remove'}
+                          </button>
+                        ) : (
+                          <div className="rounded-lg border border-green-400/30 bg-green-500/10 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider text-green-300">
+                            Joined {joinedCount}/{selectedCapacity}
+                          </div>
+                        )}
                       </div>
                     );
                   })
@@ -703,7 +734,7 @@ export default function Dashboard({
             onClick={() => onLeaveMatchmaking(matchmakingState.betAmount, matchmakingState.capacity, matchmakingState.gameMode)}
             className={`${selectedCapacity === 4 && isOriginalSeeker && joinedCount >= 2 ? 'w-full' : 'col-span-2 w-full'} bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider`}
           >
-            Cancel Radar (Ka Bax Radiyaha)
+            Cancel Radar
           </button>
         </div>
       </div>

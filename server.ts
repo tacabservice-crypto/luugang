@@ -2781,7 +2781,7 @@ setInterval(() => {
   });
 }, 10000);
 
-// Matchmaking automatic bot auto-fill (PUBG style)
+// Match full real-player queues only. Automatic bot filling is disabled.
 setInterval(() => {
   cleanupMatchmakingQueues();
 
@@ -2827,7 +2827,7 @@ setInterval(() => {
     const waitTimeMs = Date.now() - joinedAt;
 
     // If wait time exceeds 3 minutes (180000 ms), auto-fill the remaining seats with bots!
-    if (waitTimeMs >= 180000) {
+    if (false && waitTimeMs >= 180000) {
       console.log(`Matchmaking timeout for queue ${queueKey}. Auto-filling remaining seats with bots...`);
 
       // Retrieve all real connected players currently in this queue
@@ -4959,6 +4959,35 @@ app.post('/api/rooms/matchmaking/start-partial', async (req, res) => {
   const finalMode: 'solo' | 'team' = rawMode === 'team' && participants.length === 4 ? 'team' : 'solo';
   const room = startMatchedRoom(participants, bet, participants.length, finalMode);
   res.json({ success: true, roomId: room.id, room, convertedToSolo: rawMode === 'team' && finalMode === 'solo' });
+});
+
+// The original seeker may remove an accepted player before the match starts.
+app.post('/api/rooms/matchmaking/remove-player', async (req, res) => {
+  const { userId, targetUserId } = req.body;
+  if (!userId || !targetUserId || userId === targetUserId) {
+    return res.status(400).json({ error: 'A valid player must be selected.' });
+  }
+
+  cleanupMatchmakingQueues();
+  const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+  if (!queueEntry) return res.status(409).json({ error: 'Your Search Live queue is no longer active.' });
+
+  const [queueKey, queuedIds] = queueEntry;
+  if (queuedIds[0] !== userId) return res.status(403).json({ error: 'Only the original seeker can remove players.' });
+  if (!queuedIds.includes(targetUserId)) return res.status(404).json({ error: 'That player is not in your queue.' });
+
+  store.matchmakingQueues[queueKey] = queuedIds.filter(id => id !== targetUserId);
+  if (store.users[targetUserId]) delete (store.users[targetUserId] as any).seekingJoinedAt;
+  await deleteSharedMatchmakingRecords(targetUserId).catch(error => {
+    console.error('Failed to delete removed matchmaking player record:', error);
+  });
+  saveStore();
+  sendEventToUser(targetUserId, 'matchmaker_removed', {
+    message: 'The seeker removed you from this Search Live match.'
+  });
+  broadcastToAll('matchmaker_seeking_cancelled', { senderId: targetUserId });
+  broadcastToAll('online_players_updated', {});
+  res.json({ success: true });
 });
 
 // Leave Matchmaking Queue
