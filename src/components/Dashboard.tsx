@@ -242,6 +242,30 @@ export default function Dashboard({
     };
   }, [user.id, matchmakingState.isQueued, showOnlinePlayers]);
 
+  useEffect(() => {
+    let stopped = false;
+    const announceHomePresence = async () => {
+      if (stopped || document.visibilityState === 'hidden') return;
+      try {
+        await fetch('/api/users/presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id }),
+          keepalive: true,
+        });
+      } catch { /* The next heartbeat retries automatically. */ }
+    };
+    const timer = window.setInterval(announceHomePresence, 20_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void announceHomePresence(); };
+    document.addEventListener('visibilitychange', onVisible);
+    void announceHomePresence();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user.id]);
+
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 
   const handleToggleOnlineStatus = async () => {

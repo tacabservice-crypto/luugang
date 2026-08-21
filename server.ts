@@ -3456,6 +3456,22 @@ app.get('/api/users/leaderboard', async (req, res) => {
 });
 
 // Get active online & registered players (real users)
+app.post('/api/users/presence', async (req, res) => {
+  const userId = String(req.body?.userId || '').trim();
+  if (!userId || !store.users[userId]) return res.status(400).json({ error: 'Valid userId is required.' });
+  try {
+    if (isMySqlConfigured()) {
+      await touchMySqlUserPresence([userId]);
+    } else if (db) {
+      await db.collection('userPresence').doc(userId).set({ userId, lastSeenAt: Date.now() }, { merge: true });
+    }
+    res.json({ success: true, lastSeenAt: Date.now() });
+  } catch (error) {
+    console.error('Home presence update failed:', error);
+    res.status(503).json({ error: 'Presence could not be updated.' });
+  }
+});
+
 app.get('/api/users/online', async (req, res) => {
   const currentUserId = req.query.userId as string;
   if (!currentUserId) {
@@ -3472,9 +3488,17 @@ app.get('/api/users/online', async (req, res) => {
   const onlineList: any[] = [];
 
   // Return Search Live users plus connected players who are available on Home.
-  const sharedOnlineIds = isMySqlConfigured()
-    ? await listMySqlOnlineUserIds().catch(error => { console.error('Shared presence lookup failed:', error); return [] as string[]; })
-    : [];
+  let sharedOnlineIds: string[] = [];
+  if (isMySqlConfigured()) {
+    sharedOnlineIds = await listMySqlOnlineUserIds().catch(error => { console.error('Shared presence lookup failed:', error); return []; });
+  } else if (db) {
+    try {
+      const snapshot = await db.collection('userPresence').where('lastSeenAt', '>=', Date.now() - 45_000).get();
+      sharedOnlineIds = snapshot.docs.map(doc => String(doc.data().userId || doc.id));
+    } catch (error) {
+      console.error('Firestore presence lookup failed:', error);
+    }
+  }
   const connectedUserIds = new Set([...activeClients.map(client => client.userId), ...sharedOnlineIds]);
   const busyUserIds = new Set<string>();
   Object.values(store.rooms).forEach(room => {
