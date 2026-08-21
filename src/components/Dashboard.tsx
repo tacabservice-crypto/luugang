@@ -31,6 +31,7 @@ import { useLanguage } from '../context/LanguageContext';
 import LanguageToggle from './LanguageToggle';
 import { formatCurrency } from '../utils/number';
 import { userErrorMessage } from '../utils/userError';
+import { apiUrl } from '../api-runtime';
 import MatchmakingRadar from './MatchmakingRadar';
 import AboutUs from './AboutUs';
 import Help from './Help';
@@ -187,12 +188,14 @@ export default function Dashboard({
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);
-  const visibleOnlinePlayers = onlinePlayers.filter(player => player.status === 'online' || player.status === 'seeking');
+  // The Home challenge list is intentionally limited to players who are
+  // online and available. Search Live players are shown in the radar instead.
+  const availableHomePlayers = onlinePlayers.filter(player => player.status === 'online');
 
   const fetchOnlinePlayers = async () => {
     try {
       setIsFetchingPlayers(true);
-      const res = await fetch(`/api/users/online?userId=${user.id}&_t=${Date.now()}`);
+      const res = await fetch(apiUrl(`/api/users/online?userId=${encodeURIComponent(user.id)}&_t=${Date.now()}`));
       if (res.ok) {
         let data = await res.json();
         // Filter out players who have very recently left to prevent reappearing due to race conditions
@@ -248,7 +251,7 @@ export default function Dashboard({
     const announceHomePresence = async () => {
       if (stopped || document.visibilityState === 'hidden') return;
       try {
-        await fetch('/api/users/presence', {
+        await fetch(apiUrl('/api/users/presence'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -278,7 +281,7 @@ export default function Dashboard({
     try {
       setIsTogglingStatus(true);
       const nextOffline = !user.isOfflinePreference;
-      const res = await fetch(`/api/users/${user.id}/status`, {
+      const res = await fetch(apiUrl(`/api/users/${encodeURIComponent(user.id)}/status`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isOffline: nextOffline })
@@ -988,9 +991,9 @@ export default function Dashboard({
                 <button onClick={() => setShowOnlinePlayers(false)} className="rounded-full bg-white/5 p-1.5 text-slate-300"><X className="h-3.5 w-3.5" /></button>
               </div>
               <div className="max-h-[48vh] space-y-1 overflow-y-auto p-2">
-                {visibleOnlinePlayers.length === 0 ? (
+                {availableHomePlayers.length === 0 ? (
                   <div className="py-8 text-center text-[10px] font-bold text-slate-500">Hadda ma jiro ciyaaryahan Home-ka jooga.</div>
-                ) : visibleOnlinePlayers.map(player => {
+                ) : availableHomePlayers.map(player => {
                   const status = inviteStatus[player.id] || 'idle';
                   return (
                     <div key={player.id} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.035] px-2 py-1.5">
@@ -1030,7 +1033,7 @@ export default function Dashboard({
           <div className="bg-black/30 px-4 py-3 border-b border-white/10 flex items-center justify-between rounded-t-2xl">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Choose Bet Stake</span>
             <button onClick={() => { setShowOnlinePlayers(true); void fetchOnlinePlayers(); }} className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
-    <TrendingUp className="w-3.5 h-3.5" /> {visibleOnlinePlayers.length} Online
+    <TrendingUp className="w-3.5 h-3.5" /> {availableHomePlayers.length} Online
 </button>
           </div>
 
