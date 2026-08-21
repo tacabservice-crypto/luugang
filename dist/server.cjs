@@ -3211,7 +3211,13 @@ app.get("/api/health", (req, res) => {
 app.get("/api/version", (_req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.setHeader("Pragma", "no-cache");
-  res.json({ version: DEPLOY_VERSION, deployedFrontend: true });
+  res.json({
+    version: DEPLOY_VERSION,
+    deployedFrontend: true,
+    nativeVersionCode: 21,
+    nativeVersionName: "3.0",
+    androidApkUrl: "/downloads/LudoSom.apk"
+  });
 });
 app.get("/api/admin/migrate-users", async (req, res) => {
   if (!auth) {

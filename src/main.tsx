@@ -7,6 +7,7 @@ import './index.css';
 import { LanguageProvider } from './context/LanguageContext.tsx';
 import ErrorPage from "./pages/ErrorPage";
 import GlobalPullToRefresh from './components/GlobalPullToRefresh';
+import NativeUpdateGate from './components/NativeUpdateGate';
 
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = lazy(() => import('./pages/BecomeVip'));
@@ -55,6 +56,7 @@ createRoot(document.getElementById('root')!).render(
       <Suspense fallback={<div className="fixed inset-x-0 top-[62px] z-[200] flex justify-center"><div className="h-7 w-7 animate-spin rounded-full border-[3px] border-blue-500 border-t-transparent" /></div>}>
         <GlobalPullToRefresh>
           <RouterProvider router={router} />
+          <NativeUpdateGate />
         </GlobalPullToRefresh>
       </Suspense>
     </LanguageProvider>
