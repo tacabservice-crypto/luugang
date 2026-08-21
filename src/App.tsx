@@ -1439,13 +1439,13 @@ export default function App() {
       )}
 
       {incomingInvite && (
-        <div className="fixed inset-0 z-[99] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-gradient-to-b from-[#1b0d44] to-[#0d0526] border-2 border-yellow-400/80 max-w-sm w-full rounded-2xl p-6 text-center space-y-5 shadow-[0_0_40px_rgba(234,179,8,0.25)] relative overflow-hidden">
+        <div className="fixed right-3 top-16 z-[130] w-[calc(100%-1.5rem)] max-w-sm animate-fade-in">
+          <div className="bg-gradient-to-b from-[#1b0d44] to-[#0d0526] border border-yellow-400/80 w-full rounded-2xl p-4 text-center space-y-3 shadow-[0_0_40px_rgba(234,179,8,0.35)] relative overflow-hidden">
             {/* Pulsing decoration */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-yellow-400 animate-pulse" />
             
             <div className="space-y-2">
-              <span className="inline-block text-5xl bg-black/40 border border-white/10 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+              <span className="inline-block text-3xl bg-black/40 border border-white/10 w-12 h-12 rounded-xl flex items-center justify-center mx-auto shadow-inner">
                 {incomingInvite.senderAvatar}
               </span>
               <h3 className="font-black text-sm text-yellow-400 uppercase tracking-widest">
@@ -1468,22 +1468,18 @@ export default function App() {
               </div>
             </div>
 
-            <p className="text-[10px] text-slate-400 font-semibold leading-normal">
-              Haddii aad aqbasho, waxaa laguu wareejin doonaa qolka lobby-ga, waxaana laguu diyaarin doonaa bilowga ciyaarta.
-            </p>
-
             <div className="flex gap-2.5 pt-1">
               <button
                 onClick={handleAcceptInvite}
                 className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer shadow-md shadow-green-500/10 uppercase tracking-wide"
               >
-                Aqbal (Accept)
+                ✓
               </button>
               <button
                 onClick={handleDeclineInvite}
                 className="flex-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wide"
               >
-                Diid (Decline)
+                ✕
               </button>
             </div>
           </div>

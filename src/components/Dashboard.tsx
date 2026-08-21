@@ -23,7 +23,8 @@ import {
   ChevronDown,
   MoreVertical,
   HelpCircle,
-  Download
+  Download,
+  X
 } from 'lucide-react';
 import { UserProfile, GameRoom } from '../types/game';
 import { useLanguage } from '../context/LanguageContext';
@@ -182,6 +183,7 @@ export default function Dashboard({
   }, [dropdownRef, settingsDropdownRef]);
 
   const [onlinePlayers, setOnlinePlayers] = useState<any[]>([]);
+  const [showOnlinePlayers, setShowOnlinePlayers] = useState(false);
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);
@@ -944,6 +946,43 @@ export default function Dashboard({
             <span>Profile settings updated successfully!</span>
           </div>
         )}
+        {showOnlinePlayers && (
+          <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+            <div className="w-full max-w-md overflow-hidden rounded-t-3xl border border-white/10 bg-[#0b1220] shadow-2xl sm:rounded-3xl">
+              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                <div>
+                  <h3 className="text-sm font-black text-white">Online Players</h3>
+                  <p className="mt-0.5 text-[10px] font-semibold text-emerald-400">Home-ka jooga oo diyaar u ah challenge</p>
+                </div>
+                <button onClick={() => setShowOnlinePlayers(false)} className="rounded-full bg-white/5 p-2 text-slate-300"><X className="h-4 w-4" /></button>
+              </div>
+              <div className="max-h-[65vh] space-y-2 overflow-y-auto p-4">
+                {onlinePlayers.filter(player => player.status === 'online').length === 0 ? (
+                  <div className="py-12 text-center text-xs font-bold text-slate-500">Hadda ma jiro ciyaaryahan Home-ka jooga oo diyaar ah.</div>
+                ) : onlinePlayers.filter(player => player.status === 'online').map(player => {
+                  const status = inviteStatus[player.id] || 'idle';
+                  return (
+                    <div key={player.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                      <AvatarDisplay avatar={player.avatar} username={player.username} className="h-11 w-11 shrink-0 rounded-xl" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-black text-white">{player.username}</div>
+                        <div className="mt-1 flex items-center gap-1 text-[10px] font-bold text-emerald-400"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Online · Home</div>
+                      </div>
+                      <button
+                        disabled={status !== 'idle'}
+                        onClick={() => void handleChallengePlayer(player.id, selectedStake)}
+                        className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-[10px] font-black uppercase text-white disabled:opacity-50"
+                      >
+                        {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent ✓' : 'Challenge'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         <MatchmakingRadar 
           onlinePlayers={onlinePlayers}
           currentUser={user}
@@ -959,8 +998,8 @@ export default function Dashboard({
         <div className="bg-slate-900/90 border border-white/10 rounded-2xl shadow-2xl space-y-0 relative">
           <div className="bg-black/30 px-4 py-3 border-b border-white/10 flex items-center justify-between rounded-t-2xl">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Choose Bet Stake</span>
-            <button onClick={scrollToRadar} className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
-    <TrendingUp className="w-3.5 h-3.5" /> {onlinePlayers.length} Online
+            <button onClick={() => { setShowOnlinePlayers(true); void fetchOnlinePlayers(); }} className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
+    <TrendingUp className="w-3.5 h-3.5" /> {onlinePlayers.filter(player => player.status === 'online').length} Online
 </button>
           </div>
 

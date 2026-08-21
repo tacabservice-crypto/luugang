@@ -3538,7 +3538,7 @@ app.get("/api/users/online", async (req, res) => {
   const now2 = Date.now();
   const onlineList = [];
   Object.values(store.users).forEach((u) => {
-    if (isBotPlayer(u.id)) return;
+    if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
     let status = "offline";
     let seekingDetails = null;
     for (const [qKey, queueUserIds] of Object.entries(store.matchmakingQueues)) {
@@ -3553,7 +3553,12 @@ app.get("/api/users/online", async (req, res) => {
         break;
       }
     }
-    if (status === "seeking") {
+    const isBusy = Object.values(store.rooms).some(
+      (room) => (room.status === "waiting" || room.status === "playing") && (room.players.some((player) => player.userId === u.id) || room.invitedUserId === u.id)
+    );
+    const isConnectedHere = activeClients.some((client) => client.userId === u.id);
+    if (status !== "seeking" && isConnectedHere && !isBusy) status = "online";
+    if (status === "seeking" || status === "online") {
       onlineList.push({
         id: u.id,
         username: u.username,
@@ -4847,6 +4852,12 @@ app.post("/api/rooms/challenge/invite", async (req, res) => {
   const { senderId, receiverId, betAmount, capacity, gameMode } = req.body;
   const sender = store.users[senderId];
   if (!sender) return res.status(404).json({ error: "Sender user not found." });
+  const receiver = store.users[receiverId];
+  if (!receiver || receiver.isOfflinePreference) return res.status(409).json({ error: "Ciyaaryahankan hadda online ma aha." });
+  const receiverBusy = Object.values(store.rooms).some(
+    (room) => (room.status === "waiting" || room.status === "playing") && (room.players.some((player) => player.userId === receiverId) || room.invitedUserId === receiverId)
+  );
+  if (receiverBusy) return res.status(409).json({ error: "Ciyaaryahankan hadda ciyaar ama challenge kale ayuu ku jiraa." });
   const bet = parseFloat(betAmount) || 0;
   if (sender.balance < bet) {
     return res.status(400).json({ error: `Insufficient wallet balance for $${bet} bet.` });
@@ -4924,6 +4935,7 @@ app.post("/api/rooms/challenge/invite", async (req, res) => {
     },
     createdAt: Date.now()
   };
+  newRoom.invitedUserId = receiverId;
   store.rooms[roomId] = newRoom;
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== senderId && id !== receiverId);

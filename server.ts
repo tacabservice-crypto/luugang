@@ -3452,9 +3452,9 @@ app.get('/api/users/online', async (req, res) => {
 
   const onlineList: any[] = [];
 
-  // Return all registered users searching or online
+  // Return Search Live users plus connected players who are available on Home.
   Object.values(store.users).forEach(u => {
-    if (isBotPlayer(u.id)) return;
+    if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
 
     let status = 'offline';
     let seekingDetails: any = null;
@@ -3473,8 +3473,14 @@ app.get('/api/users/online', async (req, res) => {
       }
     }
 
-    // ONLY include users who are actively searching in matchmaking queues right now
-    if (status === 'seeking') {
+    const isBusy = Object.values(store.rooms).some(room =>
+      (room.status === 'waiting' || room.status === 'playing')
+      && (room.players.some(player => player.userId === u.id) || (room as any).invitedUserId === u.id)
+    );
+    const isConnectedHere = activeClients.some(client => client.userId === u.id);
+    if (status !== 'seeking' && isConnectedHere && !isBusy) status = 'online';
+
+    if (status === 'seeking' || status === 'online') {
       onlineList.push({
         id: u.id,
         username: u.username,
@@ -3490,7 +3496,7 @@ app.get('/api/users/online', async (req, res) => {
     }
   });
 
-  // Sort seeking players by seekingJoinedAt descending (most recent first)
+  // Search Live players remain first; available Home players follow.
   onlineList.sort((a, b) => {
     if (a.status === 'seeking' && b.status === 'seeking') {
       return (b.seekingJoinedAt || 0) - (a.seekingJoinedAt || 0);
@@ -5071,6 +5077,13 @@ app.post('/api/rooms/challenge/invite', async (req, res) => {
   const { senderId, receiverId, betAmount, capacity, gameMode } = req.body;
   const sender = store.users[senderId];
   if (!sender) return res.status(404).json({ error: 'Sender user not found.' });
+  const receiver = store.users[receiverId];
+  if (!receiver || receiver.isOfflinePreference) return res.status(409).json({ error: 'Ciyaaryahankan hadda online ma aha.' });
+  const receiverBusy = Object.values(store.rooms).some(room =>
+    (room.status === 'waiting' || room.status === 'playing')
+    && (room.players.some(player => player.userId === receiverId) || (room as any).invitedUserId === receiverId)
+  );
+  if (receiverBusy) return res.status(409).json({ error: 'Ciyaaryahankan hadda ciyaar ama challenge kale ayuu ku jiraa.' });
 
   const bet = parseFloat(betAmount) || 0;
   if (sender.balance < bet) {
@@ -5189,6 +5202,7 @@ app.post('/api/rooms/challenge/invite', async (req, res) => {
     },
     createdAt: Date.now()
   };
+  (newRoom as any).invitedUserId = receiverId;
 
   store.rooms[roomId] = newRoom;
 
