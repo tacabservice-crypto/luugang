@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface PhysicalDiceProps {
   value: number | null;
@@ -22,6 +22,7 @@ function PhysicalDice({
 }: PhysicalDiceProps) {
   const [rotation, setRotation] = useState({ x: 0, y: 0, z: 0 });
   const [shake, setShake] = useState(false);
+  const latestValueRef = useRef(value);
 
   // Map each value to standard 3D rotations to face the viewer
   const faceRotations: Record<number, { x: number; y: number; z: number }> = {
@@ -32,6 +33,10 @@ function PhysicalDice({
     3: { x: -90, y: 0, z: 0 },
     4: { x: 90, y: 0, z: 0 }
   };
+
+  useEffect(() => {
+    latestValueRef.current = value;
+  }, [value]);
 
   useEffect(() => {
     if (isRolling) {
@@ -45,23 +50,16 @@ function PhysicalDice({
         });
       }, 80);
 
-      const timer = setTimeout(() => {
-        clearInterval(interval);
-        setShake(false);
-        // Settle on the actual value rotation
-        const target = faceRotations[value || 1] || faceRotations[1];
-        setRotation(target);
-      }, 700);
-
       return () => {
         clearInterval(interval);
-        clearTimeout(timer);
       };
     } else {
-      const target = faceRotations[value || 1] || faceRotations[1];
+      setShake(false);
+      const finalValue = latestValueRef.current || 1;
+      const target = faceRotations[finalValue] || faceRotations[1];
       setRotation(target);
     }
-  }, [isRolling, value]);
+  }, [isRolling]);
 
   const renderFaceDots = (faceVal: number) => {
     const dotPositions: Record<number, number[]> = {

@@ -180,6 +180,7 @@ export default function GameRoomView({
   const onRollDiceRef = useRef(onRollDice);
   const rollRequestInFlightRef = useRef(false);
   const optimisticRollRef = useRef(false);
+  const rollAnimationStartedAtRef = useRef<number | null>(null);
   const optimisticRollTimeoutRef = useRef<number | null>(null);
   const lastShownInactivityStrikeAtRef = useRef(Number(
     room.players.find(player => player.userId === userId)?.lastInactivityStrikeAt || 0
@@ -261,6 +262,7 @@ export default function GameRoomView({
     // result still comes from the server, but database/network latency should
     // never make the dice look unresponsive.
     optimisticRollRef.current = true;
+    rollAnimationStartedAtRef.current = Date.now();
     setIsRolling(true);
     if (speakerOnRef.current && diceAudioRef.current) {
       diceAudioRef.current.volume = 0.5;
@@ -470,18 +472,29 @@ export default function GameRoomView({
         window.clearTimeout(optimisticRollTimeoutRef.current);
         optimisticRollTimeoutRef.current = null;
       }
+      const animationStartedAt = alreadyStartedFromTap && rollAnimationStartedAtRef.current
+        ? rollAnimationStartedAtRef.current
+        : Date.now();
+      rollAnimationStartedAtRef.current = animationStartedAt;
       setIsRolling(true);
       if (!alreadyStartedFromTap && isSpeakerOn && diceAudioRef.current) {
         diceAudioRef.current.volume = 0.5;
         diceAudioRef.current.currentTime = 0;
         diceAudioRef.current.play().catch(e => console.error("Error playing dice sound:", e));
       }
-      const timer = setTimeout(() => setIsRolling(false), 800);
+      // A server response must finish the animation that began with the tap,
+      // not restart it. This keeps the tumble and its sound on one timeline.
+      const remainingAnimationMs = Math.max(0, 800 - (Date.now() - animationStartedAt));
+      const timer = setTimeout(() => {
+        setIsRolling(false);
+        rollAnimationStartedAtRef.current = null;
+      }, remainingAnimationMs);
       return () => clearTimeout(timer);
     }
     // A fast token move can change the turn before the animation timer ends.
     // Always unlock the dice as soon as the new turn is unrolled.
     setIsRolling(false);
+    rollAnimationStartedAtRef.current = null;
   }, [room.gameState.diceRoll, room.gameState.hasRolled, room.gameState.turn, activePlayer?.userId, isSpeakerOn]);
 
   // Win/Loss sound effect
@@ -1222,10 +1235,9 @@ export default function GameRoomView({
             {/* 3D Physical Dice Controller */}
             <div className="flex flex-col items-center justify-center w-full">
               <PhysicalDice
-                // Do not replay the previous player's number after the turn
-                // has advanced. That stale fallback made a passed/no-move
-                // turn look frozen and caused users to tap the old dice again.
-                value={room.gameState.hasRolled ? (room.gameState.diceRoll ?? room.gameState.lastDiceRoll) : null}
+                // Keep the most recent result visible between turns. Whether
+                // rolling is allowed is controlled separately by `disabled`.
+                value={room.gameState.diceRoll ?? room.gameState.lastDiceRoll ?? null}
                 isRolling={isRolling}
                 onClick={canPlay ? requestDiceRoll : () => {}}
                 disabled={!canPlay || !isActiveTurn || room.gameState.hasRolled || isRollRequestPending}
