@@ -187,6 +187,7 @@ export default function Dashboard({
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);
+  const visibleOnlinePlayers = onlinePlayers.filter(player => player.status === 'online' || player.status === 'seeking');
 
   const fetchOnlinePlayers = async () => {
     try {
@@ -987,9 +988,9 @@ export default function Dashboard({
                 <button onClick={() => setShowOnlinePlayers(false)} className="rounded-full bg-white/5 p-1.5 text-slate-300"><X className="h-3.5 w-3.5" /></button>
               </div>
               <div className="max-h-[48vh] space-y-1 overflow-y-auto p-2">
-                {onlinePlayers.filter(player => player.status === 'online').length === 0 ? (
+                {visibleOnlinePlayers.length === 0 ? (
                   <div className="py-8 text-center text-[10px] font-bold text-slate-500">Hadda ma jiro ciyaaryahan Home-ka jooga.</div>
-                ) : onlinePlayers.filter(player => player.status === 'online').map(player => {
+                ) : visibleOnlinePlayers.map(player => {
                   const status = inviteStatus[player.id] || 'idle';
                   return (
                     <div key={player.id} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.035] px-2 py-1.5">
@@ -1029,7 +1030,7 @@ export default function Dashboard({
           <div className="bg-black/30 px-4 py-3 border-b border-white/10 flex items-center justify-between rounded-t-2xl">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Choose Bet Stake</span>
             <button onClick={() => { setShowOnlinePlayers(true); void fetchOnlinePlayers(); }} className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
-    <TrendingUp className="w-3.5 h-3.5" /> {onlinePlayers.filter(player => player.status === 'online').length} Online
+    <TrendingUp className="w-3.5 h-3.5" /> {visibleOnlinePlayers.length} Online
 </button>
           </div>
 
