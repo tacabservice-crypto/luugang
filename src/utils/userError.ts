@@ -1,5 +1,6 @@
 const ERROR_MESSAGES: Array<[RegExp, string]> = [
   [/auth\/(invalid-credential|user-not-found)|invalid credentials?/i, 'No account was found with these details.'],
+  [/no account.*phone number/i, 'No account was found with this phone number. Check the country code and password.'],
   [/auth\/wrong-password|incorrect password/i, 'The password is incorrect.'],
   [/auth\/email-already-in-use|already registered/i, 'This email is already registered.'],
   [/auth\/weak-password|password.*(6|weak)/i, 'Use a password with at least 6 characters.'],
@@ -11,6 +12,8 @@ const ERROR_MESSAGES: Array<[RegExp, string]> = [
   [/auth\/account-exists-with-different-credential/i, 'This email uses a different sign-in method.'],
   [/operation-not-allowed/i, 'This sign-in method is currently unavailable.'],
   [/phone sign-in is currently disabled/i, 'Phone sign-in is currently unavailable.'],
+  [/native security service is not configured/i, 'Phone registration security is temporarily unavailable.'],
+  [/security route is available only inside/i, 'The app could not verify this Android installation. Update the app and try again.'],
   [/auth\/invalid-phone-number|invalid phone/i, 'Check the selected country and enter the complete phone number.'],
   [/auth\/invalid-verification-code|invalid.*sms.*code/i, 'The SMS verification code is incorrect.'],
   [/auth\/code-expired/i, 'The SMS code has expired. Request a new one.'],

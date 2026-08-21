@@ -3432,9 +3432,6 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
   if (signInProvider === "phone" && onboardingComplete !== true) {
     return res.status(428).json({ error: "Complete phone verification and account setup before continuing." });
   }
-  if (isPhonePasswordLogin && phoneAuthAction !== "signup") {
-    return res.status(404).json({ error: "No account was found with this phone number." });
-  }
   if (requiresEmailOtp && signInProvider === "password") {
     const otpVerification = await readEmailOtp(firebaseUid);
     const verifiedAt = Number(otpVerification?.verifiedAt || 0);

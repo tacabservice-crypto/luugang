@@ -3306,9 +3306,9 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     return res.status(428).json({ error: 'Complete phone verification and account setup before continuing.' });
   }
 
-  if (isPhonePasswordLogin && phoneAuthAction !== 'signup') {
-    return res.status(404).json({ error: 'No account was found with this phone number.' });
-  }
+  // If Firebase authenticated an existing phone-alias credential but its app
+  // profile was lost during an earlier interrupted signup/deploy, continue to
+  // the minimal-profile recovery below instead of permanently locking it out.
 
   if (requiresEmailOtp && signInProvider === 'password') {
     const otpVerification = await readEmailOtp(firebaseUid);

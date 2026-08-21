@@ -200,16 +200,23 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         }
         const action = isLogin ? 'login' : 'signup';
         const isNativeAndroid = Capacitor.getPlatform() === 'android';
-        const securityResponse = await fetch(`${API_BASE_URL}${isNativeAndroid ? '/api/auth/native-security-ticket' : '/api/auth/turnstile/verify'}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(isNativeAndroid ? { 'X-LudoSom-Platform': 'android' } : {}),
-          },
-          body: JSON.stringify({ token: isNativeAndroid ? undefined : turnstileToken, phone: normalizedPhone, action }),
-        });
-        const securityData = await readApiJson(securityResponse);
-        if (!securityResponse.ok) throw new Error(securityData.error || 'Security check failed.');
+        // Native login already requires a valid Firebase email/password
+        // credential. The native security ticket is consumed only when a new
+        // phone-alias account is created, so requesting it for every APK login
+        // introduced an unnecessary failure point in Android WebView.
+        let securityData: { ticket?: string; error?: string } = {};
+        if (!isNativeAndroid || action === 'signup') {
+          const securityResponse = await fetch(`${API_BASE_URL}${isNativeAndroid ? '/api/auth/native-security-ticket' : '/api/auth/turnstile/verify'}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(isNativeAndroid ? { 'X-LudoSom-Platform': 'android' } : {}),
+            },
+            body: JSON.stringify({ token: isNativeAndroid ? undefined : turnstileToken, phone: normalizedPhone, action }),
+          });
+          securityData = await readApiJson(securityResponse);
+          if (!securityResponse.ok) throw new Error(securityData.error || 'Security check failed.');
+        }
         const phoneAlias = `phone.${normalizedPhone.slice(1)}@phone.ludosom.app`;
         sessionStorage.setItem('ludosom_auth_onboarding_pending', '1');
         const credential = isLogin
@@ -226,7 +233,7 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
         const raw = String(err?.code || err?.message || '');
         if (/email-already-in-use/i.test(raw)) setError('This phone number is already registered. Please sign in.');
         else if (/invalid-credential|user-not-found/i.test(raw)) setError('No account was found with this phone number and password.');
-        else setError(userErrorMessage(err, 'Phone sign-in could not be completed.'));
+        else setError(userErrorMessage(err, String(err?.message || 'Phone sign-in could not be completed.')));
       } finally { setLoading(false); }
       return;
     }
