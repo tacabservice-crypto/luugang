@@ -1941,16 +1941,20 @@ async function syncToFirestore() {
 }
 var pendingMySqlStoreSnapshot = null;
 var mySqlStoreSync = null;
+var lastMySqlStoreSnapshotAt = 0;
+var MYSQL_STORE_SNAPSHOT_INTERVAL_MS = 5e3;
 function queueMySqlStoreSync() {
   if (firebaseMySqlMigrationMode || mysqlRuntimeStoreMode() === "disabled") return Promise.resolve();
   pendingMySqlStoreSnapshot = store;
   if (!mySqlStoreSync) {
     mySqlStoreSync = (async () => {
       while (pendingMySqlStoreSnapshot) {
-        await new Promise((resolve) => setTimeout(resolve, 750));
+        const waitMs = Math.max(750, MYSQL_STORE_SNAPSHOT_INTERVAL_MS - (Date.now() - lastMySqlStoreSnapshotAt));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
         const snapshot = JSON.parse(JSON.stringify(pendingMySqlStoreSnapshot));
         pendingMySqlStoreSnapshot = null;
         await saveRuntimeStoreToMySql(snapshot);
+        lastMySqlStoreSnapshotAt = Date.now();
       }
     })().finally(() => {
       mySqlStoreSync = null;
@@ -1959,15 +1963,19 @@ function queueMySqlStoreSync() {
   return mySqlStoreSync;
 }
 var diskStoreSaveTimer = null;
+var lastDiskStoreSaveAt = 0;
+var DISK_STORE_SAVE_INTERVAL_MS = 1e4;
 function queueDiskStoreSave() {
   if (diskStoreSaveTimer) return;
+  const delay = Math.max(250, DISK_STORE_SAVE_INTERVAL_MS - (Date.now() - lastDiskStoreSaveAt));
   diskStoreSaveTimer = setTimeout(() => {
     diskStoreSaveTimer = null;
-    const payload = JSON.stringify(store, null, 2);
+    const payload = JSON.stringify(store);
     void import_fs.default.promises.writeFile(DB_FILE, payload, "utf8").catch((error) => {
       console.error("Failed to write database backup to disk.", error);
     });
-  }, 200);
+    lastDiskStoreSaveAt = Date.now();
+  }, delay);
   diskStoreSaveTimer.unref?.();
 }
 function saveStore() {
@@ -3537,6 +3545,13 @@ app.get("/api/users/online", async (req, res) => {
   cleanupMatchmakingQueues();
   const now2 = Date.now();
   const onlineList = [];
+  const connectedUserIds = new Set(activeClients.map((client) => client.userId));
+  const busyUserIds = /* @__PURE__ */ new Set();
+  Object.values(store.rooms).forEach((room) => {
+    if (room.status !== "waiting" && room.status !== "playing") return;
+    room.players.forEach((player) => busyUserIds.add(player.userId));
+    if (room.invitedUserId) busyUserIds.add(String(room.invitedUserId));
+  });
   Object.values(store.users).forEach((u) => {
     if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
     let status = "offline";
@@ -3553,11 +3568,7 @@ app.get("/api/users/online", async (req, res) => {
         break;
       }
     }
-    const isBusy = Object.values(store.rooms).some(
-      (room) => (room.status === "waiting" || room.status === "playing") && (room.players.some((player) => player.userId === u.id) || room.invitedUserId === u.id)
-    );
-    const isConnectedHere = activeClients.some((client) => client.userId === u.id);
-    if (status !== "seeking" && isConnectedHere && !isBusy) status = "online";
+    if (status !== "seeking" && connectedUserIds.has(u.id) && !busyUserIds.has(u.id)) status = "online";
     if (status === "seeking" || status === "online") {
       onlineList.push({
         id: u.id,

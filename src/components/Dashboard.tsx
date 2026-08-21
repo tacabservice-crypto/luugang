@@ -211,9 +211,10 @@ export default function Dashboard({
 
   useEffect(() => {
     fetchOnlinePlayers();
-    // SSE gives instant updates on the same server process; this 2-second sync
-    // also discovers searches created on other production processes/browsers.
-    const liveSearchInterval = window.setInterval(fetchOnlinePlayers, 5000);
+    // SSE refreshes immediately. Poll only as a cross-process safety net and
+    // use a shorter interval solely while the radar/list is actively needed.
+    const pollInterval = matchmakingState.isQueued || showOnlinePlayers ? 15_000 : 60_000;
+    const liveSearchInterval = window.setInterval(fetchOnlinePlayers, pollInterval);
     const handleRefresh = () => fetchOnlinePlayers();
     const handlePlayerLeft = (e: CustomEvent) => {
       const { userId } = e.detail;
@@ -239,7 +240,7 @@ export default function Dashboard({
       window.removeEventListener('refresh_online_players', handleRefresh);
       window.removeEventListener('player_left_queue', handlePlayerLeft as EventListener);
     };
-  }, [user.id]);
+  }, [user.id, matchmakingState.isQueued, showOnlinePlayers]);
 
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 

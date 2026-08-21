@@ -27,7 +27,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}
 const AuthScreen = React.lazy(() => import('./components/AuthScreen'));
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const GameRoomView = React.lazy(() => import('./components/GameRoom'));
-import WalletModal from './components/WalletModal';
+const WalletModal = React.lazy(() => import('./components/WalletModal'));
 const RejoinPrompt = React.lazy(() => import('./components/RejoinPrompt'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
@@ -349,6 +349,13 @@ export default function App() {
       window.clearTimeout(authLoadingTimeout);
       if (firebaseUser) {
         try {
+          try {
+            const cached = JSON.parse(localStorage.getItem('ludosom_cached_profile') || 'null') as UserProfile | null;
+            if (cached?.id) {
+              setUser(cached);
+              setAuthLoading(false);
+            }
+          } catch { /* ignore invalid cache */ }
           await firebaseUser.reload();
           const providerId = firebaseUser.providerData[0]?.providerId;
           if (sessionStorage.getItem('ludosom_auth_onboarding_pending') === '1') {
@@ -358,13 +365,13 @@ export default function App() {
           const token = await firebaseUser.getIdToken();
           let response: Response | null = null;
           let profileData: UserProfile | null = null;
-          for (let attempt = 0; attempt < 12; attempt += 1) {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
             try {
-              response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+              response = await fetchWithTimeout(`${API_BASE_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ email: firebaseUser.email, username: undefined, avatar: undefined }),
-              });
+              }, 8_000);
               if (response.ok) {
                 profileData = await response.json();
                 break;
@@ -380,9 +387,9 @@ export default function App() {
               }
             } catch (requestError) {
               if (/session has expired|verification is required|OTP verification/i.test(String((requestError as Error)?.message || ''))) throw requestError;
-              if (attempt === 11) throw requestError;
+              if (attempt === 2) throw requestError;
             }
-            await new Promise(resolve => window.setTimeout(resolve, 2500));
+            await new Promise(resolve => window.setTimeout(resolve, 1000));
           }
           if (!profileData) throw new Error(`The server is still restarting (${response?.status || 'offline'}).`);
           setUser(profileData);
@@ -1488,6 +1495,16 @@ export default function App() {
     </>
   );
 
+  const renderWallet = () => isWalletOpen ? (
+    <React.Suspense fallback={null}>
+      <WalletModal
+        user={user}
+        onClose={() => setIsWalletOpen(false)}
+        onBalanceUpdated={handleRefreshBalance}
+      />
+    </React.Suspense>
+  ) : null;
+
   if (activeRoom) {
     return (
       <>
@@ -1514,13 +1531,7 @@ export default function App() {
               }
             }}
           />
-        {isWalletOpen && (
-          <WalletModal
-            user={user}
-            onClose={() => setIsWalletOpen(false)}
-            onBalanceUpdated={handleRefreshBalance}
-          />
-        )}
+        {renderWallet()}
         {renderOverlays()}
         <Toaster />
       </VoiceChatProvider>
@@ -1553,13 +1564,7 @@ export default function App() {
               }
             }}
           />
-          {isWalletOpen && (
-            <WalletModal
-              user={user}
-              onClose={() => setIsWalletOpen(false)}
-              onBalanceUpdated={handleRefreshBalance}
-            />
-          )}
+          {renderWallet()}
           {renderOverlays()}
           <Toaster />
         </VoiceChatProvider>
@@ -1582,13 +1587,7 @@ export default function App() {
             onDismissRejoin={handleDismissRejoin}
             onProfileUpdate={handleProfileUpdate}
           />
-          {isWalletOpen && (
-            <WalletModal
-              user={user}
-              onClose={() => setIsWalletOpen(false)}
-              onBalanceUpdated={handleRefreshBalance}
-            />
-          )}
+          {renderWallet()}
           {renderOverlays()}
           <Toaster />
         </VoiceChatProvider>

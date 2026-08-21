@@ -1330,6 +1330,8 @@ async function syncToFirestore() {
 
 let pendingMySqlStoreSnapshot: Record<string, any> | null = null;
 let mySqlStoreSync: Promise<void> | null = null;
+let lastMySqlStoreSnapshotAt = 0;
+const MYSQL_STORE_SNAPSHOT_INTERVAL_MS = 5_000;
 
 function queueMySqlStoreSync(): Promise<void> {
   if (firebaseMySqlMigrationMode || mysqlRuntimeStoreMode() === 'disabled') return Promise.resolve();
@@ -1340,12 +1342,14 @@ function queueMySqlStoreSync(): Promise<void> {
   if (!mySqlStoreSync) {
     mySqlStoreSync = (async () => {
       while (pendingMySqlStoreSnapshot) {
-        // Dice rolls and timer ticks can arrive in large bursts. Allow a short
-        // coalescing window so one shared snapshot represents the whole burst.
-        await new Promise(resolve => setTimeout(resolve, 750));
+        // Live rooms have their own persistence. Throttle the compatibility
+        // snapshot so serializing the entire store cannot block the API loop.
+        const waitMs = Math.max(750, MYSQL_STORE_SNAPSHOT_INTERVAL_MS - (Date.now() - lastMySqlStoreSnapshotAt));
+        await new Promise(resolve => setTimeout(resolve, waitMs));
         const snapshot = JSON.parse(JSON.stringify(pendingMySqlStoreSnapshot));
         pendingMySqlStoreSnapshot = null;
         await saveRuntimeStoreToMySql(snapshot);
+        lastMySqlStoreSnapshotAt = Date.now();
       }
     })().finally(() => {
       mySqlStoreSync = null;
@@ -1355,16 +1359,22 @@ function queueMySqlStoreSync(): Promise<void> {
 }
 
 let diskStoreSaveTimer: NodeJS.Timeout | null = null;
+let lastDiskStoreSaveAt = 0;
+const DISK_STORE_SAVE_INTERVAL_MS = 10_000;
 
 function queueDiskStoreSave() {
   if (diskStoreSaveTimer) return;
+  const delay = Math.max(250, DISK_STORE_SAVE_INTERVAL_MS - (Date.now() - lastDiskStoreSaveAt));
   diskStoreSaveTimer = setTimeout(() => {
     diskStoreSaveTimer = null;
-    const payload = JSON.stringify(store, null, 2);
+    // Compact JSON substantially reduces CPU time and disk I/O. Critical
+    // financial writes still use saveStoreAndWait immediately.
+    const payload = JSON.stringify(store);
     void fs.promises.writeFile(DB_FILE, payload, 'utf8').catch(error => {
       console.error('Failed to write database backup to disk.', error);
     });
-  }, 200);
+    lastDiskStoreSaveAt = Date.now();
+  }, delay);
   diskStoreSaveTimer.unref?.();
 }
 
@@ -3453,6 +3463,14 @@ app.get('/api/users/online', async (req, res) => {
   const onlineList: any[] = [];
 
   // Return Search Live users plus connected players who are available on Home.
+  const connectedUserIds = new Set(activeClients.map(client => client.userId));
+  const busyUserIds = new Set<string>();
+  Object.values(store.rooms).forEach(room => {
+    if (room.status !== 'waiting' && room.status !== 'playing') return;
+    room.players.forEach(player => busyUserIds.add(player.userId));
+    if ((room as any).invitedUserId) busyUserIds.add(String((room as any).invitedUserId));
+  });
+
   Object.values(store.users).forEach(u => {
     if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
 
@@ -3473,12 +3491,7 @@ app.get('/api/users/online', async (req, res) => {
       }
     }
 
-    const isBusy = Object.values(store.rooms).some(room =>
-      (room.status === 'waiting' || room.status === 'playing')
-      && (room.players.some(player => player.userId === u.id) || (room as any).invitedUserId === u.id)
-    );
-    const isConnectedHere = activeClients.some(client => client.userId === u.id);
-    if (status !== 'seeking' && isConnectedHere && !isBusy) status = 'online';
+    if (status !== 'seeking' && connectedUserIds.has(u.id) && !busyUserIds.has(u.id)) status = 'online';
 
     if (status === 'seeking' || status === 'online') {
       onlineList.push({
