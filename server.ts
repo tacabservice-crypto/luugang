@@ -42,7 +42,7 @@ function getDistDirectory(): string {
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
-import { isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
+import { getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
@@ -1980,7 +1980,7 @@ function isBotPlayer(userId: string): boolean {
 }
 
 // Trigger game auto-play bot actions
-function executeBotTurnIfActive(room: GameRoom) {
+function executeBotTurnIfActiveLegacy(room: GameRoom) {
   const activePlayer = room.players[room.gameState.turn];
   if (!activePlayer || !isBotPlayer(activePlayer.userId)) return;
 
@@ -2051,6 +2051,91 @@ function executeBotTurnIfActive(room: GameRoom) {
           broadcastToRoom(room.id, 'game_update', room);
           executeBotTurnIfActive(room);
         }, 900);
+      }
+    }
+  }, 400);
+}
+
+function executeBotTurnIfActive(room: GameRoom) {
+  const activePlayer = room.players[room.gameState.turn];
+  if (!activePlayer || !isBotPlayer(activePlayer.userId)) return;
+  const roomId = room.id;
+  const botUserId = activePlayer.userId;
+
+  setTimeout(async () => {
+    try {
+      // Always re-read the canonical object. MySQL hydration can replace a
+      // captured room while the bot is thinking; mutating that old object was
+      // the main cause of bot games freezing after an apparently valid roll.
+      const currentRoom = store.rooms[roomId];
+      const currentBot = currentRoom?.players[currentRoom.gameState.turn];
+      if (!currentRoom || currentRoom.status !== 'playing' || currentBot?.userId !== botUserId || !isBotPlayer(currentBot.userId)) return;
+      if (currentRoom.gameState.hasRolled) return;
+
+      const diceValue = Math.floor(Math.random() * 6) + 1;
+      currentRoom.gameState.diceRoll = diceValue;
+      currentRoom.gameState.lastDiceRoll = diceValue;
+      currentRoom.gameState.hasRolled = true;
+      currentRoom.gameState.turnTimer = 30;
+      currentRoom.gameState.consecutiveSixes = diceValue === 6
+        ? Number(currentRoom.gameState.consecutiveSixes || 0) + 1
+        : 0;
+      const tripleSixPenalty = currentRoom.gameState.consecutiveSixes >= 3;
+      if (tripleSixPenalty) {
+        currentRoom.gameState.consecutiveSixes = 0;
+        addLog(currentRoom, `Bot ${currentBot.username} rolled three consecutive sixes and loses the turn.`);
+      }
+      touchRoom(currentRoom);
+      addLog(currentRoom, `Bot ${currentBot.username} rolled a ${diceValue}.`);
+      saveStore();
+      await persistLiveRoom(currentRoom);
+      broadcastToRoom(roomId, 'game_update', currentRoom);
+
+      const selectedTokenId = tripleSixPenalty ? null : (selectAutomaticToken(currentRoom, currentBot, diceValue)?.id || null);
+      if (!tripleSixPenalty && !selectedTokenId) addLog(currentRoom, `Bot ${currentBot.username} has no valid move.`);
+
+      setTimeout(async () => {
+        try {
+          const latestRoom = store.rooms[roomId];
+          const latestBot = latestRoom?.players[latestRoom.gameState.turn];
+          if (!latestRoom || latestRoom.status !== 'playing' || latestBot?.userId !== botUserId) return;
+          if (!latestRoom.gameState.hasRolled || latestRoom.gameState.diceRoll !== diceValue) return;
+
+          if (selectedTokenId) moveTokenLogic(latestRoom, selectedTokenId, diceValue);
+          else advanceTurn(latestRoom);
+          saveStore();
+          await persistLiveRoom(latestRoom);
+          void persistRoomUserProfiles(latestRoom).catch(error => console.error(`Bot profile sync failed for room ${roomId}:`, error));
+          broadcastToRoom(roomId, 'game_update', latestRoom);
+          executeBotTurnIfActive(latestRoom);
+        } catch (error) {
+          console.error(`Bot move failed for room ${roomId}:`, error);
+          // The in-memory move may already be complete. Retry publishing that
+          // canonical state instead of leaving hasRolled=true forever.
+          setTimeout(async () => {
+            try {
+              const recoveryRoom = store.rooms[roomId];
+              if (!recoveryRoom) return;
+              await persistLiveRoom(recoveryRoom);
+              broadcastToRoom(roomId, 'game_update', recoveryRoom);
+              executeBotTurnIfActive(recoveryRoom);
+            } catch (retryError) {
+              console.error(`Bot move recovery failed for room ${roomId}:`, retryError);
+            }
+          }, 1000);
+        }
+      }, 900);
+    } catch (error) {
+      console.error(`Bot roll failed for room ${roomId}:`, error);
+      const latestRoom = store.rooms[roomId];
+      if (latestRoom?.status === 'playing') {
+        // The roll was not durably published, so return to a clean unrolled
+        // state and let the bot retry. This avoids a permanent rolled/no-move
+        // state after a temporary database failure.
+        latestRoom.gameState.diceRoll = null;
+        latestRoom.gameState.hasRolled = false;
+        touchRoom(latestRoom);
+        setTimeout(() => executeBotTurnIfActive(latestRoom), 1000);
       }
     }
   }, 400);
@@ -2599,7 +2684,24 @@ setInterval(async () => {
         }
 
         if (gs.turnTimer === 0) {
-          if (!activePlayer || isBotPlayer(activePlayer.userId)) return;
+          if (!activePlayer) return;
+          if (isBotPlayer(activePlayer.userId)) {
+            // Final safety net: a temporary DB/process interruption must not
+            // leave a bot turn parked forever. Resume an already rolled bot
+            // move, or restart an unrolled bot turn.
+            if (gs.hasRolled && gs.diceRoll !== null) {
+              const recoveryToken = selectAutomaticToken(room, activePlayer, gs.diceRoll);
+              if (recoveryToken) moveTokenLogic(room, recoveryToken.id, gs.diceRoll);
+              else advanceTurn(room);
+              saveStore();
+              void persistLiveRoom(room).catch(error => console.error(`Bot watchdog persistence failed for ${room.id}:`, error));
+              broadcastToRoom(room.id, 'game_update', room);
+              executeBotTurnIfActive(room);
+            } else {
+              executeBotTurnIfActive(room);
+            }
+            return;
+          }
           const strike = Number(activePlayer.inactivityStrikes || 0) + 1;
           activePlayer.inactivityStrikes = strike;
           activePlayer.lastInactivityStrikeAt = now;
@@ -4156,6 +4258,50 @@ app.use('/api/rooms', async (req, res, next) => {
   next();
 });
 
+// Serialize the two authoritative gameplay mutations across every Node
+// worker. A slow request can outlive the client's timeout; without this lock,
+// a retry routed to another worker could roll or move the same turn twice.
+app.use('/api/rooms', async (req, res, next) => {
+  if (!isMySqlConfigured() || req.method !== 'POST' || !['/roll-dice', '/move-token'].includes(req.path)) return next();
+  const roomId = String(req.body?.roomId || '').trim().toUpperCase();
+  if (!roomId) return res.status(400).json({ error: 'Room ID is required.' });
+
+  let connection: any;
+  try {
+    connection = await getMySqlPool().getConnection();
+    const lockName = `ludosom_room_${roomId}`.slice(0, 64);
+    const [rows] = await connection.query('SELECT GET_LOCK(?, 8) AS acquired', [lockName]);
+    if (Number(rows[0]?.acquired) !== 1) {
+      connection.release();
+      return res.status(503).json({ error: 'The game server is busy synchronizing this turn. Please retry.' });
+    }
+
+    // Once the lock is held, MySQL is the canonical hand-off state. This
+    // prevents a worker's old in-memory snapshot from rejecting a valid move.
+    const sharedRoom = await loadMySqlGameRoom(roomId);
+    const localRoom = store.rooms[roomId];
+    if (sharedRoom && !(localRoom && ['completed', 'cancelled'].includes(localRoom.status))) {
+      store.rooms[roomId] = sharedRoom;
+    }
+
+    let released = false;
+    const releaseLock = () => {
+      if (released) return;
+      released = true;
+      void connection.query('SELECT RELEASE_LOCK(?)', [lockName])
+        .catch((error: unknown) => console.error(`Failed to release gameplay lock for ${roomId}:`, error))
+        .finally(() => connection.release());
+    };
+    res.once('finish', releaseLock);
+    res.once('close', releaseLock);
+    next();
+  } catch (error) {
+    if (connection) connection.release();
+    console.error(`Failed to acquire gameplay lock for ${roomId}:`, error);
+    return res.status(503).json({ error: 'The game server could not synchronize this turn. Please retry.' });
+  }
+});
+
 // GET /api/rooms/active
 // Returns a list of all currently active games that can be spectated.
 app.get('/api/rooms/active', (req, res) => {
@@ -5437,7 +5583,8 @@ app.post('/api/rooms/move-token', async (req, res) => {
   // Execute Move
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
+  await persistLiveRoom(room);
+  void persistRoomUserProfiles(room).catch(error => console.error(`Profile sync failed after move in room ${room.id}:`, error));
   broadcastToRoom(room.id, 'game_update', room);
   
   // Trigger bot turn if needed

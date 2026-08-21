@@ -2440,51 +2440,68 @@ function isBotPlayer(userId) {
 function executeBotTurnIfActive(room) {
   const activePlayer = room.players[room.gameState.turn];
   if (!activePlayer || !isBotPlayer(activePlayer.userId)) return;
-  setTimeout(() => {
-    if (!room.gameState.hasRolled) {
-      const d = Math.floor(Math.random() * 6) + 1;
-      room.gameState.diceRoll = d;
-      room.gameState.lastDiceRoll = d;
-      room.gameState.hasRolled = true;
-      touchRoom(room);
-      broadcastToRoom(room.id, "game_update", room);
-      addLog(room, `\u{1F916} Bot ${activePlayer.username} rolled a ${d}!`);
-      const playableColor = getPlayableColor(room, activePlayer);
-      const playerTokens = room.gameState.tokens.filter((t) => t.color === playableColor);
-      const validTokens = playerTokens.filter((t) => isMoveValid(t, d));
-      if (validTokens.length === 0) {
-        addLog(room, `\u{1F916} Bot ${activePlayer.username} has no valid moves.`);
-        setTimeout(() => {
-          advanceTurn(room);
-          broadcastToRoom(room.id, "game_update", room);
-          executeBotTurnIfActive(room);
-        }, 900);
-      } else {
-        let selectedToken = validTokens[0];
-        for (const token of validTokens) {
-          const nextRelative = token.position === -1 ? 0 : token.position + d;
-          const globalPos = getGlobalPosition(token.color, nextRelative);
-          if (globalPos !== null && !SAFE_GLOBAL_SQUARES.includes(globalPos)) {
-            const hasOpponent = room.gameState.tokens.some((t) => {
-              if (t.color === token.color || t.position < 0 || t.position > 50) return false;
-              const opGlobal = getGlobalPosition(t.color, t.position);
-              return opGlobal === globalPos;
-            });
-            if (hasOpponent) {
-              selectedToken = token;
-              break;
+  const roomId = room.id;
+  const botUserId = activePlayer.userId;
+  setTimeout(async () => {
+    try {
+      const currentRoom = store.rooms[roomId];
+      const currentBot = currentRoom?.players[currentRoom.gameState.turn];
+      if (!currentRoom || currentRoom.status !== "playing" || currentBot?.userId !== botUserId || !isBotPlayer(currentBot.userId)) return;
+      if (currentRoom.gameState.hasRolled) return;
+      const diceValue = Math.floor(Math.random() * 6) + 1;
+      currentRoom.gameState.diceRoll = diceValue;
+      currentRoom.gameState.lastDiceRoll = diceValue;
+      currentRoom.gameState.hasRolled = true;
+      currentRoom.gameState.turnTimer = 30;
+      currentRoom.gameState.consecutiveSixes = diceValue === 6 ? Number(currentRoom.gameState.consecutiveSixes || 0) + 1 : 0;
+      const tripleSixPenalty = currentRoom.gameState.consecutiveSixes >= 3;
+      if (tripleSixPenalty) {
+        currentRoom.gameState.consecutiveSixes = 0;
+        addLog(currentRoom, `Bot ${currentBot.username} rolled three consecutive sixes and loses the turn.`);
+      }
+      touchRoom(currentRoom);
+      addLog(currentRoom, `Bot ${currentBot.username} rolled a ${diceValue}.`);
+      saveStore();
+      await persistLiveRoom(currentRoom);
+      broadcastToRoom(roomId, "game_update", currentRoom);
+      const selectedTokenId = tripleSixPenalty ? null : selectAutomaticToken(currentRoom, currentBot, diceValue)?.id || null;
+      if (!tripleSixPenalty && !selectedTokenId) addLog(currentRoom, `Bot ${currentBot.username} has no valid move.`);
+      setTimeout(async () => {
+        try {
+          const latestRoom = store.rooms[roomId];
+          const latestBot = latestRoom?.players[latestRoom.gameState.turn];
+          if (!latestRoom || latestRoom.status !== "playing" || latestBot?.userId !== botUserId) return;
+          if (!latestRoom.gameState.hasRolled || latestRoom.gameState.diceRoll !== diceValue) return;
+          if (selectedTokenId) moveTokenLogic(latestRoom, selectedTokenId, diceValue);
+          else advanceTurn(latestRoom);
+          saveStore();
+          await persistLiveRoom(latestRoom);
+          void persistRoomUserProfiles(latestRoom).catch((error) => console.error(`Bot profile sync failed for room ${roomId}:`, error));
+          broadcastToRoom(roomId, "game_update", latestRoom);
+          executeBotTurnIfActive(latestRoom);
+        } catch (error) {
+          console.error(`Bot move failed for room ${roomId}:`, error);
+          setTimeout(async () => {
+            try {
+              const recoveryRoom = store.rooms[roomId];
+              if (!recoveryRoom) return;
+              await persistLiveRoom(recoveryRoom);
+              broadcastToRoom(roomId, "game_update", recoveryRoom);
+              executeBotTurnIfActive(recoveryRoom);
+            } catch (retryError) {
+              console.error(`Bot move recovery failed for room ${roomId}:`, retryError);
             }
-          }
+          }, 1e3);
         }
-        if (selectedToken === validTokens[0] && d === 6) {
-          const baseToken = validTokens.find((t) => t.position === -1);
-          if (baseToken) selectedToken = baseToken;
-        }
-        setTimeout(() => {
-          moveTokenLogic(room, selectedToken.id, d);
-          broadcastToRoom(room.id, "game_update", room);
-          executeBotTurnIfActive(room);
-        }, 900);
+      }, 900);
+    } catch (error) {
+      console.error(`Bot roll failed for room ${roomId}:`, error);
+      const latestRoom = store.rooms[roomId];
+      if (latestRoom?.status === "playing") {
+        latestRoom.gameState.diceRoll = null;
+        latestRoom.gameState.hasRolled = false;
+        touchRoom(latestRoom);
+        setTimeout(() => executeBotTurnIfActive(latestRoom), 1e3);
       }
     }
   }, 400);
@@ -2909,7 +2926,21 @@ setInterval(async () => {
             changed = true;
           }
           if (gs.turnTimer === 0) {
-            if (!activePlayer || isBotPlayer(activePlayer.userId)) return;
+            if (!activePlayer) return;
+            if (isBotPlayer(activePlayer.userId)) {
+              if (gs.hasRolled && gs.diceRoll !== null) {
+                const recoveryToken = selectAutomaticToken(room, activePlayer, gs.diceRoll);
+                if (recoveryToken) moveTokenLogic(room, recoveryToken.id, gs.diceRoll);
+                else advanceTurn(room);
+                saveStore();
+                void persistLiveRoom(room).catch((error) => console.error(`Bot watchdog persistence failed for ${room.id}:`, error));
+                broadcastToRoom(room.id, "game_update", room);
+                executeBotTurnIfActive(room);
+              } else {
+                executeBotTurnIfActive(room);
+              }
+              return;
+            }
             const strike = Number(activePlayer.inactivityStrikes || 0) + 1;
             activePlayer.inactivityStrikes = strike;
             activePlayer.lastInactivityStrikeAt = now2;
@@ -4178,6 +4209,39 @@ app.use("/api/rooms", async (req, res, next) => {
   });
   next();
 });
+app.use("/api/rooms", async (req, res, next) => {
+  if (!isMySqlConfigured() || req.method !== "POST" || !["/roll-dice", "/move-token"].includes(req.path)) return next();
+  const roomId = String(req.body?.roomId || "").trim().toUpperCase();
+  if (!roomId) return res.status(400).json({ error: "Room ID is required." });
+  let connection;
+  try {
+    connection = await getMySqlPool().getConnection();
+    const lockName = `ludosom_room_${roomId}`.slice(0, 64);
+    const [rows] = await connection.query("SELECT GET_LOCK(?, 8) AS acquired", [lockName]);
+    if (Number(rows[0]?.acquired) !== 1) {
+      connection.release();
+      return res.status(503).json({ error: "The game server is busy synchronizing this turn. Please retry." });
+    }
+    const sharedRoom = await loadMySqlGameRoom(roomId);
+    const localRoom = store.rooms[roomId];
+    if (sharedRoom && !(localRoom && ["completed", "cancelled"].includes(localRoom.status))) {
+      store.rooms[roomId] = sharedRoom;
+    }
+    let released = false;
+    const releaseLock = () => {
+      if (released) return;
+      released = true;
+      void connection.query("SELECT RELEASE_LOCK(?)", [lockName]).catch((error) => console.error(`Failed to release gameplay lock for ${roomId}:`, error)).finally(() => connection.release());
+    };
+    res.once("finish", releaseLock);
+    res.once("close", releaseLock);
+    next();
+  } catch (error) {
+    if (connection) connection.release();
+    console.error(`Failed to acquire gameplay lock for ${roomId}:`, error);
+    return res.status(503).json({ error: "The game server could not synchronize this turn. Please retry." });
+  }
+});
 app.get("/api/rooms/active", (req, res) => {
   const now2 = Date.now();
   const activeGames = Object.values(store.rooms).filter((r) => {
@@ -5170,7 +5234,8 @@ app.post("/api/rooms/move-token", async (req, res) => {
   gs.turnTimer = 30;
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
+  await persistLiveRoom(room);
+  void persistRoomUserProfiles(room).catch((error) => console.error(`Profile sync failed after move in room ${room.id}:`, error));
   broadcastToRoom(room.id, "game_update", room);
   executeBotTurnIfActive(room);
   res.json(room);
