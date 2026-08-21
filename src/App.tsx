@@ -975,6 +975,20 @@ export default function App() {
                 setActiveRoom(previous => previous && shouldAcceptRoomUpdate(previous, latestRoom)
                   ? { ...latestRoom, rejectionReason: previous.rejectionReason || latestRoom.rejectionReason }
                   : previous);
+                // The tap may have crossed a turn transition. If the fresh
+                // authoritative snapshot now says it is this user's turn,
+                // replay the same roll once so the game continues without
+                // requiring another tap or leaving the board stuck.
+                const latestPlayer = latestRoom.players[latestRoom.gameState.turn];
+                if (latestRoom.status === 'playing' && latestPlayer?.userId === user.id && !latestRoom.gameState.hasRolled) {
+                  const retryResponse = await fetchWithTimeout(`${API_BASE_URL}/api/rooms/roll-dice`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: user.id, roomId: latestRoom.id }),
+                  });
+                  const retryData = await retryResponse.json().catch(() => null);
+                  if (retryResponse.ok && retryData?.id === latestRoom.id) setActiveRoom(retryData);
+                }
                 return;
               }
             }
