@@ -188,9 +188,9 @@ export default function Dashboard({
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);
-  // The Home challenge list is intentionally limited to players who are
-  // online and available. Search Live players are shown in the radar instead.
-  const availableHomePlayers = onlinePlayers.filter(player => player.status === 'online');
+  // The Online button should show every currently connected player returned by
+  // the server. The server already removes players who are inside a game.
+  const availableHomePlayers = onlinePlayers.filter(player => player.status === 'online' || player.status === 'seeking');
 
   const fetchOnlinePlayers = async () => {
     try {
