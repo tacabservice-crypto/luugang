@@ -5357,7 +5357,7 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
     // Advance turn synchronously
     advanceTurn(room);
     saveStore();
-    void persistLiveRoom(room).catch(error => console.error(`Failed to persist room ${room.id}:`, error));
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, 'game_update', room);
     executeBotTurnIfActive(room);
 
@@ -5374,27 +5374,31 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
     // FIRST, broadcast the result of the roll so all clients can see the animation.
     addLog(room, `${activePlayer.username} has no valid moves with roll ${d}. Turn passes.`);
     saveStore();
-    void persistLiveRoom(room).catch(error => console.error(`Failed to persist room ${room.id}:`, error));
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, 'game_update', room);
     res.json(room); // Respond to the roller immediately.
 
     // SECOND, after a delay to allow for the animation, advance the turn and broadcast again.
-    setTimeout(() => {
-      // Re-fetch the room to ensure we're acting on the latest state
-      const currentRoom = store.rooms[roomId];
-      if (currentRoom && currentRoom.status === 'playing') {
-        advanceTurn(currentRoom);
-        saveStore();
-        void persistLiveRoom(currentRoom).catch(error => console.error(`Failed to persist room ${currentRoom.id}:`, error));
-        broadcastToRoom(currentRoom.id, 'game_update', currentRoom);
-        executeBotTurnIfActive(currentRoom);
+    setTimeout(async () => {
+      try {
+        // Re-fetch the room to ensure we're acting on the latest state
+        const currentRoom = store.rooms[roomId];
+        if (currentRoom && currentRoom.status === 'playing') {
+          advanceTurn(currentRoom);
+          saveStore();
+          await persistLiveRoom(currentRoom);
+          broadcastToRoom(currentRoom.id, 'game_update', currentRoom);
+          executeBotTurnIfActive(currentRoom);
+        }
+      } catch (error) {
+        console.error(`Failed to advance no-move turn for room ${roomId}:`, error);
       }
     }, 1500); // 1.5-second delay for clients to see the roll animation
 
   } else {
     // There are valid moves, so we just update the state and wait for the player's move.
     saveStore();
-    void persistLiveRoom(room).catch(error => console.error(`Failed to persist room ${room.id}:`, error));
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, 'game_update', room);
     res.json(room);
   }
@@ -5433,7 +5437,7 @@ app.post('/api/rooms/move-token', async (req, res) => {
   // Execute Move
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  void Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]).catch(error => console.error(`Failed to persist move for room ${room.id}:`, error));
+  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
   broadcastToRoom(room.id, 'game_update', room);
   
   // Trigger bot turn if needed

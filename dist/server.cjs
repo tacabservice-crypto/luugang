@@ -5110,7 +5110,7 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
     gs.hasRolled = false;
     advanceTurn(room);
     saveStore();
-    void persistLiveRoom(room).catch((error) => console.error(`Failed to persist room ${room.id}:`, error));
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, "game_update", room);
     executeBotTurnIfActive(room);
     return res.json(room);
@@ -5121,22 +5121,26 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
   if (validTokens.length === 0) {
     addLog(room, `${activePlayer.username} has no valid moves with roll ${d}. Turn passes.`);
     saveStore();
-    void persistLiveRoom(room).catch((error) => console.error(`Failed to persist room ${room.id}:`, error));
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, "game_update", room);
     res.json(room);
-    setTimeout(() => {
-      const currentRoom = store.rooms[roomId];
-      if (currentRoom && currentRoom.status === "playing") {
-        advanceTurn(currentRoom);
-        saveStore();
-        void persistLiveRoom(currentRoom).catch((error) => console.error(`Failed to persist room ${currentRoom.id}:`, error));
-        broadcastToRoom(currentRoom.id, "game_update", currentRoom);
-        executeBotTurnIfActive(currentRoom);
+    setTimeout(async () => {
+      try {
+        const currentRoom = store.rooms[roomId];
+        if (currentRoom && currentRoom.status === "playing") {
+          advanceTurn(currentRoom);
+          saveStore();
+          await persistLiveRoom(currentRoom);
+          broadcastToRoom(currentRoom.id, "game_update", currentRoom);
+          executeBotTurnIfActive(currentRoom);
+        }
+      } catch (error) {
+        console.error(`Failed to advance no-move turn for room ${roomId}:`, error);
       }
     }, 1500);
   } else {
     saveStore();
-    void persistLiveRoom(room).catch((error) => console.error(`Failed to persist room ${room.id}:`, error));
+    await persistLiveRoom(room);
     broadcastToRoom(room.id, "game_update", room);
     res.json(room);
   }
@@ -5166,7 +5170,7 @@ app.post("/api/rooms/move-token", async (req, res) => {
   gs.turnTimer = 30;
   moveTokenLogic(room, tokenId, gs.diceRoll);
   saveStore();
-  void Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]).catch((error) => console.error(`Failed to persist move for room ${room.id}:`, error));
+  await Promise.all([persistLiveRoom(room), persistRoomUserProfiles(room)]);
   broadcastToRoom(room.id, "game_update", room);
   executeBotTurnIfActive(room);
   res.json(room);

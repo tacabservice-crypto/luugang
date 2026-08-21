@@ -947,6 +947,26 @@ export default function App() {
     }
   };
 
+  const recoverLatestGameplayRoom = async (): Promise<GameRoom | null> => {
+    if (!user || !activeRoom) return null;
+    try {
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/api/rooms/${activeRoom.id}?userId=${encodeURIComponent(user.id)}&t=${Date.now()}`,
+        { cache: 'no-store' },
+        8000,
+      );
+      if (!response.ok) return null;
+      const latestRoom = await response.json() as GameRoom;
+      if (!latestRoom?.id || latestRoom.id !== activeRoom.id) return null;
+      setActiveRoom(previous => previous?.id === latestRoom.id && shouldAcceptRoomUpdate(previous, latestRoom)
+        ? { ...latestRoom, rejectionReason: previous.rejectionReason || latestRoom.rejectionReason }
+        : previous);
+      return latestRoom;
+    } catch {
+      return null;
+    }
+  };
+
   const handleRollDice = async () => {
     if (!user || !activeRoom) return;
     try {
@@ -1005,6 +1025,14 @@ export default function App() {
       // failure. The authoritative room refresh above has already reconciled
       // the turn; never show the confusing English error over the game.
       if (/not your turn to roll/i.test(String((err as any)?.message || err || ''))) return;
+      const recoveredRoom = await recoverLatestGameplayRoom();
+      if (recoveredRoom) {
+        const recoveredPlayer = recoveredRoom.players[recoveredRoom.gameState.turn];
+        // The response may have timed out after the server already committed
+        // the roll. Restoring that state makes the legal tokens clickable and
+        // continues play without rolling a second time.
+        if (recoveredRoom.status !== 'playing' || recoveredPlayer?.userId !== user.id || recoveredRoom.gameState.hasRolled) return;
+      }
       setErrorToast(userErrorMessage(err, 'Xiriirka server-ka wuu gaabtay. Ciyaartu ma lumin; fadlan sug ilbiriqsiyo yar oo mar kale tuur.'));
     }
   };
@@ -1022,6 +1050,8 @@ export default function App() {
       setActiveRoom(data);
     } catch (err) {
       console.error(err);
+      const recoveredRoom = await recoverLatestGameplayRoom();
+      if (recoveredRoom) return;
       setErrorToast(userErrorMessage(err, 'Xiriirka server-ka wuu gaabtay. Landhuhu ma lumin; fadlan isku day mar kale.'));
     }
   };
