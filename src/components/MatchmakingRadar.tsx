@@ -134,7 +134,7 @@ const MatchmakingRadar: React.FC<MatchmakingRadarProps> = ({
                                 </span>
                                 <span className="flex items-center gap-1 bg-purple-500/20 text-purple-200 px-1.5 py-0.5 rounded-full border border-purple-400/30">
                                     <Users className="h-2.5 w-2.5" />
-                                    {matchmakingState.capacity || 2} Players
+                                    {player.seekingDetails?.gameMode === 'team' ? 4 : (player.seekingDetails?.capacity || 2)} Players
                                 </span>
                             </div>
                           ) : (
@@ -166,13 +166,16 @@ const MatchmakingRadar: React.FC<MatchmakingRadarProps> = ({
                           disabled={inviteStatus[player.id] === 'sending'}
                           onClick={() => {
                             const bet = player.seekingDetails?.betAmount ?? 0;
-                            const cap = player.seekingDetails?.capacity ?? 2;
                             const mode = player.seekingDetails?.gameMode ?? 'solo';
-                            onStartMatchmaking(bet, cap, mode, player.id);
+                            const cap = mode === 'team' ? 4 : (player.seekingDetails?.capacity ?? 2);
+                            // Accepting a 4-player Search Live request joins the
+                            // same queue. Only a 2-player Solo request uses the
+                            // direct head-to-head challenge endpoint.
+                            onStartMatchmaking(bet, cap, mode, cap === 2 && mode === 'solo' ? player.id : undefined);
                           }}
                           className="bg-green-500 hover:bg-green-400 text-black font-black text-[8.5px] px-2 py-0.5 rounded-lg active:scale-95 transition-all uppercase tracking-wider cursor-pointer shadow-md shadow-green-500/25 animate-bounce flex items-center gap-1"
                         >
-                          Challenge
+                          {(player.seekingDetails?.gameMode === 'team' || player.seekingDetails?.capacity === 4) ? 'Accept 4P' : 'Challenge'}
                         </button>
                       )}
                     </div>
