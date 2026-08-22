@@ -3671,7 +3671,7 @@ app.get("/api/users/online", async (req, res) => {
     if (room.invitedUserId) busyUserIds.add(String(room.invitedUserId));
   });
   candidateUsers.forEach((u) => {
-    if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
+    if (isBotPlayer(u.id) || u.id === currentUserId) return;
     let status = "offline";
     let seekingDetails = null;
     for (const [qKey, queueUserIds] of Object.entries(store.matchmakingQueues)) {

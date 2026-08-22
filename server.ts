@@ -3576,7 +3576,10 @@ app.get('/api/users/online', async (req, res) => {
   });
 
   candidateUsers.forEach(u => {
-    if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
+    // A fresh Home presence is authoritative: anyone currently on Home and
+    // outside a game must be visible and challengeable. Persisted offline
+    // preferences are intentionally not allowed to hide an active Home user.
+    if (isBotPlayer(u.id) || u.id === currentUserId) return;
 
     let status = 'offline';
     let seekingDetails: any = null;
