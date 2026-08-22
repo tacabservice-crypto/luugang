@@ -3460,13 +3460,17 @@ app.post('/api/users/presence', async (req, res) => {
   const userId = String(req.body?.userId || '').trim();
   if (!userId) return res.status(400).json({ error: 'Valid userId is required.' });
   const knownUser = store.users[userId];
+  const reportedOfflinePreference = req.body?.isOfflinePreference === true;
   const profile = {
     id: userId,
     username: knownUser?.username || String(req.body?.username || 'Player').slice(0, 20),
     avatar: knownUser?.avatar || req.body?.avatar || '🎮',
     winCount: knownUser?.winCount || 0,
     lossCount: knownUser?.lossCount || 0,
-    isOfflinePreference: knownUser?.isOfflinePreference ?? Boolean(req.body?.isOfflinePreference),
+    // The visible Home client is fresher than the persisted profile cache.
+    // Using the cached value here could permanently hide returning users whose
+    // client has already switched back online.
+    isOfflinePreference: reportedOfflinePreference,
   };
   try {
     if (isMySqlConfigured()) {

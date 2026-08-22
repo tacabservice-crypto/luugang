@@ -188,9 +188,8 @@ export default function Dashboard({
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);
-  // The Online button should show every currently connected player returned by
-  // the server. The server already removes players who are inside a game.
-  const availableHomePlayers = onlinePlayers.filter(player => player.status === 'online' || player.status === 'seeking');
+  // Only users who are currently on Home and available for a direct challenge.
+  const availableHomePlayers = onlinePlayers.filter(player => player.status === 'online');
 
   const fetchOnlinePlayers = async () => {
     try {
@@ -273,7 +272,7 @@ export default function Dashboard({
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [user.id]);
+  }, [user.id, user.username, user.avatar, user.isOfflinePreference]);
 
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 

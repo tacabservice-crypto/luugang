@@ -3561,13 +3561,17 @@ app.post("/api/users/presence", async (req, res) => {
   const userId = String(req.body?.userId || "").trim();
   if (!userId) return res.status(400).json({ error: "Valid userId is required." });
   const knownUser = store.users[userId];
+  const reportedOfflinePreference = req.body?.isOfflinePreference === true;
   const profile = {
     id: userId,
     username: knownUser?.username || String(req.body?.username || "Player").slice(0, 20),
     avatar: knownUser?.avatar || req.body?.avatar || "\u{1F3AE}",
     winCount: knownUser?.winCount || 0,
     lossCount: knownUser?.lossCount || 0,
-    isOfflinePreference: knownUser?.isOfflinePreference ?? Boolean(req.body?.isOfflinePreference)
+    // The visible Home client is fresher than the persisted profile cache.
+    // Using the cached value here could permanently hide returning users whose
+    // client has already switched back online.
+    isOfflinePreference: reportedOfflinePreference
   };
   try {
     if (isMySqlConfigured()) {
@@ -3606,7 +3610,27 @@ app.get("/api/users/online", async (req, res) => {
   const connectedUserIds = /* @__PURE__ */ new Set([...activeClients.map((client) => client.userId), ...sharedOnlineUsers.map((user) => user.id)]);
   const candidateUsers = new Map(Object.values(store.users).map((user) => [user.id, user]));
   sharedOnlineUsers.forEach(({ id, profile }) => {
-    if (!candidateUsers.has(id) && profile) candidateUsers.set(id, profile);
+    candidateUsers.set(id, {
+      ...candidateUsers.get(id) || {},
+      ...profile || {},
+      id,
+      username: profile?.username || candidateUsers.get(id)?.username || "Player",
+      avatar: profile?.avatar || candidateUsers.get(id)?.avatar || "\u{1F3AE}",
+      isOfflinePreference: profile?.isOfflinePreference ?? candidateUsers.get(id)?.isOfflinePreference ?? false
+    });
+  });
+  activeClients.forEach((client) => {
+    if (!candidateUsers.has(client.userId)) {
+      candidateUsers.set(client.userId, {
+        id: client.userId,
+        username: "Player",
+        avatar: "\u{1F3AE}",
+        balance: 0,
+        winCount: 0,
+        lossCount: 0,
+        isOfflinePreference: false
+      });
+    }
   });
   const busyUserIds = /* @__PURE__ */ new Set();
   Object.values(store.rooms).forEach((room) => {
