@@ -8,6 +8,7 @@ import { LanguageProvider } from './context/LanguageContext.tsx';
 import ErrorPage from "./pages/ErrorPage";
 import GlobalPullToRefresh from './components/GlobalPullToRefresh';
 import NativeUpdateGate from './components/NativeUpdateGate';
+import NativeBackHandler from './components/NativeBackHandler';
 
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = lazy(() => import('./pages/BecomeVip'));
@@ -16,32 +17,32 @@ const Tournaments = lazy(() => import('./pages/Tournaments'));
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <App />,
+    element: <><NativeBackHandler /><App /></>,
     errorElement: <ErrorPage />,
   },
   {
     path: "/room/:roomId",
-    element: <App />,
+    element: <><NativeBackHandler /><App /></>,
     errorElement: <ErrorPage />,
   },
   {
     path: "/admin",
-    element: <AdminDashboard />,
+    element: <><NativeBackHandler /><AdminDashboard /></>,
     errorElement: <ErrorPage />,
   },
   {
     path: "/cashier",
-    element: <AdminDashboard cashierMode />,
+    element: <><NativeBackHandler /><AdminDashboard cashierMode /></>,
     errorElement: <ErrorPage />,
   },
   {
     path: "/vip",
-    element: <BecomeVip />,
+    element: <><NativeBackHandler /><BecomeVip /></>,
     errorElement: <ErrorPage />,
   },
   {
     path: "/tournaments",
-    element: <Tournaments />,
+    element: <><NativeBackHandler /><Tournaments /></>,
     errorElement: <ErrorPage />,
   },
   {

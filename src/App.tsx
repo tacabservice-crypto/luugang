@@ -10,6 +10,7 @@ import { auth } from './firebase-client';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { userErrorMessage } from './utils/userError';
 import playGameReminderAudioSrc from './assets/play_the_game.mp3';
+import { NATIVE_BACK_EVENT } from './components/NativeBackHandler';
 
 // Gameplay actions must never wait forever on a slow mobile connection.
 // The server remains authoritative; this only releases the UI and allows a
@@ -262,6 +263,20 @@ export default function App() {
   const [activePlayNudge, setActivePlayNudge] = useState<{ nudgedBy: string } | null>(null);
   const playNudgeTimeoutRef = useRef<number | null>(null);
   const playGameReminderAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const handleNativeBack = (event: Event) => {
+      if (showConfirmLeave) {
+        event.preventDefault();
+        setShowConfirmLeave(false);
+      } else if (isWalletOpen) {
+        event.preventDefault();
+        setIsWalletOpen(false);
+      }
+    };
+    window.addEventListener(NATIVE_BACK_EVENT, handleNativeBack);
+    return () => window.removeEventListener(NATIVE_BACK_EVENT, handleNativeBack);
+  }, [isWalletOpen, showConfirmLeave]);
 
   useEffect(() => {
     const audio = new Audio(playGameReminderAudioSrc);

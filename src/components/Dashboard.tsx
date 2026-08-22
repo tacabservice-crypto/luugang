@@ -40,6 +40,7 @@ import UserEditModal from './UserEditModal';
 import AvatarDisplay from './AvatarDisplay';
 import LiveAdBanner from './LiveAdBanner';
 import { useNavigate } from 'react-router-dom';
+import { NATIVE_BACK_EVENT } from './NativeBackHandler';
 
 interface DashboardProps {
   noticeSlot?: React.ReactNode;
@@ -187,6 +188,21 @@ export default function Dashboard({
 
   const [onlinePlayers, setOnlinePlayers] = useState<any[]>([]);
   const [showOnlinePlayers, setShowOnlinePlayers] = useState(false);
+
+  useEffect(() => {
+    const handleNativeBack = (event: Event) => {
+      if (showHelp) setShowHelp(false);
+      else if (showAboutUs) setShowAboutUs(false);
+      else if (isEditingProfile) setIsEditingProfile(false);
+      else if (showOnlinePlayers) setShowOnlinePlayers(false);
+      else if (isSettingsDropdownOpen) setIsSettingsDropdownOpen(false);
+      else if (isStakeDropdownOpen) setIsStakeDropdownOpen(false);
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener(NATIVE_BACK_EVENT, handleNativeBack);
+    return () => window.removeEventListener(NATIVE_BACK_EVENT, handleNativeBack);
+  }, [isEditingProfile, isSettingsDropdownOpen, isStakeDropdownOpen, showAboutUs, showHelp, showOnlinePlayers]);
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);

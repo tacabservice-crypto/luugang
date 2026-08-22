@@ -43,6 +43,7 @@ import { toast } from 'react-hot-toast';
 import { useVoiceChat } from '../context/VoiceChatContext';
 import { formatCurrency } from '../utils/number';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { NATIVE_BACK_EVENT } from './NativeBackHandler';
 
 const QUICK_REACTIONS = [
   { id: 'laugh', emoji: '\u{1F602}', label: 'Qosol' },
@@ -216,6 +217,19 @@ export default function GameRoomView({
     toggleSpeaker 
   } = useVoiceChat();
   const speakerOnRef = useRef(isSpeakerOn);
+
+  useEffect(() => {
+    const handleNativeBack = (event: Event) => {
+      if (isEditProfileModalOpen) setIsEditProfileModalOpen(false);
+      else if (isVoiceControlsOpen) setIsVoiceControlsOpen(false);
+      else if (isUserMenuOpen) setIsUserMenuOpen(false);
+      else if (activePanel) setActivePanel(null);
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener(NATIVE_BACK_EVENT, handleNativeBack);
+    return () => window.removeEventListener(NATIVE_BACK_EVENT, handleNativeBack);
+  }, [activePanel, isEditProfileModalOpen, isUserMenuOpen, isVoiceControlsOpen]);
 
   // Freeze the page behind the floating chat/log panel. Touch gestures may
   // move the panel itself, but the game board must remain at the exact same
