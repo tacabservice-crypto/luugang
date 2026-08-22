@@ -1,35 +1,27 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import { ArrowLeft, Eye, Gamepad2, HeartHandshake, Radio, ShieldCheck, Sparkles, Target, Trophy, Users, Wallet } from 'lucide-react';
 
-import React from 'react';
-import { useLanguage } from '../context/LanguageContext';
-import { X } from 'lucide-react';
+interface AboutUsProps { onClose: () => void; }
 
-interface AboutUsProps {
-  onClose: () => void;
-}
+const features = [
+  [Gamepad2, 'Ciyaaro kala duwan', 'Solo 1v1 ama afar qof, Partnership 2v2, Private Room, Search Live iyo Bot.'],
+  [Radio, 'Realtime', 'Dice, dhaqaaqa xoolaha, turn timer-ka iyo natiijada waxaa wada arka ciyaartoyda iyo daawadayaasha.'],
+  [Wallet, 'Wallet isku xiran', 'Deposit, withdrawal, stake, payout iyo transaction status waxay ku wada jiraan account-kaaga.'],
+  [Eye, 'Daawasho iyo bet', 'Ciyaaraha socda waa la daawan karaa; user login lehna WIN ama LOSS ayuu ka dooran karaa market-ka furan.'],
+  [Trophy, 'Tartamo iyo horumar', 'Leaderboard, tournaments, win/loss statistics iyo VIP plans waxay ciyaarta siinayaan yool joogto ah.'],
+  [ShieldCheck, 'Server authoritative', 'Server-ka ayaa xaqiijiya turn-ka, dice result-ka, dhaqaaqa saxda ah, guusha iyo settlement-ka lacagta.'],
+];
 
 export default function AboutUs({ onClose }: AboutUsProps) {
-  const { t } = useLanguage();
-
-  return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-purple-500/30 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 bg-slate-800/80 rounded-full hover:bg-slate-700/80 transition-colors"
-        >
-          <X className="w-4 h-4 text-slate-300" />
-        </button>
-        <h1 className="text-2xl font-bold mb-4 text-yellow-400">{t('aboutUs')}</h1>
-        <div className="prose prose-invert text-slate-300">
-          <p>
-            {t('aboutUsContent')}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className="fixed inset-0 z-[150] overflow-y-auto bg-[#050313] text-white">
+    <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_8%,rgba(124,58,237,.28),transparent_32%),radial-gradient(circle_at_88%_30%,rgba(14,165,233,.14),transparent_28%)]" />
+    <header className="sticky top-0 z-20 border-b border-white/10 bg-[#08051a]/90 backdrop-blur-xl"><div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-7"><button onClick={onClose} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"><ArrowLeft className="h-4 w-4" /> Home</button><div className="flex items-center gap-2"><img src="/ludosom-logo.png" alt="LudoSom" className="h-9 w-9 rounded-xl object-cover" /><div><div className="text-xs font-black">About LudoSom</div><div className="text-[8px] font-bold uppercase tracking-widest text-purple-300">Who we are</div></div></div></div></header>
+    <main className="relative mx-auto max-w-5xl px-4 pb-20 pt-9 sm:px-7 sm:pt-14">
+      <section className="rounded-[28px] border border-purple-400/20 bg-gradient-to-br from-purple-950/80 via-slate-950/90 to-blue-950/70 p-6 shadow-2xl sm:p-10"><span className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-amber-200"><Sparkles className="h-3 w-3" /> Faa'iido Qarsoon</span><h1 className="mt-5 max-w-3xl text-3xl font-black leading-tight sm:text-5xl">Ludo Soomaaliyeed oo isku keenta ciyaar, tartan iyo bulsho.</h1><p className="mt-5 max-w-3xl text-sm font-medium leading-7 text-slate-300">LudoSom waa madal Ludo online ah oo kuu sahlaysa inaad hesho qof aad la tartanto, asxaabta qol gaar ah kula ciyaarto, Bot ku tababarto, ciyaaraha socda daawato ama tournament uga qayb gasho—web iyo Android app labadaba.</p></section>
+      <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{features.map(([Icon, title, text]: any) => <article key={title} className="rounded-2xl border border-white/10 bg-white/[.045] p-5"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/15 text-purple-300"><Icon className="h-5 w-5" /></span><h2 className="mt-4 text-sm font-black">{title}</h2><p className="mt-2 text-[11px] font-medium leading-5 text-slate-400">{text}</p></article>)}</section>
+      <section className="mt-6 grid gap-5 lg:grid-cols-2"><article className="rounded-3xl border border-white/10 bg-slate-950/70 p-6"><div className="flex items-center gap-3"><Target className="h-6 w-6 text-amber-300" /><h2 className="text-xl font-black">Ujeeddadeenna</h2></div><p className="mt-4 text-sm leading-7 text-slate-300">Waxaan dhiseynaa ciyaar uu qof cusub si fudud u fahmi karo, ciyaaryahan khibrad lehna ka heli karo tartan dhab ah. Home-ku wuxuu muujinayaa stakes, online players, radar, live games iyo leaderboard. Guest-ku app-ka wuu baran karaa oo live game wuu daawan karaa; login waxaa loo baahan yahay marka la ciyaarayo, lacag la isticmaalayo ama bulshada lala falgalayo.</p></article><article className="rounded-3xl border border-white/10 bg-slate-950/70 p-6"><div className="flex items-center gap-3"><HeartHandshake className="h-6 w-6 text-emerald-300" /><h2 className="text-xl font-black">Bulsho iyo ixtiraam</h2></div><p className="mt-4 text-sm leading-7 text-slate-300">Online Players iyo Challenge waxay isku xiraan dadka Home-ka jooga. Chat, reactions iyo daawadayaashu waxay abuuraan jawi bulsho. Ciyaar wanaag, hadal wanaagsan iyo xushmaynta ciyaartoyda kale waa qayb muhiim ah oo LudoSom ah.</p></article></section>
+      <section className="mt-6 rounded-3xl border border-blue-400/15 bg-blue-500/[.06] p-6 sm:p-8"><h2 className="text-xl font-black">Sida LudoSom u shaqeeyo</h2><div className="mt-6 grid gap-4 sm:grid-cols-2">{[['1','Dooro habka','Dooro stake, 2 ama 4 ciyaaryahan, kadib Solo ama Team.'],['2','Hel ciyaar','Search Live, Challenge, Private Room ama Bot ka dooro.'],['3','Ciyaar turn-kaaga','Tuur dice-ka, dooro dhaqaaq sax ah, kana war hay timer-ka.'],['4','Hel natiijada','Server-ku wuxuu xaqiijiyaa guusha, payout-ka, stats-ka iyo bet settlement-ka.']].map(([n,t,x])=><div key={n} className="flex gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500 text-xs font-black">{n}</span><div><h3 className="text-sm font-black">{t}</h3><p className="mt-1 text-[11px] leading-5 text-slate-400">{x}</p></div></div>)}</div></section>
+      <section className="mt-6 rounded-3xl border border-amber-300/15 bg-amber-300/[.05] p-6"><h2 className="text-lg font-black">Mas'uuliyad iyo hufnaan</h2><p className="mt-3 text-xs leading-6 text-slate-300">Stake ama bet dhig keliya lacag aad awooddo. Hubi amount-ka ka hor submit. Ha siin qof kale password, OTP ama xogta wallet-ka. Natiijada iyo payout-ku waxay ku xiran yihiin xaaladda server-ka ee la xaqiijiyey.</p></section>
+      <footer className="mt-10 text-center"><div className="flex items-center justify-center gap-2 text-sm font-black"><Users className="h-4 w-4 text-purple-300" /> Ku soo dhowow LudoSom</div><p className="mt-2 text-[10px] text-slate-500">Play fair · Respect players · Enjoy the game</p></footer>
+    </main>
+  </div>;
 }

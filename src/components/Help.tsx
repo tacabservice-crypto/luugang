@@ -1,35 +1,36 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import { ArrowLeft, CircleDollarSign, Eye, Gamepad2, HelpCircle, Radio, Search, ShieldAlert, Smartphone, UserPlus, Users, Wallet, Wifi } from 'lucide-react';
 
-import React from 'react';
-import { useLanguage } from '../context/LanguageContext';
-import { X } from 'lucide-react';
+interface HelpProps { onClose: () => void; }
 
-interface HelpProps {
-  onClose: () => void;
-}
+const tutorials = [
+  { icon: UserPlus, title: '1. Account samee ama Login', steps: ['Guest ahaan Home-ka oo dhan waad arki kartaa.', 'Taabo Login, Wallet, Search, Bot ama fal user u baahan.', 'Sheet-ka ka dooro Sign In ama Sign Up.', 'Geli email/phone iyo password, ama Google isticmaal.', 'Haddii OTP lagu weydiiyo, geli 6-da lambar ee laguu soo diray.'] },
+  { icon: Search, title: '2. Search Live iyo Radar', steps: ['Choose Bet Stake ka dooro lacagta ciyaarta.', 'Dooro 2 ama 4 players.', 'Haddii ay 4 yihiin, dooro Solo ama Partnership 2v2.', 'Taabo Search Live Players.', 'Radar-ku dadka ku soo biiray ayuu muujinayaa; marka tiradu buuxsanto ciyaartu way bilaabataa.'] },
+  { icon: Users, title: '3. Challenge iyo Private Room', steps: ['Online taabo si aad u aragto users-ka Home-ka jooga.', 'Challenge taabo user-ka aad rabto.', 'Qofka kale wuxuu haystaa waqti uu ku aqbalo ama ku diido.', 'Create Lobby samee oo room code-ka saaxiibkaa u dir.', 'Join Lobby: geli code-ka kadib taabo fallaaraha gelitaanka.'] },
+  { icon: Gamepad2, title: '4. Sida ciyaarta loo ciyaaro', steps: ['Marka turn-kaagu yimaado dice-ka taabo.', '6 ayaa xoolo base-ka ka soo saari kara.', 'Dooro xoolaha la dhaqaajin karo; move aan sax ahayn server-ku ma aqbalayo.', 'Hal xoolo oo keliya marka bada ku jiro xaaladaha qaarkood automatic ayuu u dhaqaaqaa.', 'Qofkii dhammaan xoolihiisa goal-ka geeya ayaa guuleysta; Team labada xulafo ayaa wada shaqeeya.'] },
+  { icon: Eye, title: '5. Daawasho iyo Bet', steps: ['Ciyaaraha Tooska Ah ka dooro Daawo.', 'Guest-ku ciyaarta wuu daawan karaa login la’aan.', 'Dice, turn iyo dhaqaaqa xoolaha realtime ayaad u arkaysaa.', 'Bet dhigashadu waxay u baahan tahay login iyo wallet balance.', 'Dooro player/team, WIN ama LOSS, stake-ka, kadib Submit.'] },
+  { icon: Wallet, title: '6. Wallet iyo lacagta', steps: ['Header-ka ka taabo Wallet.', 'Deposit ka dooro provider iyo amount, kadib raac tilmaamaha agent/cashier.', 'Withdrawal geli amount-ka iyo lambarka lacagta laguugu dirayo.', 'Request-ku wuxuu noqon karaa Pending, Approved ama Rejected.', 'Hubi balance-ka, fee-ga iyo transaction status-ka mar kasta.'] },
+];
+
+const faqs = [
+  ['Maxaan login la’aan samayn karaa?', 'Waxaad arki kartaa Home, About Us, Help, leaderboard, stakes iyo live games; ciyaar socotana waad daawan kartaa. Ciyaar, wallet, challenge, chat iyo bet waxay u baahan yihiin login.'],
+  ['Online iyo Offline maxay yihiin?', 'Online wuxuu kuu oggolaanayaa inaad ka muuqato dadka Home-ka jooga oo challenge laguugu soo diro. Offline wuxuu qarinayaa availability-gaaga, laakiin account-ka kama baxaysid.'],
+  ['Maxaa dhacaya haddii internetku go’o?', 'Ha ku celcelin dice ama move. Sug reconnect-ka; server-ku wuxuu hayaa xaaladda la xaqiijiyey. Haddii loo baahdo Home ku noqo oo Rejoin isticmaal.'],
+  ['Maxaa bet loo celin karaa?', 'Bet waa la refund-gareyn karaa haddii ciyaarta la cancel-gareeyo, winner sax ah la waayo ama market pool-ku uusan samayn karin payout sax ah.'],
+  ['Bot-ka sidee loola ciyaaraa?', 'Stake iyo mode dooro kadib Play Against Bot taabo. Hubi wallet balance-ka iyo shuruudaha Bot game-ka ka hor bilaabidda.'],
+  ['Tournament sidee looga qayb galaa?', 'Menu-ga ka fur Tournaments, dooro mid registration-ku furan yahay, hubi entry fee iyo waqtiga, Register samee, kadib Check In waqtiga loo asteeyey.'],
+];
 
 export default function Help({ onClose }: HelpProps) {
-  const { t } = useLanguage();
-
-  return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-blue-500/30 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 bg-slate-800/80 rounded-full hover:bg-slate-700/80 transition-colors"
-        >
-          <X className="w-4 h-4 text-slate-300" />
-        </button>
-        <h1 className="text-2xl font-bold mb-4 text-blue-400">{t('help')}</h1>
-        <div className="prose prose-invert text-slate-300">
-          <p>
-            {t('helpContent')}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className="fixed inset-0 z-[150] overflow-y-auto bg-[#040712] text-white">
+    <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_85%_5%,rgba(37,99,235,.24),transparent_30%),radial-gradient(circle_at_8%_35%,rgba(124,58,237,.18),transparent_32%)]" />
+    <header className="sticky top-0 z-20 border-b border-white/10 bg-[#070b18]/90 backdrop-blur-xl"><div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-7"><button onClick={onClose} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"><ArrowLeft className="h-4 w-4" /> Home</button><div className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/15 text-blue-300"><HelpCircle className="h-5 w-5" /></span><div><div className="text-xs font-black">LudoSom Help Center</div><div className="text-[8px] font-bold uppercase tracking-widest text-blue-300">Tilmaamaha isticmaalka</div></div></div></div></header>
+    <main className="relative mx-auto max-w-5xl px-4 pb-20 pt-8 sm:px-7 sm:pt-12">
+      <section className="rounded-[28px] border border-blue-400/20 bg-gradient-to-br from-blue-950/70 via-slate-950/90 to-purple-950/70 p-6 sm:p-9"><span className="text-[9px] font-black uppercase tracking-[.28em] text-blue-300">Bilow halkan</span><h1 className="mt-3 text-3xl font-black sm:text-5xl">Sidee LudoSom loo isticmaalaa?</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">Tilmaamahan wuxuu qof cusub ka bilaabayaa furitaanka app-ka ilaa account, wallet, ciyaar, daawasho iyo bet. Qayb kasta hoos uga raac tallaabooyinka sida ay u kala horreeyaan.</p></section>
+      <section className="mt-5 grid gap-3 sm:grid-cols-4">{[['Guest','Home + Daawo',Eye],['Player','Ciyaar + Challenge',Gamepad2],['Wallet','Deposit + Withdraw',Wallet],['Live','Spectate + Bet',Radio]].map(([title,text,Icon]:any)=><div key={title} className="rounded-2xl border border-white/10 bg-white/[.045] p-4"><Icon className="h-5 w-5 text-blue-300" /><h2 className="mt-3 text-xs font-black">{title}</h2><p className="mt-1 text-[9px] font-bold text-slate-500">{text}</p></div>)}</section>
+      <section className="mt-6 space-y-4">{tutorials.map(({icon:Icon,title,steps})=><article key={title} className="rounded-3xl border border-white/10 bg-slate-950/70 p-5 sm:p-6"><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/15 text-blue-300"><Icon className="h-5 w-5" /></span><h2 className="text-base font-black sm:text-lg">{title}</h2></div><ol className="mt-5 grid gap-3 sm:grid-cols-2">{steps.map((step,index)=><li key={step} className="flex gap-3 rounded-xl border border-white/[.06] bg-white/[.035] p-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-black">{index+1}</span><p className="text-[11px] font-medium leading-5 text-slate-300">{step}</p></li>)}</ol></article>)}</section>
+      <section className="mt-6 grid gap-4 lg:grid-cols-2"><article className="rounded-3xl border border-emerald-400/15 bg-emerald-500/[.055] p-6"><div className="flex items-center gap-3"><Wifi className="h-6 w-6 text-emerald-300" /><h2 className="text-lg font-black">Haddii ciyaartu gaabiso</h2></div><ul className="mt-4 space-y-3 text-[11px] leading-5 text-slate-300"><li>• Hubi Mobile Data ama Wi‑Fi.</li><li>• Hal mar taabo dice/move; sug server-ka.</li><li>• Ha xirin app-ka inta submit socdo.</li><li>• Room kaa lumo, Home ka eeg Rejoin.</li><li>• APK-ga ku hay version-ka ugu dambeeya.</li></ul></article><article className="rounded-3xl border border-amber-300/15 bg-amber-300/[.055] p-6"><div className="flex items-center gap-3"><ShieldAlert className="h-6 w-6 text-amber-300" /><h2 className="text-lg font-black">Account-kaaga ilaali</h2></div><ul className="mt-4 space-y-3 text-[11px] leading-5 text-slate-300"><li>• Password iyo OTP cidna ha siin.</li><li>• Hubi phone/email-ka account-ka.</li><li>• Amount-ka xaqiiji ka hor transaction ama bet.</li><li>• Qalab qalaad markaad isticmaasho Logout samee.</li><li>• Ha isticmaalin lacag ka badan inta aad awooddo.</li></ul></article></section>
+      <section className="mt-6 rounded-3xl border border-white/10 bg-white/[.035] p-6"><div className="flex items-center gap-3"><CircleDollarSign className="h-6 w-6 text-purple-300" /><h2 className="text-xl font-black">Su'aalaha inta badan la weydiiyo</h2></div><div className="mt-5 divide-y divide-white/10">{faqs.map(([q,a])=><details key={q} className="group py-4"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-xs font-black"><span>{q}</span><span className="text-lg text-blue-300 transition group-open:rotate-45">+</span></summary><p className="mt-3 pr-7 text-[11px] leading-6 text-slate-400">{a}</p></details>)}</div></section>
+      <section className="mt-6 rounded-3xl border border-purple-400/15 bg-purple-500/[.05] p-6 text-center"><Smartphone className="mx-auto h-7 w-7 text-purple-300" /><h2 className="mt-3 text-base font-black">Weli ma fahmin qayb?</h2><p className="mx-auto mt-2 max-w-xl text-[11px] leading-6 text-slate-400">Qaybta ku saabsan falka aad rabto raac. Fariinta error-ka akhri, internet-ka hubi, kadib mar kale isku day. Room code, transaction status ama fariinta error-ka hayso marka taageero loo baahan yahay.</p></section>
+    </main>
+  </div>;
 }

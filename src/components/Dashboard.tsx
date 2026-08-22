@@ -981,7 +981,7 @@ export default function Dashboard({
 
             <div className="space-y-0.5 sm:space-y-1 min-w-0 flex-1">
               <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                <h2 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[100px] xs:max-w-[140px] sm:max-w-none" title={user.username}>
+                <h2 className={`${isGuest ? 'whitespace-nowrap text-[10px] tracking-normal sm:text-sm' : 'truncate max-w-[100px] text-xs tracking-wide xs:max-w-[140px] sm:max-w-none sm:text-base'} font-bold text-white`} title={user.username}>
                   {user.username} {user.vip && user.vip.expires > Date.now() && <span className="ml-1 text-yellow-400 text-lg">👑</span>}
                 </h2>
                 {!isGuest && <button 
