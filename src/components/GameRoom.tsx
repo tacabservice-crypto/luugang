@@ -1425,6 +1425,9 @@ export default function GameRoomView({
             validTokenMoves={canPlay ? validTokenMoves : []}
             onTokenClick={canPlay ? requestTokenMove : () => {}}
             userColor={myPlayer?.color}
+            showTurnDice={isSpectator}
+            diceValue={room.gameState.hasRolled ? room.gameState.diceRoll : null}
+            diceRolling={isRolling}
           />
         </div>
 

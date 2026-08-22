@@ -6,6 +6,7 @@
 import React from 'react';
 import { LudoToken, PlayerColor, LudoPlayer } from '../types/game';
 import { Star } from 'lucide-react';
+import PhysicalDice from './PhysicalDice';
 
 interface LudoBoardProps {
   tokens: LudoToken[];
@@ -14,6 +15,9 @@ interface LudoBoardProps {
   validTokenMoves: string[]; // List of token IDs that are valid to move
   onTokenClick: (tokenId: string) => void;
   userColor: PlayerColor | null;
+  showTurnDice?: boolean;
+  diceValue?: number | null;
+  diceRolling?: boolean;
 }
 
 // ==========================================
@@ -102,7 +106,10 @@ export default function LudoBoard({
   activeColor,
   validTokenMoves,
   onTokenClick,
-  userColor
+  userColor,
+  showTurnDice = false,
+  diceValue = null,
+  diceRolling = false
 }: LudoBoardProps) {
   
   const displayColorMapping = getDisplayMapping(userColor);
@@ -130,6 +137,11 @@ export default function LudoBoard({
   };
 
   const placements = getCellTokenPositions();
+  const activeDisplayColor = activeColor ? displayColorMapping[activeColor] : null;
+  const dicePosition = activeDisplayColor === 'green' ? { left: '20%', top: '20%' }
+    : activeDisplayColor === 'yellow' ? { left: '80%', top: '20%' }
+    : activeDisplayColor === 'blue' ? { left: '80%', top: '80%' }
+    : { left: '20%', top: '80%' };
 
   const getXY = (col: number, row: number) => {
     const size = 100 / 15;
@@ -268,6 +280,24 @@ export default function LudoBoard({
           });
         })}
       </svg>
+      {showTurnDice && activeColor && (
+        <div
+          className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 transition-all duration-500"
+          style={dicePosition}
+          aria-label={`${activeColor} player dice ${diceValue || ''}`}
+        >
+          <div className="rounded-2xl border border-white/20 bg-black/45 px-1 shadow-xl backdrop-blur-sm">
+            <PhysicalDice
+              value={diceValue}
+              isRolling={diceRolling}
+              onClick={() => undefined}
+              disabled
+              compact
+              color={COLOR_THEMES[activeColor].main}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
