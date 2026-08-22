@@ -5575,6 +5575,18 @@ app.post("/api/rooms/roll-dice", async (req, res) => {
   const playableColor = getPlayableColor(room, activePlayer);
   const playerTokens = gs.tokens.filter((t) => t.color === playableColor);
   const validTokens = playerTokens.filter((t) => isMoveValid(t, d));
+  const tokensOnBoard = playerTokens.filter((token) => token.position >= 0 && token.position < 56);
+  const soleBoardToken = d !== 6 && tokensOnBoard.length === 1 ? validTokens.find((token) => token.id === tokensOnBoard[0].id) : void 0;
+  if (soleBoardToken) {
+    addLog(room, `${activePlayer.username}'s only active token moved automatically with roll ${d}.`);
+    moveTokenLogic(room, soleBoardToken.id, d);
+    saveStore();
+    await persistLiveRoom(room);
+    void persistRoomUserProfiles(room).catch((error) => console.error(`Profile sync failed after automatic move in room ${room.id}:`, error));
+    broadcastToRoom(room.id, "game_update", room);
+    executeBotTurnIfActive(room);
+    return res.json(room);
+  }
   if (validTokens.length === 0) {
     addLog(room, `${activePlayer.username} has no valid moves with roll ${d}. Turn passes.`);
     saveStore();

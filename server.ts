@@ -5961,6 +5961,26 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
   const playableColor = getPlayableColor(room, activePlayer);
   const playerTokens = gs.tokens.filter(t => t.color === playableColor);
   const validTokens = playerTokens.filter(t => isMoveValid(t, d));
+  const tokensOnBoard = playerTokens.filter(token => token.position >= 0 && token.position < 56);
+
+  // With exactly one token on the route there is no meaningful choice, so
+  // move it automatically. A six always remains manual because the player may
+  // choose between moving that token and releasing another token from base.
+  // Releasing a second token naturally disables this rule on later rolls.
+  const soleBoardToken = d !== 6 && tokensOnBoard.length === 1
+    ? validTokens.find(token => token.id === tokensOnBoard[0].id)
+    : undefined;
+
+  if (soleBoardToken) {
+    addLog(room, `${activePlayer.username}'s only active token moved automatically with roll ${d}.`);
+    moveTokenLogic(room, soleBoardToken.id, d);
+    saveStore();
+    await persistLiveRoom(room);
+    void persistRoomUserProfiles(room).catch(error => console.error(`Profile sync failed after automatic move in room ${room.id}:`, error));
+    broadcastToRoom(room.id, 'game_update', room);
+    executeBotTurnIfActive(room);
+    return res.json(room);
+  }
 
   if (validTokens.length === 0) {
     // No moves possible, turn ends automatically.
