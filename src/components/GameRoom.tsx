@@ -1436,7 +1436,7 @@ export default function GameRoomView({
             <div className="mb-2 flex items-center justify-between">
               <div>
                 <div className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-400">Live Match Market</div>
-                <div className="text-xs font-black text-white">Saadaali W / L</div>
+                <div className="text-xs font-black text-white">Dooro dhinaca iyo natiijada</div>
               </div>
               <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-right">
                 <div className="text-[7px] font-black uppercase text-amber-300">Live Odds</div>
@@ -1455,27 +1455,53 @@ export default function GameRoomView({
                 </span>
               </div>
             ) : (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {room.players.filter(player => player.status !== 'left').map(player => (
-                    <button key={player.userId} type="button" onClick={() => setBetTargetId(player.userId)} className={`flex min-w-0 items-center gap-1.5 rounded-lg border p-1.5 text-left transition ${betTargetId === player.userId ? 'border-emerald-400 bg-emerald-500/15' : 'border-white/10 bg-black/20'}`}>
-                      <PlayerAvatar avatar={player.avatar} className="h-6 w-6 text-base" />
-                      <span className="min-w-0 flex-1 truncate text-[9px] font-black text-white">{player.username}</span>
-                      <span className="text-[7px] font-bold text-slate-500">{spectatorMarkets.find(market => market.targetPlayerId === player.userId)?.progress || 0}%</span>
-                      <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${COLOR_MAP[player.color]}`} />
-                    </button>
-                  ))}
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  {spectatorMarkets.map((market, marketIndex) => {
+                    const memberIds = market.memberIds || [market.targetPlayerId];
+                    const marketPlayers = room.players.filter(player => memberIds.includes(player.userId));
+                    const selected = betTargetId === market.targetPlayerId;
+                    const anotherSelected = Boolean(betTargetId) && !selected;
+                    return (
+                      <div key={market.targetPlayerId} className={`rounded-xl border p-2 transition-all ${selected ? 'border-emerald-400/60 bg-emerald-500/10 shadow-lg shadow-emerald-950/30' : anotherSelected ? 'border-white/5 bg-black/20 opacity-40' : 'border-white/10 bg-black/25'}`}>
+                        <div className="mb-2 flex items-center gap-1.5">
+                          <div className="flex -space-x-1.5">
+                            {marketPlayers.map(player => <PlayerAvatar key={player.userId} avatar={player.avatar} className="h-6 w-6 border border-slate-800 text-sm" />)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[9px] font-black text-white">{room.gameMode === 'team' ? `TEAM ${marketIndex + 1}` : market.targetUsername}</div>
+                            <div className="truncate text-[7px] font-bold text-slate-500">{room.gameMode === 'team' ? market.targetUsername : `${market.progress || 0}% progress`}</div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1">
+                          {(['W', 'L'] as const).map(choice => {
+                            const choiceSelected = selected && betPrediction === choice;
+                            return (
+                              <button key={choice} type="button" onClick={() => { setBetTargetId(market.targetPlayerId); setBetPrediction(choice); setBetError(''); }} className={`rounded-lg border py-2 text-[9px] font-black transition ${choiceSelected ? (choice === 'W' ? 'border-emerald-300 bg-emerald-500 text-slate-950' : 'border-red-300 bg-red-500 text-white') : 'border-white/10 bg-white/5 text-slate-400'}`}>
+                                {choice === 'W' ? `WIN ${market.winOdds || '—'}` : `LOSS ${market.lossOdds || '—'}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="grid grid-cols-[1fr_1fr_1.3fr] gap-1.5">
-                  {(['W', 'L'] as const).map(choice => (
-                    <button key={choice} type="button" onClick={() => setBetPrediction(choice)} className={`rounded-lg border py-2 text-[10px] font-black ${betPrediction === choice ? (choice === 'W' ? 'border-emerald-300 bg-emerald-500 text-slate-950' : 'border-red-300 bg-red-500 text-white') : 'border-white/10 bg-white/5 text-slate-400'}`}>
-                      {choice === 'W' ? `W · ${selectedSpectatorMarket?.winOdds || '—'}` : `L · ${selectedSpectatorMarket?.lossOdds || '—'}`}
-                    </button>
-                  ))}
-                  <input value={betStake} onChange={event => setBetStake(event.target.value)} type="number" min="0.10" max="10" step="0.10" className="min-w-0 rounded-lg border border-white/10 bg-black/30 px-2 text-center font-mono text-xs font-black text-white outline-none focus:border-emerald-400" aria-label="Bet stake" />
+
+                <div className={`rounded-xl border border-white/10 bg-black/25 p-2 transition ${betTargetId ? 'opacity-100' : 'pointer-events-none opacity-35'}`}>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[8px] font-black uppercase tracking-wider text-slate-400">Dooro lacagta</span>
+                    <span className="text-[8px] font-bold text-emerald-300">Min $0.10 · Max $10</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {['0.10', '0.25', '0.50', '1.00'].map(amount => (
+                      <button key={amount} type="button" onClick={() => setBetStake(amount)} className={`rounded-lg border py-2 font-mono text-[9px] font-black ${Number(betStake) === Number(amount) ? 'border-amber-300 bg-amber-400 text-slate-950' : 'border-white/10 bg-white/5 text-slate-300'}`}>${amount}</button>
+                    ))}
+                    <input value={betStake} onChange={event => setBetStake(event.target.value)} type="number" min="0.10" max="10" step="0.10" className="min-w-0 rounded-lg border border-white/10 bg-black/40 px-1 text-center font-mono text-[9px] font-black text-white outline-none focus:border-amber-300" aria-label="Bet stake" />
+                  </div>
                 </div>
                 <button type="button" disabled={!betTargetId || isPlacingBet} onClick={() => void placeSpectatorBet()} className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 py-2.5 text-[10px] font-black uppercase tracking-wider text-slate-950 shadow-lg shadow-emerald-950/30 disabled:opacity-40">
-                  {isPlacingBet ? 'Confirming…' : `Place Bet · Est. $${estimatedDynamicReturn.toFixed(2)}`}
+                  {isPlacingBet ? 'Confirming…' : `Submit ${betPrediction} Bet · Est. $${estimatedDynamicReturn.toFixed(2)}`}
                 </button>
                 {betError && <p className="text-center text-[9px] font-bold text-red-300">{betError}</p>}
                 <p className="text-center text-[8px] font-semibold text-slate-500">Dynamic pool · 10% app commission · Unmatched market = refund · Closes at home stretch</p>
