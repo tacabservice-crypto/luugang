@@ -3608,6 +3608,25 @@ app.get("/api/users/online", async (req, res) => {
     return res.status(400).json({ error: "Missing userId parameter" });
   }
   cleanupMatchmakingQueues();
+  try {
+    let currentProfile = store.users[currentUserId] || null;
+    if (!currentProfile && isMySqlConfigured()) currentProfile = await loadMySqlRuntimeUser(currentUserId);
+    if (!currentProfile && db) currentProfile = await refreshUserProfileById(currentUserId);
+    if (currentProfile) {
+      const presenceProfile = { ...currentProfile, id: currentUserId, isOfflinePreference: false };
+      if (isMySqlConfigured()) {
+        await touchMySqlUserPresence([presenceProfile]);
+      } else if (db) {
+        await db.collection("userPresence").doc(currentUserId).set({
+          userId: currentUserId,
+          lastSeenAt: Date.now(),
+          profile: presenceProfile
+        }, { merge: true });
+      }
+    }
+  } catch (error) {
+    console.error(`Online-list presence registration failed for ${currentUserId}:`, error);
+  }
   const now2 = Date.now();
   const onlineList = [];
   let sharedOnlineUsers = [];

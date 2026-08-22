@@ -3504,6 +3504,29 @@ app.get('/api/users/online', async (req, res) => {
 
   cleanupMatchmakingQueues();
 
+  // Treat loading the Home online list as a presence heartbeat too. This
+  // guarantees that every Dashboard session registers itself even when its
+  // background POST heartbeat or SSE stream is blocked by a browser/WebView.
+  try {
+    let currentProfile = store.users[currentUserId] || null;
+    if (!currentProfile && isMySqlConfigured()) currentProfile = await loadMySqlRuntimeUser(currentUserId);
+    if (!currentProfile && db) currentProfile = await refreshUserProfileById(currentUserId);
+    if (currentProfile) {
+      const presenceProfile = { ...currentProfile, id: currentUserId, isOfflinePreference: false };
+      if (isMySqlConfigured()) {
+        await touchMySqlUserPresence([presenceProfile]);
+      } else if (db) {
+        await db.collection('userPresence').doc(currentUserId).set({
+          userId: currentUserId,
+          lastSeenAt: Date.now(),
+          profile: presenceProfile,
+        }, { merge: true });
+      }
+    }
+  } catch (error) {
+    console.error(`Online-list presence registration failed for ${currentUserId}:`, error);
+  }
+
   const now = Date.now();
 
   // Cross-process matchmaking is kept current by the single server-side
