@@ -3562,10 +3562,12 @@ app.post("/api/users/presence", async (req, res) => {
   if (!userId) return res.status(400).json({ error: "Valid userId is required." });
   const knownUser = store.users[userId];
   const reportedOfflinePreference = req.body?.isOfflinePreference === true;
+  const reportedUsername = String(req.body?.username || "").trim().slice(0, 20);
+  const reportedAvatar = req.body?.avatar;
   const profile = {
     id: userId,
-    username: knownUser?.username || String(req.body?.username || "Player").slice(0, 20),
-    avatar: knownUser?.avatar || req.body?.avatar || "\u{1F3AE}",
+    username: reportedUsername || knownUser?.username || "Player",
+    avatar: reportedAvatar || knownUser?.avatar || "\u{1F3AE}",
     winCount: knownUser?.winCount || 0,
     lossCount: knownUser?.lossCount || 0,
     // The visible Home client is fresher than the persisted profile cache.
@@ -3619,18 +3621,25 @@ app.get("/api/users/online", async (req, res) => {
       isOfflinePreference: profile?.isOfflinePreference ?? candidateUsers.get(id)?.isOfflinePreference ?? false
     });
   });
-  activeClients.forEach((client) => {
-    if (!candidateUsers.has(client.userId)) {
-      candidateUsers.set(client.userId, {
-        id: client.userId,
-        username: "Player",
-        avatar: "\u{1F3AE}",
-        balance: 0,
-        winCount: 0,
-        lossCount: 0,
-        isOfflinePreference: false
-      });
+  const missingProfileIds = [...connectedUserIds].filter((id) => {
+    const candidate = candidateUsers.get(id);
+    return !candidate || !candidate.username || candidate.username === "Player";
+  });
+  const hydratedProfiles = await Promise.all(missingProfileIds.map(async (id) => {
+    try {
+      return isMySqlConfigured() ? await loadMySqlRuntimeUser(id) : await refreshUserProfileById(id);
+    } catch (error) {
+      console.error(`Online profile lookup failed for ${id}:`, error);
+      return null;
     }
+  }));
+  hydratedProfiles.forEach((profile, index) => {
+    if (!profile?.id || !profile.username) return;
+    const id = missingProfileIds[index];
+    candidateUsers.set(id, { ...candidateUsers.get(id) || {}, ...profile, id });
+  });
+  candidateUsers.forEach((candidate, id) => {
+    if (!candidate.username || candidate.username === "Player") candidateUsers.delete(id);
   });
   const busyUserIds = /* @__PURE__ */ new Set();
   Object.values(store.rooms).forEach((room) => {
