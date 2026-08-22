@@ -1,6 +1,7 @@
 import mysql, { Pool, PoolOptions } from 'mysql2/promise';
 
 let pool: Pool | null = null;
+let gameplayLockPool: Pool | null = null;
 
 export function isMySqlConfigured() {
   return Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
@@ -34,6 +35,19 @@ export function getMySqlPool() {
   return pool;
 }
 
+// Named gameplay locks must never consume the same connections used by room
+// persistence. Otherwise several simultaneous rooms can fill the data pool
+// with lock holders that are all waiting for a free persistence connection.
+export function getMySqlGameplayLockPool() {
+  if (!gameplayLockPool) {
+    gameplayLockPool = mysql.createPool({
+      ...mysqlConfig(),
+      connectionLimit: Math.max(2, Math.min(20, Number(process.env.MYSQL_GAMEPLAY_LOCK_CONNECTION_LIMIT) || 10)),
+    });
+  }
+  return gameplayLockPool;
+}
+
 export async function testMySqlConnection() {
   const connection = await getMySqlPool().getConnection();
   try {
@@ -45,8 +59,9 @@ export async function testMySqlConnection() {
 }
 
 export async function closeMySqlPool() {
-  if (!pool) return;
   const activePool = pool;
+  const activeGameplayLockPool = gameplayLockPool;
   pool = null;
-  await activePool.end();
+  gameplayLockPool = null;
+  await Promise.all([activePool?.end(), activeGameplayLockPool?.end()]);
 }

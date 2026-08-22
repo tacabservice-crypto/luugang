@@ -42,6 +42,7 @@ var import_firestore = require("firebase-admin/firestore");
 // src/server/mysql.ts
 var import_promise = __toESM(require("mysql2/promise"), 1);
 var pool = null;
+var gameplayLockPool = null;
 function isMySqlConfigured() {
   return Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
 }
@@ -71,6 +72,15 @@ function getMySqlPool() {
   if (!pool) pool = import_promise.default.createPool(mysqlConfig());
   return pool;
 }
+function getMySqlGameplayLockPool() {
+  if (!gameplayLockPool) {
+    gameplayLockPool = import_promise.default.createPool({
+      ...mysqlConfig(),
+      connectionLimit: Math.max(2, Math.min(20, Number(process.env.MYSQL_GAMEPLAY_LOCK_CONNECTION_LIMIT) || 10))
+    });
+  }
+  return gameplayLockPool;
+}
 async function testMySqlConnection() {
   const connection = await getMySqlPool().getConnection();
   try {
@@ -81,10 +91,11 @@ async function testMySqlConnection() {
   }
 }
 async function closeMySqlPool() {
-  if (!pool) return;
   const activePool = pool;
+  const activeGameplayLockPool = gameplayLockPool;
   pool = null;
-  await activePool.end();
+  gameplayLockPool = null;
+  await Promise.all([activePool?.end(), activeGameplayLockPool?.end()]);
 }
 
 // scripts/migrate-firestore-to-mysql.ts
@@ -4477,6 +4488,8 @@ setInterval(() => {
     }
   });
 }, 3e4);
+var activeRoomHydrationAt = 0;
+var activeRoomHydrationPromise = null;
 app.use("/api/rooms", async (req, res, next) => {
   if (!isMySqlConfigured()) return next();
   const pathParts = req.path.split("/").filter(Boolean);
@@ -4504,13 +4517,21 @@ app.use("/api/rooms", async (req, res, next) => {
   const bodyRoomId = String(req.body?.roomId || req.body?.roomCode || "").trim().toUpperCase();
   const pathRoomId = pathParts[0] === "check-status" ? String(pathParts[1] || "").trim().toUpperCase() : !reservedPaths.has(pathParts[0]) ? String(pathParts[0] || "").trim().toUpperCase() : "";
   const roomId = bodyRoomId || pathRoomId;
+  const isAuthoritativeGameplayMutation = req.method === "POST" && ["roll-dice", "move-token"].includes(pathParts[0]);
   try {
     if (req.method === "GET" && pathParts[0] === "active") {
-      const rooms = await listMySqlActiveGameRooms();
-      rooms.forEach((room) => {
-        if (room?.id && shouldAcceptRoomSnapshot(store.rooms[room.id], room)) store.rooms[room.id] = room;
-      });
-    } else if (roomId) {
+      if (!activeRoomHydrationPromise && Date.now() - activeRoomHydrationAt >= 5e3) {
+        activeRoomHydrationPromise = listMySqlActiveGameRooms().then((rooms) => {
+          rooms.forEach((room) => {
+            if (room?.id && shouldAcceptRoomSnapshot(store.rooms[room.id], room)) store.rooms[room.id] = room;
+          });
+          activeRoomHydrationAt = Date.now();
+        }).finally(() => {
+          activeRoomHydrationPromise = null;
+        });
+      }
+      if (activeRoomHydrationPromise) await activeRoomHydrationPromise;
+    } else if (roomId && !isAuthoritativeGameplayMutation) {
       const room = await loadMySqlGameRoom(roomId);
       const localRoom = store.rooms[roomId];
       if (room && shouldAcceptRoomSnapshot(localRoom, room)) {
@@ -4524,6 +4545,7 @@ app.use("/api/rooms", async (req, res, next) => {
       req.query?.userId
     ].map((value) => String(value || "").trim()).filter(Boolean);
     await Promise.all([...new Set(userIds)].map(async (userId) => {
+      if (store.users[userId]) return;
       const user = await loadMySqlRuntimeUser(userId);
       if (user?.id && !store.users[user.id]) store.users[user.id] = user;
     }));
@@ -4531,6 +4553,7 @@ app.use("/api/rooms", async (req, res, next) => {
     console.error("MySQL live room hydration failed; continuing with local state:", error);
   }
   res.once("finish", () => {
+    if (isAuthoritativeGameplayMutation) return;
     const persistedRoomId = String(res.locals.roomId || roomId || "").trim().toUpperCase();
     const room = store.rooms[persistedRoomId];
     if (!room || res.statusCode >= 500) return;
@@ -4546,7 +4569,7 @@ app.use("/api/rooms", async (req, res, next) => {
   if (!roomId) return res.status(400).json({ error: "Room ID is required." });
   let connection;
   try {
-    connection = await getMySqlPool().getConnection();
+    connection = await getMySqlGameplayLockPool().getConnection();
     const lockName = `ludosom_room_${roomId}`.slice(0, 64);
     const [rows] = await connection.query("SELECT GET_LOCK(?, 8) AS acquired", [lockName]);
     if (Number(rows[0]?.acquired) !== 1) {

@@ -42,7 +42,7 @@ function getDistDirectory(): string {
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
-import { getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
+import { getMySqlGameplayLockPool, getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, deleteMySqlGameRoom, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, listMySqlOnlineUsers, touchMySqlUserPresence, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
@@ -4549,6 +4549,9 @@ setInterval(() => {
 // Keep live room state shared when production traffic is served by more than
 // one Node process. Local memory remains the fast working copy, while MySQL is
 // the hand-off point between processes.
+let activeRoomHydrationAt = 0;
+let activeRoomHydrationPromise: Promise<void> | null = null;
+
 app.use('/api/rooms', async (req, res, next) => {
   if (!isMySqlConfigured()) return next();
 
@@ -4563,14 +4566,22 @@ app.use('/api/rooms', async (req, res, next) => {
     ? String(pathParts[1] || '').trim().toUpperCase()
     : (!reservedPaths.has(pathParts[0]) ? String(pathParts[0] || '').trim().toUpperCase() : '');
   const roomId = bodyRoomId || pathRoomId;
+  const isAuthoritativeGameplayMutation = req.method === 'POST' && ['roll-dice', 'move-token'].includes(pathParts[0]);
 
   try {
     if (req.method === 'GET' && pathParts[0] === 'active') {
-      const rooms = await listMySqlActiveGameRooms();
-      rooms.forEach(room => {
-        if (room?.id && shouldAcceptRoomSnapshot(store.rooms[room.id], room)) store.rooms[room.id] = room;
-      });
-    } else if (roomId) {
+      // Every dashboard polls this endpoint. Coalesce those polls into one SQL
+      // read per worker instead of loading every room once per connected user.
+      if (!activeRoomHydrationPromise && Date.now() - activeRoomHydrationAt >= 5_000) {
+        activeRoomHydrationPromise = listMySqlActiveGameRooms().then(rooms => {
+          rooms.forEach(room => {
+            if (room?.id && shouldAcceptRoomSnapshot(store.rooms[room.id], room)) store.rooms[room.id] = room;
+          });
+          activeRoomHydrationAt = Date.now();
+        }).finally(() => { activeRoomHydrationPromise = null; });
+      }
+      if (activeRoomHydrationPromise) await activeRoomHydrationPromise;
+    } else if (roomId && !isAuthoritativeGameplayMutation) {
       const room = await loadMySqlGameRoom(roomId);
       const localRoom = store.rooms[roomId];
       // A lagging shared snapshot must never resurrect a settled room. Doing so
@@ -4587,6 +4598,7 @@ app.use('/api/rooms', async (req, res, next) => {
       req.query?.userId,
     ].map(value => String(value || '').trim()).filter(Boolean);
     await Promise.all([...new Set(userIds)].map(async userId => {
+      if (store.users[userId]) return;
       const user = await loadMySqlRuntimeUser(userId);
       // Do not replace a live in-memory wallet with a lagging SQL read. User
       // updates are synchronized explicitly after every critical settlement.
@@ -4597,6 +4609,7 @@ app.use('/api/rooms', async (req, res, next) => {
   }
 
   res.once('finish', () => {
+    if (isAuthoritativeGameplayMutation) return;
     const persistedRoomId = String(res.locals.roomId || roomId || '').trim().toUpperCase();
     const room = store.rooms[persistedRoomId];
     if (!room || res.statusCode >= 500) return;
@@ -4617,7 +4630,7 @@ app.use('/api/rooms', async (req, res, next) => {
 
   let connection: any;
   try {
-    connection = await getMySqlPool().getConnection();
+    connection = await getMySqlGameplayLockPool().getConnection();
     const lockName = `ludosom_room_${roomId}`.slice(0, 64);
     const [rows] = await connection.query('SELECT GET_LOCK(?, 8) AS acquired', [lockName]);
     if (Number(rows[0]?.acquired) !== 1) {
