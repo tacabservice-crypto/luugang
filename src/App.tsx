@@ -1539,7 +1539,7 @@ export default function App() {
   ) : null;
 
   if (!user) {
-    const guestProfile: UserProfile = { id: guestIdRef.current, username: 'Daawade', avatar: '👁️', balance: 0, winCount: 0, lossCount: 0 };
+    const guestProfile: UserProfile = { id: guestIdRef.current, username: 'Welcome To LudoSom', avatar: '/ludosom-logo.png', balance: 0, winCount: 0, lossCount: 0, isOfflinePreference: true };
     if (activeRoom) {
       return <VoiceChatProvider><GameRoomView room={activeRoom} user={guestProfile} userId={guestProfile.id} isGuest onRequireAuth={requireAuth} onLeave={() => { setActiveRoom(null); navigate('/'); }} onLogout={() => requireAuth()} onToggleReady={() => requireAuth()} onAddBot={() => requireAuth()} onChangeTeam={() => requireAuth()} onStartMatch={() => requireAuth()} onRollDice={() => requireAuth()} onMoveToken={() => requireAuth()} onSendChat={() => requireAuth('Login samee si aad chat-ka uga qaybqaadato.')} onProfileUpdate={async () => requireAuth()} onRetryJoin={() => requireAuth()} />{renderAuthSheet()}<Toaster /></VoiceChatProvider>;
     }

@@ -984,22 +984,22 @@ export default function Dashboard({
                 <h2 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[100px] xs:max-w-[140px] sm:max-w-none" title={user.username}>
                   {user.username} {user.vip && user.vip.expires > Date.now() && <span className="ml-1 text-yellow-400 text-lg">👑</span>}
                 </h2>
-                <button 
-                  onClick={() => isGuest ? onRequireAuth?.('Login samee si aad profile-kaaga u maamusho.') : setIsEditingProfile(!isEditingProfile)}
+                {!isGuest && <button 
+                  onClick={() => setIsEditingProfile(!isEditingProfile)}
                   className="shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold text-blue-400 hover:bg-white/10 transition-all cursor-pointer active:scale-95"
                 >
                   Edit
-                </button>
+                </button>}
               </div>
 
-              <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-300 font-medium whitespace-nowrap">
+              {isGuest ? <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300 sm:text-xs">Faa'iido Qarsoon</div> : <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-300 font-medium whitespace-nowrap">
                 <span className="flex items-center gap-1 text-emerald-400 font-semibold">
                   <Flame className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-400" />
                   {user.winCount} Wins
                 </span>
                 <span className="text-slate-600">•</span>
                 <span className="text-slate-400">{user.lossCount} Defeats</span>
-              </div>
+              </div>}
             </div>
           </div>
 
