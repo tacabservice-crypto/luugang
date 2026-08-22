@@ -5018,14 +5018,34 @@ app.post("/api/rooms/voice-signaling", (req, res) => {
 });
 app.post("/api/rooms/challenge/invite", async (req, res) => {
   const { senderId, receiverId, betAmount, capacity, gameMode } = req.body;
-  const sender = store.users[senderId];
+  let sender = store.users[senderId];
+  if (!sender && isMySqlConfigured()) sender = await loadMySqlRuntimeUser(senderId);
   if (!sender) return res.status(404).json({ error: "Sender user not found." });
-  const receiver = store.users[receiverId];
-  if (!receiver || receiver.isOfflinePreference) return res.status(409).json({ error: "Ciyaaryahankan hadda online ma aha." });
-  const receiverBusy = Object.values(store.rooms).some(
-    (room) => (room.status === "waiting" || room.status === "playing") && (room.players.some((player) => player.userId === receiverId) || room.invitedUserId === receiverId)
-  );
-  if (receiverBusy) return res.status(409).json({ error: "Ciyaaryahankan hadda ciyaar ama challenge kale ayuu ku jiraa." });
+  let receiver = store.users[receiverId];
+  if (!receiver && isMySqlConfigured()) receiver = await loadMySqlRuntimeUser(receiverId);
+  if (!receiver) return res.status(409).json({ error: "Ciyaaryahankan hadda online ma aha." });
+  store.users[senderId] = sender;
+  store.users[receiverId] = receiver;
+  let receiverIsFreshlyHome = false;
+  try {
+    if (isMySqlConfigured()) {
+      const onlineUsers = await listMySqlOnlineUsers();
+      receiverIsFreshlyHome = onlineUsers.some(
+        (user) => user.id === receiverId && user.profile?.presenceLocation === "home"
+      );
+    } else if (db) {
+      const presenceDoc = await db.collection("userPresence").doc(receiverId).get();
+      const presence = presenceDoc.data();
+      receiverIsFreshlyHome = Boolean(
+        presenceDoc.exists && Number(presence?.lastSeenAt || 0) >= Date.now() - 45e3 && presence?.profile?.presenceLocation === "home"
+      );
+    }
+  } catch (error) {
+    console.error(`Challenge presence lookup failed for ${receiverId}:`, error);
+  }
+  if (!receiverIsFreshlyHome) {
+    return res.status(409).json({ error: "Ciyaaryahankan hadda Home-ka online kama aha." });
+  }
   const bet = parseFloat(betAmount) || 0;
   if (sender.balance < bet) {
     return res.status(400).json({ error: `Insufficient wallet balance for $${bet} bet.` });
