@@ -2792,14 +2792,6 @@ setInterval(() => {
   });
 }, 10000);
 
-// Share presence across all production processes without polling full user
-// profiles. Stale rows expire naturally in listMySqlOnlineUserIds.
-setInterval(() => {
-  if (!isMySqlConfigured()) return;
-  const userIds = [...new Set(activeClients.map(client => client.userId).filter(Boolean))];
-  if (userIds.length) void touchMySqlUserPresence(userIds).catch(error => console.error('Presence heartbeat failed:', error));
-}, 25_000).unref?.();
-
 // Match full real-player queues only. Automatic bot filling is disabled.
 setInterval(() => {
   cleanupMatchmakingQueues();
@@ -3196,7 +3188,6 @@ app.get('/api/updates', (req, res) => {
   } : undefined;
   const client: SSEClient = { userId, res, profile: clientProfile };
   activeClients.push(client);
-  if (isMySqlConfigured()) void touchMySqlUserPresence([clientProfile || userId]).catch(error => console.error('Presence connect update failed:', error));
 
   // Handle Reconnection: Check if this user is rejoining an active game
   const activeRoom = Object.values(store.rooms).find(r =>
@@ -3478,6 +3469,7 @@ app.post('/api/users/presence', async (req, res) => {
     avatar: reportedAvatar || knownUser?.avatar || '🎮',
     winCount: knownUser?.winCount || 0,
     lossCount: knownUser?.lossCount || 0,
+    presenceLocation: 'home',
     // The visible Home client is fresher than the persisted profile cache.
     // Using the cached value here could permanently hide returning users whose
     // client has already switched back online.
@@ -3512,7 +3504,7 @@ app.get('/api/users/online', async (req, res) => {
     if (!currentProfile && isMySqlConfigured()) currentProfile = await loadMySqlRuntimeUser(currentUserId);
     if (!currentProfile && db) currentProfile = await refreshUserProfileById(currentUserId);
     if (currentProfile) {
-      const presenceProfile = { ...currentProfile, id: currentUserId, isOfflinePreference: false };
+      const presenceProfile = { ...currentProfile, id: currentUserId, isOfflinePreference: false, presenceLocation: 'home' };
       if (isMySqlConfigured()) {
         await touchMySqlUserPresence([presenceProfile]);
       } else if (db) {
@@ -3546,6 +3538,11 @@ app.get('/api/users/online', async (req, res) => {
       console.error('Firestore presence lookup failed:', error);
     }
   }
+  const homePresenceUserIds = new Set(
+    sharedOnlineUsers
+      .filter(user => user.profile?.presenceLocation === 'home')
+      .map(user => user.id)
+  );
   const connectedUserIds = new Set([...activeClients.map(client => client.userId), ...sharedOnlineUsers.map(user => user.id)]);
   const candidateUsers = new Map(Object.values(store.users).map(user => [user.id, user]));
   sharedOnlineUsers.forEach(({ id, profile }) => {
@@ -3621,7 +3618,11 @@ app.get('/api/users/online', async (req, res) => {
       }
     }
 
-    if (status !== 'seeking' && connectedUserIds.has(u.id) && !busyUserIds.has(u.id)) status = 'online';
+    if (
+      status !== 'seeking'
+      && connectedUserIds.has(u.id)
+      && (homePresenceUserIds.has(u.id) || !busyUserIds.has(u.id))
+    ) status = 'online';
 
     if (status === 'seeking' || status === 'online') {
       onlineList.push({
