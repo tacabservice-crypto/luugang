@@ -881,8 +881,112 @@ export default function GameRoomView({
     const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : (winnerId ? [winnerId] : []);
     const isMeWinner = winnerIds.includes(userId);
     const winnerPlayer = room.players.find(p => p.userId === winnerId) || room.players[0];
+    const winnerNames = room.players.filter(player => winnerIds.includes(player.userId)).map(player => player.username).join(' & ');
     const losers = room.players.filter(p => !winnerIds.includes(p.userId));
     const myNetPayout = room.gameState.winnerPayouts?.[userId] ?? room.gameState.winnerPayout ?? 0;
+
+    if (isSpectator) {
+      const betStatus = spectatorBet?.status as 'open' | 'won' | 'lost' | 'refunded' | undefined;
+      const isBetWon = betStatus === 'won';
+      const isBetLost = betStatus === 'lost';
+      const isBetRefunded = betStatus === 'refunded';
+      const isBetSettling = betStatus === 'open';
+      const betPayout = Number(spectatorBet?.payout ?? spectatorBet?.potentialPayout ?? 0);
+      const betStakeAmount = Number(spectatorBet?.stake ?? 0);
+      const betProfit = Math.max(0, betPayout - betStakeAmount);
+
+      return (
+        <div className="min-h-screen overflow-hidden bg-gradient-to-b from-[#170d38] via-[#09051d] to-[#02010a] px-4 py-6 text-white selection:bg-purple-500">
+          {isBetWon && <Confetti width={width} height={height} numberOfPieces={180} recycle={false} />}
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute left-1/2 top-1/3 h-72 w-72 -translate-x-1/2 rounded-full bg-purple-600/15 blur-[90px]" />
+            <div className="absolute right-[-5rem] top-[-5rem] h-64 w-64 rounded-full bg-blue-500/10 blur-[90px]" />
+          </div>
+
+          <main className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-sm flex-col justify-center">
+            <div className="mb-3 flex items-center justify-center gap-2 text-[9px] font-black uppercase tracking-[0.28em] text-purple-300">
+              <Eye className="h-3.5 w-3.5" /> Match Result
+            </div>
+
+            <section className={`overflow-hidden rounded-3xl border shadow-2xl ${
+              isBetWon ? 'border-emerald-400/30 shadow-emerald-950/40' :
+              isBetLost ? 'border-red-400/25 shadow-red-950/30' :
+              isBetRefunded ? 'border-amber-300/30 shadow-amber-950/30' :
+              'border-purple-400/20 shadow-purple-950/40'
+            }`}>
+              <div className={`p-6 text-center ${
+                isBetWon ? 'bg-gradient-to-br from-emerald-500/25 to-slate-950' :
+                isBetLost ? 'bg-gradient-to-br from-red-500/20 to-slate-950' :
+                isBetRefunded ? 'bg-gradient-to-br from-amber-500/20 to-slate-950' :
+                'bg-gradient-to-br from-purple-500/20 to-slate-950'
+              }`}>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-black/25 text-3xl shadow-inner">
+                  {isBetWon ? '✅' : isBetLost ? '❌' : isBetRefunded ? '↩️' : isBetSettling ? <Timer className="h-8 w-8 animate-spin text-blue-300" /> : '🏁'}
+                </div>
+                <h2 className="text-xl font-black tracking-tight">
+                  {isBetWon ? 'Bet-kaagu Wuu Guuleystay!' :
+                   isBetLost ? 'Bet-kaaga Waa Laga Badiyey' :
+                   isBetRefunded ? 'Bet-kaaga Waa La Celiyey' :
+                   isBetSettling ? 'Bet-ka Waa La Xisaabinayaa…' :
+                   'Ciyaartu Way Dhammaatay'}
+                </h2>
+                <p className="mt-1 text-xs font-bold text-slate-400">
+                  {winnerNames || winnerPlayer?.username} ayaa ku guuleystay ciyaarta
+                </p>
+              </div>
+
+              {spectatorBet ? (
+                <div className="space-y-3 bg-[#0b0820]/95 p-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-white/5 bg-white/[0.04] p-2 text-center">
+                      <span className="block text-[8px] font-black uppercase text-slate-500">Doorashada</span>
+                      <span className="mt-1 block truncate text-xs font-black">{spectatorBet.targetUsername} · {spectatorBet.prediction}</span>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/[0.04] p-2 text-center">
+                      <span className="block text-[8px] font-black uppercase text-slate-500">Stake</span>
+                      <span className="mt-1 block font-mono text-xs font-black">{formatCurrency(betStakeAmount)}</span>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/[0.04] p-2 text-center">
+                      <span className="block text-[8px] font-black uppercase text-slate-500">Final Odds</span>
+                      <span className="mt-1 block font-mono text-xs font-black">{spectatorBet.odds ? Number(spectatorBet.odds).toFixed(2) : '—'}</span>
+                    </div>
+                  </div>
+
+                  <div className={`flex items-center justify-between rounded-2xl border px-4 py-3 ${
+                    isBetWon ? 'border-emerald-400/20 bg-emerald-500/10' :
+                    isBetLost ? 'border-red-400/20 bg-red-500/10' :
+                    isBetRefunded ? 'border-amber-300/20 bg-amber-500/10' :
+                    'border-blue-400/20 bg-blue-500/10'
+                  }`}>
+                    <div>
+                      <span className="block text-[8px] font-black uppercase tracking-widest text-slate-400">
+                        {isBetWon ? 'Wallet-ka lagu daray' : isBetLost ? 'Stake lumay' : isBetRefunded ? 'Wallet-ka lagu celiyey' : 'Xaaladda'}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] font-bold text-slate-300">
+                        {isBetWon ? `Faa’iido saafi ah ${formatCurrency(betProfit)}` : isBetLost ? 'Saadaashu ma aysan guuleysan' : isBetRefunded ? 'Suuqa bet-ka waa la baajiyey' : 'Natiijada lacagta ayaa la xaqiijinayaa'}
+                      </span>
+                    </div>
+                    <strong className={`font-mono text-xl ${isBetWon ? 'text-emerald-300' : isBetLost ? 'text-red-300' : isBetRefunded ? 'text-amber-300' : 'text-blue-300'}`}>
+                      {isBetWon ? `+${formatCurrency(betPayout)}` : isBetLost ? `-${formatCurrency(betStakeAmount)}` : isBetRefunded ? `+${formatCurrency(betStakeAmount)}` : '•••'}
+                    </strong>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-[#0b0820]/95 p-4 text-center">
+                  <ShieldCheck className="mx-auto mb-2 h-5 w-5 text-purple-300" />
+                  <p className="text-xs font-bold text-slate-300">Waxaad ciyaarta u daawatay daawade ahaan.</p>
+                  <p className="mt-1 text-[10px] text-slate-500">Bet lagama dhigin ciyaartan.</p>
+                </div>
+              )}
+            </section>
+
+            <button onClick={() => onLeave(true)} className="mt-4 w-full rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 py-3.5 text-xs font-black uppercase tracking-widest text-black shadow-lg shadow-amber-950/20 transition active:scale-[0.98]">
+              Home-ka Ku Laabo
+            </button>
+          </main>
+        </div>
+      );
+    }
     
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-between p-4 selection:bg-purple-500 selection:text-white relative overflow-hidden">
