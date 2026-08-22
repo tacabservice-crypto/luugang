@@ -3514,9 +3514,14 @@ app.get('/api/users/online', async (req, res) => {
     // Presence is the freshest source for Home. Merge it even when the user
     // already exists in the local store; otherwise a stale cached profile can
     // keep an online user hidden (especially after changing offline preference).
-    if (profile) {
-      candidateUsers.set(id, { ...(candidateUsers.get(id) || {}), ...profile, id });
-    }
+    candidateUsers.set(id, {
+      ...(candidateUsers.get(id) || {}),
+      ...(profile || {}),
+      id,
+      username: profile?.username || candidateUsers.get(id)?.username || 'Player',
+      avatar: profile?.avatar || candidateUsers.get(id)?.avatar || '🎮',
+      isOfflinePreference: profile?.isOfflinePreference ?? candidateUsers.get(id)?.isOfflinePreference ?? false,
+    });
   });
   const busyUserIds = new Set<string>();
   Object.values(store.rooms).forEach(room => {
