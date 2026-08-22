@@ -170,6 +170,7 @@ export default function GameRoomView({
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
   const [spectatorBet, setSpectatorBet] = useState<any | null>(null);
+  const [spectatorMarkets, setSpectatorMarkets] = useState<any[]>([]);
   const [betTargetId, setBetTargetId] = useState('');
   const [betPrediction, setBetPrediction] = useState<'W' | 'L'>('W');
   const [betStake, setBetStake] = useState('0.10');
@@ -367,10 +368,16 @@ export default function GameRoomView({
 
   useEffect(() => {
     if (!isSpectator) return;
-    void fetch(`/api/rooms/${encodeURIComponent(room.id)}/spectator-bet?userId=${encodeURIComponent(userId)}`)
+    const loadMarkets = () => fetch(`/api/rooms/${encodeURIComponent(room.id)}/spectator-bet?userId=${encodeURIComponent(userId)}&_t=${Date.now()}`)
       .then(response => response.ok ? response.json() : null)
-      .then(data => { if (data?.bet) setSpectatorBet(data.bet); })
+      .then(data => {
+        if (data?.bet) setSpectatorBet(data.bet);
+        if (Array.isArray(data?.markets)) setSpectatorMarkets(data.markets);
+      })
       .catch(() => undefined);
+    void loadMarkets();
+    const interval = window.setInterval(loadMarkets, 3_000);
+    return () => window.clearInterval(interval);
   }, [isSpectator, room.id, userId]);
 
   const placeSpectatorBet = async () => {
@@ -1002,6 +1009,17 @@ export default function GameRoomView({
 
   const bottomBoxColor = myPlayer?.isHost ? hostPlayer?.color : challengerPlayer?.color;
   const topBoxColor = myPlayer?.isHost ? challengerPlayer?.color : hostPlayer?.color;
+  const selectedSpectatorMarket = spectatorMarkets.find(market => market.targetPlayerId === betTargetId);
+  const enteredBetStake = Math.max(0, Number(betStake || 0));
+  const selectedSidePool = Number(betPrediction === 'W' ? selectedSpectatorMarket?.winPool || 0 : selectedSpectatorMarket?.lossPool || 0);
+  const oppositeSidePool = Number(betPrediction === 'W' ? selectedSpectatorMarket?.lossPool || 0 : selectedSpectatorMarket?.winPool || 0);
+  const estimatedPoolTotal = selectedSidePool + oppositeSidePool + enteredBetStake;
+  const estimatedDynamicOdds = enteredBetStake > 0
+    ? Number((estimatedPoolTotal * 0.90 / (selectedSidePool + enteredBetStake)).toFixed(2))
+    : null;
+  const estimatedDynamicReturn = estimatedDynamicOdds && estimatedDynamicOdds > 1
+    ? Number((enteredBetStake * estimatedDynamicOdds).toFixed(2))
+    : enteredBetStake;
 
   return (
     <>{!isSpectator && <LiveAdBanner placement="game" />}
@@ -1317,8 +1335,8 @@ export default function GameRoomView({
                 <div className="text-xs font-black text-white">Saadaali W / L</div>
               </div>
               <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-right">
-                <div className="text-[7px] font-black uppercase text-amber-300">Odds</div>
-                <div className="font-mono text-sm font-black text-white">1.80</div>
+                <div className="text-[7px] font-black uppercase text-amber-300">Live Odds</div>
+                <div className="font-mono text-sm font-black text-white">{estimatedDynamicOdds && estimatedDynamicOdds > 1 ? estimatedDynamicOdds.toFixed(2) : 'Pool'}</div>
               </div>
             </div>
 
@@ -1338,7 +1356,8 @@ export default function GameRoomView({
                   {room.players.filter(player => player.status !== 'left').map(player => (
                     <button key={player.userId} type="button" onClick={() => setBetTargetId(player.userId)} className={`flex min-w-0 items-center gap-1.5 rounded-lg border p-1.5 text-left transition ${betTargetId === player.userId ? 'border-emerald-400 bg-emerald-500/15' : 'border-white/10 bg-black/20'}`}>
                       <PlayerAvatar avatar={player.avatar} className="h-6 w-6 text-base" />
-                      <span className="truncate text-[9px] font-black text-white">{player.username}</span>
+                      <span className="min-w-0 flex-1 truncate text-[9px] font-black text-white">{player.username}</span>
+                      <span className="text-[7px] font-bold text-slate-500">{spectatorMarkets.find(market => market.targetPlayerId === player.userId)?.progress || 0}%</span>
                       <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${COLOR_MAP[player.color]}`} />
                     </button>
                   ))}
@@ -1346,16 +1365,16 @@ export default function GameRoomView({
                 <div className="grid grid-cols-[1fr_1fr_1.3fr] gap-1.5">
                   {(['W', 'L'] as const).map(choice => (
                     <button key={choice} type="button" onClick={() => setBetPrediction(choice)} className={`rounded-lg border py-2 text-[10px] font-black ${betPrediction === choice ? (choice === 'W' ? 'border-emerald-300 bg-emerald-500 text-slate-950' : 'border-red-300 bg-red-500 text-white') : 'border-white/10 bg-white/5 text-slate-400'}`}>
-                      {choice === 'W' ? 'W · WIN' : 'L · LOSS'}
+                      {choice === 'W' ? `W · ${selectedSpectatorMarket?.winOdds || '—'}` : `L · ${selectedSpectatorMarket?.lossOdds || '—'}`}
                     </button>
                   ))}
                   <input value={betStake} onChange={event => setBetStake(event.target.value)} type="number" min="0.10" max="10" step="0.10" className="min-w-0 rounded-lg border border-white/10 bg-black/30 px-2 text-center font-mono text-xs font-black text-white outline-none focus:border-emerald-400" aria-label="Bet stake" />
                 </div>
                 <button type="button" disabled={!betTargetId || isPlacingBet} onClick={() => void placeSpectatorBet()} className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 py-2.5 text-[10px] font-black uppercase tracking-wider text-slate-950 shadow-lg shadow-emerald-950/30 disabled:opacity-40">
-                  {isPlacingBet ? 'Confirming…' : `Place Bet · Return $${(Number(betStake || 0) * 1.8).toFixed(2)}`}
+                  {isPlacingBet ? 'Confirming…' : `Place Bet · Est. $${estimatedDynamicReturn.toFixed(2)}`}
                 </button>
                 {betError && <p className="text-center text-[9px] font-bold text-red-300">{betError}</p>}
-                <p className="text-center text-[8px] font-semibold text-slate-500">Min $0.10 · Max $10 · Hal bet ciyaar kasta · Market closes at home stretch</p>
+                <p className="text-center text-[8px] font-semibold text-slate-500">Dynamic pool · 10% app commission · Unmatched market = refund · Closes at home stretch</p>
               </div>
             )}
           </div>

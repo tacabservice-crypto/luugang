@@ -2436,31 +2436,47 @@ async function settleSpectatorBets(room) {
   settlingSpectatorRooms.add(room.id);
   try {
     const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : room.gameState.winnerId ? [room.gameState.winnerId] : [];
-    for (const bet of openBets) {
-      const bettor = store.users[bet.userId];
-      if (!bettor) continue;
-      bet.settledAt = Date.now();
-      if (room.status === "cancelled" || winnerIds.length === 0) {
-        bet.status = "refunded";
-        bet.payout = bet.stake;
-        bettor.balance = Number((bettor.balance + bet.stake).toFixed(2));
-        addTransaction(bet.userId, "refund", bet.stake, room.id, `Spectator bet refund ${bet.id}.`);
-      } else {
-        const targetWon = winnerIds.includes(bet.targetPlayerId);
-        const correct = bet.prediction === "W" ? targetWon : !targetWon;
-        if (correct) {
+    const markets = /* @__PURE__ */ new Map();
+    openBets.forEach((bet) => markets.set(bet.targetPlayerId, [...markets.get(bet.targetPlayerId) || [], bet]));
+    for (const [targetPlayerId, marketBets] of markets) {
+      const totalPool = Number(marketBets.reduce((sum, bet) => sum + bet.stake, 0).toFixed(2));
+      const targetWon = winnerIds.includes(targetPlayerId);
+      const winningPrediction = targetWon ? "W" : "L";
+      const winnerPool = Number(marketBets.filter((bet) => bet.prediction === winningPrediction).reduce((sum, bet) => sum + bet.stake, 0).toFixed(2));
+      const distributablePool = Number((totalPool * 0.9).toFixed(2));
+      const shouldRefund = room.status === "cancelled" || winnerIds.length === 0 || winnerPool === 0 || distributablePool <= winnerPool;
+      const winningBets = marketBets.filter((bet) => bet.prediction === winningPrediction);
+      let distributed = 0;
+      for (const bet of marketBets) {
+        const bettor = store.users[bet.userId];
+        if (!bettor) continue;
+        bet.settledAt = Date.now();
+        if (shouldRefund) {
+          bet.status = "refunded";
+          bet.payout = bet.stake;
+          bettor.balance = Number((bettor.balance + bet.stake).toFixed(2));
+          addTransaction(bet.userId, "refund", bet.stake, room.id, `Unmatched spectator pool refund ${bet.id}.`);
+        } else if (bet.prediction === winningPrediction) {
+          const winnerIndex = winningBets.findIndex((item) => item.id === bet.id);
+          const payout = winnerIndex === winningBets.length - 1 ? Number((distributablePool - distributed).toFixed(2)) : Number((distributablePool * (bet.stake / winnerPool)).toFixed(2));
+          distributed = Number((distributed + payout).toFixed(2));
           bet.status = "won";
-          bet.payout = bet.potentialPayout;
-          bettor.balance = Number((bettor.balance + bet.potentialPayout).toFixed(2));
-          addTransaction(bet.userId, "win_payout", bet.potentialPayout, room.id, `Spectator ${bet.prediction} bet won on ${bet.targetUsername} (${bet.odds.toFixed(2)} odds).`);
+          bet.payout = payout;
+          bet.odds = Number((payout / bet.stake).toFixed(2));
+          bet.potentialPayout = payout;
+          bettor.balance = Number((bettor.balance + payout).toFixed(2));
+          addTransaction(bet.userId, "win_payout", payout, room.id, `Dynamic spectator pool won on ${bet.targetUsername} (${bet.odds.toFixed(2)} final odds).`);
         } else {
           bet.status = "lost";
           bet.payout = 0;
-          recordHouseRevenue("betting_margin", bet.stake, bet.id, `Lost spectator bet on match ${room.id}.`);
         }
+        broadcastUserUpdate(bet.userId);
+        await saveUserProfileToFirestore(bettor);
       }
-      broadcastUserUpdate(bet.userId);
-      await saveUserProfileToFirestore(bettor);
+      if (!shouldRefund) {
+        const commission = Number((totalPool - distributablePool).toFixed(2));
+        recordHouseRevenue("betting_margin", commission, `${room.id}:${targetPlayerId}`, `10% spectator pool commission for match ${room.id}.`);
+      }
     }
     await saveStoreAndWait();
   } finally {
@@ -4568,8 +4584,28 @@ app.get("/api/rooms/active", (req, res) => {
 });
 app.get("/api/rooms/:roomId/spectator-bet", (req, res) => {
   const userId = String(req.query.userId || "");
-  const bet = store.spectatorBets.find((item) => item.roomId === req.params.roomId && item.userId === userId) || null;
-  res.json({ bet, odds: 1.8, minStake: 0.1, maxStake: 10 });
+  const roomId = req.params.roomId;
+  const bet = store.spectatorBets.find((item) => item.roomId === roomId && item.userId === userId) || null;
+  const openBets = store.spectatorBets.filter((item) => item.roomId === roomId && item.status === "open");
+  const room = store.rooms[roomId];
+  const markets = (room?.players || []).filter((player) => player.status !== "left").map((player) => {
+    const playerBets = openBets.filter((item) => item.targetPlayerId === player.userId);
+    const winPool = Number(playerBets.filter((item) => item.prediction === "W").reduce((sum, item) => sum + item.stake, 0).toFixed(2));
+    const lossPool = Number(playerBets.filter((item) => item.prediction === "L").reduce((sum, item) => sum + item.stake, 0).toFixed(2));
+    const totalPool = Number((winPool + lossPool).toFixed(2));
+    const tokens = room.gameState.tokens.filter((token) => token.ownerId === player.userId || token.color === player.color);
+    const progress = tokens.length ? Math.round(tokens.reduce((sum, token) => sum + Math.max(0, token.position), 0) / (tokens.length * 56) * 100) : 0;
+    return {
+      targetPlayerId: player.userId,
+      winPool,
+      lossPool,
+      totalPool,
+      winOdds: winPool > 0 ? Number((totalPool * 0.9 / winPool).toFixed(2)) : null,
+      lossOdds: lossPool > 0 ? Number((totalPool * 0.9 / lossPool).toFixed(2)) : null,
+      progress
+    };
+  });
+  res.json({ bet, markets, commissionRate: 0.1, minStake: 0.1, maxStake: 10 });
 });
 app.post("/api/rooms/:roomId/spectator-bet", async (req, res) => {
   const roomId = req.params.roomId;
@@ -4593,6 +4629,20 @@ app.post("/api/rooms/:roomId/spectator-bet", async (req, res) => {
   const marketClosed = room.gameState.tokens.some((token) => token.position >= 51);
   if (marketClosed) return res.status(409).json({ error: "Market-ku wuu xirmay maadaama ciyaartu dhammaad ku dhowdahay." });
   const target = room.players.find((player) => player.userId === targetPlayerId);
+  const marketBets = store.spectatorBets.filter((bet2) => bet2.roomId === roomId && bet2.targetPlayerId === targetPlayerId && bet2.status === "open");
+  const winPool = marketBets.filter((bet2) => bet2.prediction === "W").reduce((sum, bet2) => sum + bet2.stake, 0);
+  const lossPool = marketBets.filter((bet2) => bet2.prediction === "L").reduce((sum, bet2) => sum + bet2.stake, 0);
+  const selectedPool = prediction === "W" ? winPool : lossPool;
+  const opposingPool = prediction === "W" ? lossPool : winPool;
+  const selectedPoolAfter = Number((selectedPool + stake).toFixed(2));
+  const maximumBalancedPool = Math.max(1, Number((opposingPool * 5).toFixed(2)));
+  if (selectedPoolAfter > maximumBalancedPool) {
+    const remaining = Math.max(0, Number((maximumBalancedPool - selectedPool).toFixed(2)));
+    return res.status(409).json({ error: remaining >= 0.1 ? `Risk limit: dhinacan waxaad hadda ku dari kartaa ugu badnaan $${remaining.toFixed(2)}.` : "Dhinacan bet badan ayaa saaran; sug bet ka soo horjeeda." });
+  }
+  const totalPoolAfter = Number((winPool + lossPool + stake).toFixed(2));
+  const estimatedOdds = Number((totalPoolAfter * 0.9 / selectedPoolAfter).toFixed(2));
+  const estimatedPayout = estimatedOdds > 1 ? Number((stake * estimatedOdds).toFixed(2)) : stake;
   const bet = {
     id: `sbet_${Date.now()}_${import_crypto.default.randomUUID().slice(0, 8)}`,
     roomId,
@@ -4601,15 +4651,15 @@ app.post("/api/rooms/:roomId/spectator-bet", async (req, res) => {
     targetUsername: target.username,
     prediction,
     stake,
-    odds: 1.8,
-    potentialPayout: Number((stake * 1.8).toFixed(2)),
+    odds: estimatedOdds,
+    potentialPayout: estimatedPayout,
     status: "open",
     createdAt: Date.now()
   };
   bettor.balance = Number((bettor.balance - stake).toFixed(2));
   store.users[userId] = bettor;
   store.spectatorBets.unshift(bet);
-  addTransaction(userId, "bet_escrow_locked", stake, roomId, `Spectator ${prediction} bet on ${target.username} at 1.80 odds.`);
+  addTransaction(userId, "bet_escrow_locked", stake, roomId, `Dynamic spectator ${prediction} pool bet on ${target.username}; estimated odds ${estimatedOdds.toFixed(2)}.`);
   await saveUserProfileToFirestore(bettor);
   await saveStoreAndWait();
   broadcastUserUpdate(userId);
