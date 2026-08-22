@@ -2130,6 +2130,11 @@ function settleBotEconomy(room: GameRoom, winnerIds: string[]) {
 }
 
 // Trigger game auto-play bot actions
+// The client dice tumbles for roughly 800ms. Keep the authoritative result
+// visible for another full second before the bot moves or passes its turn so
+// players and spectators can actually read every roll.
+const BOT_DICE_RESULT_HOLD_MS = 1800;
+
 function executeBotTurnIfActiveLegacy(room: GameRoom) {
   const activePlayer = room.players[room.gameState.turn];
   if (!activePlayer || !isBotPlayer(activePlayer.userId)) return;
@@ -2163,7 +2168,7 @@ function executeBotTurnIfActiveLegacy(room: GameRoom) {
           advanceTurn(room);
           broadcastToRoom(room.id, 'game_update', room);
           executeBotTurnIfActive(room);
-        }, 900);
+        }, BOT_DICE_RESULT_HOLD_MS);
       } else {
         // Prioritize moves:
         // 1. Cut opponent
@@ -2200,7 +2205,7 @@ function executeBotTurnIfActiveLegacy(room: GameRoom) {
           moveTokenLogic(room, selectedToken.id, d);
           broadcastToRoom(room.id, 'game_update', room);
           executeBotTurnIfActive(room);
-        }, 900);
+        }, BOT_DICE_RESULT_HOLD_MS);
       }
     }
   }, 400);
@@ -2274,7 +2279,7 @@ function executeBotTurnIfActive(room: GameRoom) {
             }
           }, 1000);
         }
-      }, 900);
+      }, BOT_DICE_RESULT_HOLD_MS);
     } catch (error) {
       console.error(`Bot roll failed for room ${roomId}:`, error);
       const latestRoom = store.rooms[roomId];

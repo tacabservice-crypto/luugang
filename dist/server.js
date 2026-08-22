@@ -2580,6 +2580,7 @@ function settleBotEconomy(room, winnerIds) {
   saveStore();
   void persistRoomUserProfiles(room).catch((error) => console.error(`Failed to persist bot result for ${room.id}:`, error));
 }
+var BOT_DICE_RESULT_HOLD_MS = 1800;
 function executeBotTurnIfActive(room) {
   const activePlayer = room.players[room.gameState.turn];
   if (!activePlayer || !isBotPlayer(activePlayer.userId)) return;
@@ -2636,7 +2637,7 @@ function executeBotTurnIfActive(room) {
             }
           }, 1e3);
         }
-      }, 900);
+      }, BOT_DICE_RESULT_HOLD_MS);
     } catch (error) {
       console.error(`Bot roll failed for room ${roomId}:`, error);
       const latestRoom = store.rooms[roomId];
