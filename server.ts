@@ -3532,6 +3532,7 @@ app.get('/api/users/online', async (req, res) => {
         id: client.userId,
         username: 'Player',
         avatar: '🎮',
+        balance: 0,
         winCount: 0,
         lossCount: 0,
         isOfflinePreference: false,
