@@ -1,0 +1,6 @@
+- [x] Enhance `data-cleanup` endpoint in `server.ts`
+- [x] Create `scripts/cleanup-db.ts` standalone script
+- [x] Verify `CAPACITOR_MOBILE_BYPASS` logic in `server.ts`
+- [x] Verify `localRoom.status === 'completed'` safety guard
+- [x] Run local verification of cleanup script
+- [/] Provide instructions for server deployment and execution
