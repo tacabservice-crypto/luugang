@@ -29,7 +29,6 @@ const AuthScreen = React.lazy(() => import('./components/AuthScreen'));
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const GameRoomView = React.lazy(() => import('./components/GameRoom'));
 const WalletModal = React.lazy(() => import('./components/WalletModal'));
-const GuestHome = React.lazy(() => import('./components/GuestHome'));
 const RejoinPrompt = React.lazy(() => import('./components/RejoinPrompt'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
@@ -1544,7 +1543,7 @@ export default function App() {
     if (activeRoom) {
       return <VoiceChatProvider><GameRoomView room={activeRoom} user={guestProfile} userId={guestProfile.id} isGuest onRequireAuth={requireAuth} onLeave={() => { setActiveRoom(null); navigate('/'); }} onLogout={() => requireAuth()} onToggleReady={() => requireAuth()} onAddBot={() => requireAuth()} onChangeTeam={() => requireAuth()} onStartMatch={() => requireAuth()} onRollDice={() => requireAuth()} onMoveToken={() => requireAuth()} onSendChat={() => requireAuth('Login samee si aad chat-ka uga qaybqaadato.')} onProfileUpdate={async () => requireAuth()} onRetryJoin={() => requireAuth()} />{renderAuthSheet()}<Toaster /></VoiceChatProvider>;
     }
-    return <div id="app-root"><GuestHome onRequireAuth={requireAuth} />{!isOnline && <div className="fixed inset-x-3 top-16 z-[120] mx-auto max-w-md rounded-xl border border-amber-400/40 bg-amber-950/95 p-3 text-center text-xs font-black text-amber-200">Internetku wuu go'an yahay; live games-ku ma cusboonaan karaan.</div>}{renderAuthSheet()}<InstallPwaPrompt /></div>;
+    return <div id="app-root"><VoiceChatProvider><Dashboard user={guestProfile} isGuest onRequireAuth={requireAuth} onOpenWallet={() => requireAuth('Login samee si aad Wallet-ka u isticmaasho.')} onLogout={() => requireAuth()} onCreatePrivateRoom={() => requireAuth('Login samee si aad qol ciyaareed u abuurto.')} onJoinPrivateRoom={() => requireAuth('Login samee si aad qol ciyaareed ugu biirto.')} onStartMatchmaking={() => requireAuth('Login samee si aad ciyaartoy u raadiso.')} onLeaveMatchmaking={() => undefined} matchmakingState={{ isQueued: false, betAmount: 0, capacity: 2, gameMode: 'solo' }} rejoinableRoom={null} onRejoin={() => requireAuth()} onDismissRejoin={() => undefined} onProfileUpdate={async () => requireAuth('Login samee si aad profile-kaaga u maamusho.')} /></VoiceChatProvider>{!isOnline && <div className="fixed inset-x-3 top-16 z-[120] mx-auto max-w-md rounded-xl border border-amber-400/40 bg-amber-950/95 p-3 text-center text-xs font-black text-amber-200">Internetku wuu go'an yahay; live games-ku ma cusboonaan karaan.</div>}{renderAuthSheet()}<InstallPwaPrompt /></div>;
   }
 
   const renderNoticeSlot = () => (

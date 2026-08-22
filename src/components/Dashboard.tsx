@@ -61,6 +61,8 @@ interface DashboardProps {
   onRejoin: () => void;
   onDismissRejoin: () => void;
   onProfileUpdate: (updatedData: Partial<UserProfile>) => Promise<void>;
+  isGuest?: boolean;
+  onRequireAuth?: (reason?: string) => void;
 }
 
 export default function Dashboard({
@@ -76,7 +78,9 @@ export default function Dashboard({
   rejoinableRoom,
   onRejoin,
   onDismissRejoin,
-  onProfileUpdate
+  onProfileUpdate,
+  isGuest = false,
+  onRequireAuth
 }: DashboardProps) {
   const navigate = useNavigate();
   const { t, language } = useLanguage();
@@ -264,6 +268,7 @@ export default function Dashboard({
   }, [user.id, matchmakingState.isQueued, showOnlinePlayers]);
 
   useEffect(() => {
+    if (isGuest) return;
     let stopped = false;
     const announceHomePresence = async () => {
       if (stopped || document.visibilityState === 'hidden') return;
@@ -290,11 +295,12 @@ export default function Dashboard({
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [user.id, user.username, user.avatar, user.isOfflinePreference]);
+  }, [isGuest, user.id, user.username, user.avatar, user.isOfflinePreference]);
 
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 
   const handleToggleOnlineStatus = async () => {
+    if (isGuest) return onRequireAuth?.('Login samee si aad online status-kaaga u maamusho.');
     try {
       setIsTogglingStatus(true);
       const nextOffline = !user.isOfflinePreference;
@@ -341,6 +347,7 @@ export default function Dashboard({
   const [isStartingBotMatch, setIsStartingBotMatch] = useState(false);
 
   const handlePlayWithBot = async () => {
+    if (isGuest) return onRequireAuth?.('Login samee si aad Bot ula ciyaarto.');
     try {
       setIsStartingBotMatch(true);
       const res = await fetch('/api/rooms/create-bot-room', {
@@ -455,6 +462,7 @@ export default function Dashboard({
   };
 
   const handleChallengePlayer = async (targetUserId: string, betAmount: number) => {
+    if (isGuest) return onRequireAuth?.('Login samee si aad ciyaaryahan u challenge-gareyso.');
     if (user.balance < betAmount) {
       alert(`Wallet-kaaga kuma filna! Waxaad u baahan tahay ugu yaraan $${betAmount} si aad u tartanto.`);
       return;
@@ -496,6 +504,7 @@ export default function Dashboard({
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isGuest) return onRequireAuth?.('Login samee si aad profile u yeelato.');
     try {
       await onProfileUpdate({ username: editName, avatar: avatarIcon });
       setSaveSuccess(true);
@@ -856,8 +865,8 @@ export default function Dashboard({
             className="bg-black/40 hover:bg-black/60 border border-white/10 px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
           >
             <Wallet className="w-3.5 h-3.5 text-blue-400" />
-            <span className="text-xs font-mono text-white font-bold">{formatCurrency(user.balance)}</span>
-            <span className="bg-blue-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-black flex items-center justify-center">+</span>
+            <span className="text-xs font-mono text-white font-bold">{isGuest ? 'Login' : formatCurrency(user.balance)}</span>
+            {!isGuest && <span className="bg-blue-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-black flex items-center justify-center">+</span>}
           </button>
 
           {/* Settings Dropdown */}
@@ -879,7 +888,8 @@ export default function Dashboard({
                 <div className="p-1">
                   <button
                     onClick={() => {
-                      setIsEditingProfile(true);
+                      if (isGuest) onRequireAuth?.('Login samee si aad profile-kaaga u maamusho.');
+                      else setIsEditingProfile(true);
                       setIsSettingsDropdownOpen(false);
                     }}
                     className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-purple-500/20 hover:text-white rounded-md"
@@ -942,8 +952,8 @@ export default function Dashboard({
                     }}
                     className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-red-400 hover:bg-red-500/20 hover:text-red-300 rounded-md"
                   >
-                    <LogOut className="w-4 h-4" />
-                    <span>{t('logout')}</span>
+                    {isGuest ? <LogIn className="w-4 h-4" /> : <LogOut className="w-4 h-4" />}
+                    <span>{isGuest ? 'Login / Sign up' : t('logout')}</span>
                   </button>
                 </div>
               </div>
@@ -975,7 +985,7 @@ export default function Dashboard({
                   {user.username} {user.vip && user.vip.expires > Date.now() && <span className="ml-1 text-yellow-400 text-lg">👑</span>}
                 </h2>
                 <button 
-                  onClick={() => setIsEditingProfile(!isEditingProfile)}
+                  onClick={() => isGuest ? onRequireAuth?.('Login samee si aad profile-kaaga u maamusho.') : setIsEditingProfile(!isEditingProfile)}
                   className="shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold text-blue-400 hover:bg-white/10 transition-all cursor-pointer active:scale-95"
                 >
                   Edit
