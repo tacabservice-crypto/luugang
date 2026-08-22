@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy } from 'react';
+import { StrictMode } from 'react';
 import './api-runtime';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
@@ -9,10 +9,9 @@ import ErrorPage from "./pages/ErrorPage";
 import GlobalPullToRefresh from './components/GlobalPullToRefresh';
 import NativeUpdateGate from './components/NativeUpdateGate';
 import NativeBackHandler from './components/NativeBackHandler';
-
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-const BecomeVip = lazy(() => import('./pages/BecomeVip'));
-const Tournaments = lazy(() => import('./pages/Tournaments'));
+import AdminDashboard from './pages/AdminDashboard';
+import BecomeVip from './pages/BecomeVip';
+import Tournaments from './pages/Tournaments';
 
 const router = createBrowserRouter([
   {
@@ -54,12 +53,10 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
-      <Suspense fallback={<div className="fixed inset-x-0 top-[62px] z-[200] flex justify-center"><div className="h-7 w-7 animate-spin rounded-full border-[3px] border-blue-500 border-t-transparent" /></div>}>
-        <GlobalPullToRefresh>
-          <RouterProvider router={router} />
-          <NativeUpdateGate />
-        </GlobalPullToRefresh>
-      </Suspense>
+      <GlobalPullToRefresh>
+        <RouterProvider router={router} />
+        <NativeUpdateGate />
+      </GlobalPullToRefresh>
     </LanguageProvider>
   </StrictMode>,
 );
