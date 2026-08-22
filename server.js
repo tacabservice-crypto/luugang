@@ -3376,8 +3376,8 @@ app.get("/api/version", (_req, res) => {
   res.json({
     version: DEPLOY_VERSION,
     deployedFrontend: true,
-    nativeVersionCode: 21,
-    nativeVersionName: "3.0",
+    nativeVersionCode: 22,
+    nativeVersionName: "3.1",
     androidApkUrl: "/downloads/LudoSom.apk"
   });
 });
