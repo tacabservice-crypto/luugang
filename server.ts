@@ -43,7 +43,7 @@ import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
-import { cleanupMySqlRealtimeEvents, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
+import { cleanupMySqlRealtimeEvents, deleteMySqlGameRoom, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
 import { deleteMySqlMatchmaking, listActiveMySqlMatchmaking, listMySqlCashierHeartbeats, listMySqlOnlineUsers, touchMySqlUserPresence, updateMySqlCashierHeartbeat, upsertMySqlMatchmaking } from './src/server/mysql-realtime.ts';
 import { deleteMySqlEmailOtp, getMySqlEmailOtp, saveMySqlEmailOtp, StoredEmailOtp } from './src/server/mysql-otp.ts';
 import { adjustMySqlAgentFloat, approveMySqlAgentPlayerRequest, deleteMySqlAdmin, deleteMySqlAgent, listMySqlManualRequests, listMySqlUsersByAgent, loadMySqlPrimaryCaches, resolveMySqlAgentRequest, resolveMySqlManualRequest, saveMySqlAdmin, saveMySqlAgent, saveMySqlAgentRequest, saveMySqlCashierPayment, saveMySqlManualRequest, saveMySqlUserProfile } from './src/server/mysql-primary-data.ts';
@@ -5459,6 +5459,30 @@ app.post('/api/rooms/challenge/accept', async (req, res) => {
     return res.status(400).json({ error: `Insufficient wallet balance to accept this $${room.betAmount} match.` });
   }
 
+  // Accepting one challenge automatically declines every other pending invite
+  // for this receiver, so all remaining cards retract on every device.
+  const activeChallengeRooms = isMySqlConfigured()
+    ? await listMySqlActiveGameRooms().catch(() => Object.values(store.rooms))
+    : Object.values(store.rooms);
+  const otherInviteRooms = activeChallengeRooms.filter(otherRoom =>
+    otherRoom.id !== roomId
+    && otherRoom.status === 'waiting'
+    && String((otherRoom as any).invitedUserId || '') === userId
+  );
+  await Promise.all(otherInviteRooms.map(async otherRoom => {
+    const otherHostId = otherRoom.players?.find((player: LudoPlayer) => player.isHost)?.userId;
+    if (otherHostId) {
+      const declinedPayload = { receiverName: user.username, reason: 'accepted_another', roomId: otherRoom.id };
+      sendEventToUser(otherHostId, 'game_invite_declined', declinedPayload);
+      publishRealtimeEvent('user', otherHostId, 'game_invite_declined', declinedPayload);
+    }
+    const cancelledPayload = { roomId: otherRoom.id, reason: 'accepted_another' };
+    sendEventToUser(userId, 'game_invite_cancelled', cancelledPayload);
+    publishRealtimeEvent('user', userId, 'game_invite_cancelled', cancelledPayload);
+    delete store.rooms[otherRoom.id];
+    if (isMySqlConfigured()) await deleteMySqlGameRoom(otherRoom.id);
+  }));
+
   const colors: PlayerColor[] = room.gameMode === 'team'
     ? ['red', 'yellow', 'green', 'blue']
     : ['red', 'green', 'yellow', 'blue'];
@@ -5539,20 +5563,24 @@ app.post('/api/rooms/challenge/accept', async (req, res) => {
 });
 
 // Decline a real game challenge
-app.post('/api/rooms/challenge/decline', (req, res) => {
-  const { userId, roomId } = req.body;
-  const user = store.users[userId];
+app.post('/api/rooms/challenge/decline', async (req, res) => {
+  const { userId, roomId, reason } = req.body;
+  let user = store.users[userId];
+  if (!user && isMySqlConfigured()) user = await loadMySqlRuntimeUser(userId);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const room = store.rooms[roomId];
+  let room = store.rooms[roomId];
+  if (!room && isMySqlConfigured()) room = await loadMySqlGameRoom(roomId) || undefined;
   if (room) {
     const hostId = room.players.find(p => p.isHost)?.userId;
     if (hostId) {
-      sendEventToUser(hostId, 'game_invite_declined', { receiverName: user.username });
-      publishRealtimeEvent('user', hostId, 'game_invite_declined', { receiverName: user.username });
+      const payload = { receiverName: user.username, roomId, reason: reason || 'declined' };
+      sendEventToUser(hostId, 'game_invite_declined', payload);
+      publishRealtimeEvent('user', hostId, 'game_invite_declined', payload);
     }
     delete store.rooms[roomId];
-    saveStore();
+    await saveStoreAndWait();
+    if (isMySqlConfigured()) await deleteMySqlGameRoom(roomId);
   }
 
   res.json({ success: true });
@@ -6149,9 +6177,16 @@ app.post('/api/rooms/leave', async (req, res) => {
   addLog(room, `${p.username} has left the game.`);
 
   if (room.status === 'waiting') {
+    const invitedUserId = String((room as any).invitedUserId || '');
+    if (p.isHost && invitedUserId) {
+      const payload = { roomId, reason: 'challenger_left' };
+      sendEventToUser(invitedUserId, 'game_invite_cancelled', payload);
+      publishRealtimeEvent('user', invitedUserId, 'game_invite_cancelled', payload);
+    }
     room.players = room.players.filter(pl => pl.userId !== userId);
     if (room.players.length === 0) {
       delete store.rooms[roomId];
+      if (isMySqlConfigured()) await deleteMySqlGameRoom(roomId);
     } else {
       // Re-assign host if host left
       if (p.isHost) {

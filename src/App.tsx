@@ -33,6 +33,16 @@ const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
 const Tournaments = React.lazy(() => import('./pages/Tournaments'));
 
+type IncomingChallengeInvite = {
+  senderId: string;
+  senderName: string;
+  senderAvatar: string;
+  betAmount: number;
+  capacity: number;
+  gameMode: 'solo' | 'team';
+  roomId: string;
+};
+
 function shouldAcceptRoomUpdate(current: GameRoom | null, incoming: GameRoom): boolean {
   if (!current || current.id !== incoming.id) return true;
   if (current.status === 'completed' || current.status === 'cancelled') return false;
@@ -281,15 +291,24 @@ export default function App() {
       playGameReminderAudioRef.current = null;
     };
   }, []);
-  const [incomingInvite, setIncomingInvite] = useState<{
-    senderId: string;
-    senderName: string;
-    senderAvatar: string;
-    betAmount: number;
-    capacity: number;
-    gameMode: 'solo' | 'team';
-    roomId: string;
-  } | null>(null);
+  const [incomingInvites, setIncomingInvites] = useState<IncomingChallengeInvite[]>([]);
+  const [exitingInviteIds, setExitingInviteIds] = useState<Set<string>>(() => new Set());
+  const inviteTimeoutsRef = useRef<Map<string, number>>(new Map());
+
+  const retractInviteCard = (roomId: string) => {
+    const timeout = inviteTimeoutsRef.current.get(roomId);
+    if (timeout) window.clearTimeout(timeout);
+    inviteTimeoutsRef.current.delete(roomId);
+    setExitingInviteIds(previous => new Set(previous).add(roomId));
+    window.setTimeout(() => {
+      setIncomingInvites(previous => previous.filter(invite => invite.roomId !== roomId));
+      setExitingInviteIds(previous => {
+        const next = new Set(previous);
+        next.delete(roomId);
+        return next;
+      });
+    }, 280);
+  };
 
   const [seekingAlert, setSeekingAlert] = useState<{
     senderId: string;
@@ -299,6 +318,11 @@ export default function App() {
     capacity: number;
     gameMode: 'solo' | 'team';
   } | null>(null);
+
+  useEffect(() => () => {
+    inviteTimeoutsRef.current.forEach(timeout => window.clearTimeout(timeout));
+    inviteTimeoutsRef.current.clear();
+  }, []);
 
   const matchmakingTimeoutRef = useRef<any>(null);
 
@@ -652,16 +676,20 @@ export default function App() {
 
     eventSource.addEventListener('game_invite', (e: any) => {
       try {
-        const data = JSON.parse(e.data) as {
-          senderId: string;
-          senderName: string;
-          senderAvatar: string;
-          betAmount: number;
-          capacity: number;
-          gameMode: 'solo' | 'team';
-          roomId: string;
-        };
-        setIncomingInvite(data);
+        const data = JSON.parse(e.data) as IncomingChallengeInvite;
+        setIncomingInvites(previous => previous.some(invite => invite.roomId === data.roomId)
+          ? previous
+          : [...previous, data]);
+        const existingTimeout = inviteTimeoutsRef.current.get(data.roomId);
+        if (existingTimeout) window.clearTimeout(existingTimeout);
+        inviteTimeoutsRef.current.set(data.roomId, window.setTimeout(() => {
+          void fetch(`${API_BASE_URL}/api/rooms/challenge/decline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, roomId: data.roomId, reason: 'timeout' }),
+          });
+          retractInviteCard(data.roomId);
+        }, 15_000));
         playInviteSound();
       } catch (err) {
         console.error('Failed to parse game invite', err);
@@ -681,14 +709,27 @@ export default function App() {
 
     eventSource.addEventListener('game_invite_declined', (e: any) => {
       try {
-        const data = JSON.parse(e.data) as { receiverName: string };
+        const data = JSON.parse(e.data) as { receiverName: string; roomId?: string; reason?: string };
         setActiveRoom(null);
         setMatchmakingState({ isQueued: false, betAmount: 0 });
         localStorage.removeItem('ludo_active_room_id');
         navigate('/', { replace: true });
-        setErrorToast(`❌ ${data.receiverName} wuu diiday challenge-kaaga.`);
+        setErrorToast(data.reason === 'timeout'
+          ? `⏱️ ${data.receiverName} kama jawaabin challenge-ka.`
+          : data.reason === 'accepted_another'
+            ? `${data.receiverName} challenge kale ayuu aqbalay.`
+            : `❌ ${data.receiverName} wuu diiday challenge-kaaga.`);
       } catch (err) {
         console.error('Failed to parse game invite declined', err);
+      }
+    });
+
+    eventSource.addEventListener('game_invite_cancelled', (e: any) => {
+      try {
+        const data = JSON.parse(e.data) as { roomId: string };
+        retractInviteCard(data.roomId);
+      } catch (err) {
+        console.error('Failed to parse cancelled game invite', err);
       }
     });
 
@@ -1281,42 +1322,44 @@ export default function App() {
     }
   };
 
-  const handleAcceptInvite = async () => {
-    if (!incomingInvite || !user) return;
+  const handleAcceptInvite = async (invite: IncomingChallengeInvite) => {
+    if (!user) return;
     try {
       const response = await fetch(`${API_BASE_URL}/api/rooms/challenge/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, roomId: incomingInvite.roomId })
+        body: JSON.stringify({ userId: user.id, roomId: invite.roomId })
       });
       if (response.ok) {
         const data = await response.json() as { roomId: string; room?: GameRoom };
         if (data.room) setActiveRoom(data.room);
-        else fetchRoomStateAndRedirect(data.roomId || incomingInvite.roomId);
+        else fetchRoomStateAndRedirect(data.roomId || invite.roomId);
+        inviteTimeoutsRef.current.forEach(timeout => window.clearTimeout(timeout));
+        inviteTimeoutsRef.current.clear();
+        setIncomingInvites([]);
+        setExitingInviteIds(new Set());
       } else {
         const err = await response.json();
         setErrorToast(err.error || 'Ku biirista martiqaadka waa ay guuldaraysatay.');
+        retractInviteCard(invite.roomId);
       }
     } catch (err) {
       console.error(err);
       setErrorToast('Waxaa dhacay cilad farsamo.');
-    } finally {
-      setIncomingInvite(null);
     }
   };
 
-  const handleDeclineInvite = async () => {
-    if (!incomingInvite || !user) return;
+  const handleDeclineInvite = async (invite: IncomingChallengeInvite) => {
+    if (!user) return;
+    retractInviteCard(invite.roomId);
     try {
       await fetch(`${API_BASE_URL}/api/rooms/challenge/decline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, roomId: incomingInvite.roomId })
+        body: JSON.stringify({ userId: user.id, roomId: invite.roomId, reason: 'declined' })
       });
     } catch (err) {
       console.error(err);
-    } finally {
-      setIncomingInvite(null);
     }
   };
 
@@ -1478,31 +1521,35 @@ export default function App() {
         </div>
       )}
 
-      {incomingInvite && (
-        <div className="fixed right-2 top-14 z-[130] w-[min(92vw,270px)] animate-fade-in">
-          <div className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-yellow-400/60 bg-[#111827]/95 p-2 shadow-[0_8px_28px_rgba(0,0,0,0.55)] backdrop-blur-md">
+      {incomingInvites.length > 0 && (
+        <div className="fixed right-2 top-14 z-[130] flex w-[min(92vw,270px)] flex-col gap-2">
+          {incomingInvites.map(invite => (
+          <div
+            key={invite.roomId}
+            className={`relative flex items-center gap-2 overflow-hidden rounded-xl border border-yellow-400/60 bg-[#111827]/95 p-2 shadow-[0_8px_28px_rgba(0,0,0,0.55)] backdrop-blur-md transition-all duration-300 ${exitingInviteIds.has(invite.roomId) ? 'translate-x-[120%] opacity-0' : 'translate-x-0 opacity-100 animate-fade-in'}`}
+          >
             <div className="absolute inset-y-0 left-0 w-1 bg-yellow-400" />
             
             <div className="ml-1 flex min-w-0 flex-1 items-center gap-2">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/35 text-xl">
-                {incomingInvite.senderAvatar}
+                {invite.senderAvatar}
               </span>
               <div className="min-w-0">
-                <div className="truncate text-[11px] font-black text-white">{incomingInvite.senderName}</div>
-                <div className="text-[9px] font-bold text-yellow-300">Challenge · ${incomingInvite.betAmount} · {incomingInvite.gameMode === 'team' ? '2v2' : '1v1'}</div>
+                <div className="truncate text-[11px] font-black text-white">{invite.senderName}</div>
+                <div className="text-[9px] font-bold text-yellow-300">Challenge · ${invite.betAmount} · {invite.gameMode === 'team' ? '2v2' : '1v1'}</div>
               </div>
             </div>
 
             <div className="flex shrink-0 gap-1.5">
               <button
-                onClick={handleAcceptInvite}
+                onClick={() => void handleAcceptInvite(invite)}
                 aria-label="Accept challenge"
                 className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-sm font-black text-white active:scale-90"
               >
                 ✓
               </button>
               <button
-                onClick={handleDeclineInvite}
+                onClick={() => void handleDeclineInvite(invite)}
                 aria-label="Decline challenge"
                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/40 bg-red-500/20 text-sm font-black text-red-300 active:scale-90"
               >
@@ -1510,6 +1557,7 @@ export default function App() {
               </button>
             </div>
           </div>
+          ))}
         </div>
       )}
     </>

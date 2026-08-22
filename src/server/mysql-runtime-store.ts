@@ -179,6 +179,12 @@ export async function saveMySqlGameRoom(room: any): Promise<void> {
   );
 }
 
+export async function deleteMySqlGameRoom(roomId: string): Promise<void> {
+  if (!roomId) return;
+  await ensureMySqlGameRoomSchema();
+  await getMySqlPool().execute('DELETE FROM game_rooms WHERE id = ?', [roomId]);
+}
+
 export async function listMySqlActiveGameRooms(): Promise<any[]> {
   await ensureMySqlGameRoomSchema();
   const [rows] = await getMySqlPool().execute<any[]>(

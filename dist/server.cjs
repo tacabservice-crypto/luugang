@@ -466,6 +466,11 @@ async function saveMySqlGameRoom(room) {
     [room.id, room.status || "waiting", Number(room.betAmount || 0), Number(room.createdAt || updatedAt), updatedAt, JSON.stringify(room)]
   );
 }
+async function deleteMySqlGameRoom(roomId) {
+  if (!roomId) return;
+  await ensureMySqlGameRoomSchema();
+  await getMySqlPool().execute("DELETE FROM game_rooms WHERE id = ?", [roomId]);
+}
 async function listMySqlActiveGameRooms() {
   await ensureMySqlGameRoomSchema();
   const [rows] = await getMySqlPool().execute(
@@ -5195,6 +5200,23 @@ app.post("/api/rooms/challenge/accept", async (req, res) => {
   if (user.balance < room.betAmount) {
     return res.status(400).json({ error: `Insufficient wallet balance to accept this $${room.betAmount} match.` });
   }
+  const activeChallengeRooms = isMySqlConfigured() ? await listMySqlActiveGameRooms().catch(() => Object.values(store.rooms)) : Object.values(store.rooms);
+  const otherInviteRooms = activeChallengeRooms.filter(
+    (otherRoom) => otherRoom.id !== roomId && otherRoom.status === "waiting" && String(otherRoom.invitedUserId || "") === userId
+  );
+  await Promise.all(otherInviteRooms.map(async (otherRoom) => {
+    const otherHostId = otherRoom.players?.find((player) => player.isHost)?.userId;
+    if (otherHostId) {
+      const declinedPayload = { receiverName: user.username, reason: "accepted_another", roomId: otherRoom.id };
+      sendEventToUser(otherHostId, "game_invite_declined", declinedPayload);
+      publishRealtimeEvent("user", otherHostId, "game_invite_declined", declinedPayload);
+    }
+    const cancelledPayload = { roomId: otherRoom.id, reason: "accepted_another" };
+    sendEventToUser(userId, "game_invite_cancelled", cancelledPayload);
+    publishRealtimeEvent("user", userId, "game_invite_cancelled", cancelledPayload);
+    delete store.rooms[otherRoom.id];
+    if (isMySqlConfigured()) await deleteMySqlGameRoom(otherRoom.id);
+  }));
   const colors = room.gameMode === "team" ? ["red", "yellow", "green", "blue"] : ["red", "green", "yellow", "blue"];
   const occupiedColors = room.players.map((p) => p.color);
   const assignedColor = colors.find((c) => !occupiedColors.includes(c)) || "green";
@@ -5263,19 +5285,23 @@ app.post("/api/rooms/challenge/accept", async (req, res) => {
   publishRealtimeEvent("user", user.id, "matchmaker_success", { roomId, room });
   res.json({ success: true, roomId, room });
 });
-app.post("/api/rooms/challenge/decline", (req, res) => {
-  const { userId, roomId } = req.body;
-  const user = store.users[userId];
+app.post("/api/rooms/challenge/decline", async (req, res) => {
+  const { userId, roomId, reason } = req.body;
+  let user = store.users[userId];
+  if (!user && isMySqlConfigured()) user = await loadMySqlRuntimeUser(userId);
   if (!user) return res.status(404).json({ error: "User not found" });
-  const room = store.rooms[roomId];
+  let room = store.rooms[roomId];
+  if (!room && isMySqlConfigured()) room = await loadMySqlGameRoom(roomId) || void 0;
   if (room) {
     const hostId = room.players.find((p) => p.isHost)?.userId;
     if (hostId) {
-      sendEventToUser(hostId, "game_invite_declined", { receiverName: user.username });
-      publishRealtimeEvent("user", hostId, "game_invite_declined", { receiverName: user.username });
+      const payload = { receiverName: user.username, roomId, reason: reason || "declined" };
+      sendEventToUser(hostId, "game_invite_declined", payload);
+      publishRealtimeEvent("user", hostId, "game_invite_declined", payload);
     }
     delete store.rooms[roomId];
-    saveStore();
+    await saveStoreAndWait();
+    if (isMySqlConfigured()) await deleteMySqlGameRoom(roomId);
   }
   res.json({ success: true });
 });
@@ -5727,9 +5753,16 @@ app.post("/api/rooms/leave", async (req, res) => {
   }
   addLog(room, `${p.username} has left the game.`);
   if (room.status === "waiting") {
+    const invitedUserId = String(room.invitedUserId || "");
+    if (p.isHost && invitedUserId) {
+      const payload = { roomId, reason: "challenger_left" };
+      sendEventToUser(invitedUserId, "game_invite_cancelled", payload);
+      publishRealtimeEvent("user", invitedUserId, "game_invite_cancelled", payload);
+    }
     room.players = room.players.filter((pl) => pl.userId !== userId);
     if (room.players.length === 0) {
       delete store.rooms[roomId];
+      if (isMySqlConfigured()) await deleteMySqlGameRoom(roomId);
     } else {
       if (p.isHost) {
         room.players[0].isHost = true;
