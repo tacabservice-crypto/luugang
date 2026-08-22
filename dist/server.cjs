@@ -2493,6 +2493,39 @@ function addLog(room, text) {
 function isBotPlayer(userId) {
   return userId.startsWith("bot_") || userId.startsWith("user_sim_") || userId.startsWith("sim_");
 }
+function isBotEconomyRoom(room) {
+  return room.players.some((player) => isBotPlayer(player.userId));
+}
+function settleBotEconomy(room, winnerIds) {
+  const marker = "Bot game fixed result";
+  const alreadySettled = store.transactions.some((tx) => tx.matchId === room.id && (tx.description || "").includes(marker));
+  if (alreadySettled) return;
+  room.gameState.winnerPayout = 0;
+  room.gameState.winnerPayouts = {};
+  room.gameState.rakeAmount = 0;
+  room.gameState.escrowBalance = 0;
+  room.players.forEach((player) => {
+    if (isBotPlayer(player.userId) || player.status === "left") return;
+    const profile = store.users[player.userId];
+    if (!profile) return;
+    if (winnerIds.includes(player.userId)) {
+      profile.balance = Number((profile.balance + 0.01).toFixed(2));
+      profile.winCount = (profile.winCount || 0) + 1;
+      room.gameState.winnerPayouts[player.userId] = 0.01;
+      if (room.gameState.winnerId === player.userId) room.gameState.winnerPayout = 0.01;
+      addTransaction(player.userId, "win_payout", 0.01, room.id, `${marker}: player win reward.`);
+    } else {
+      const deduction = Math.min(0.02, Number(profile.balance || 0));
+      profile.balance = Number(Math.max(0, profile.balance - deduction).toFixed(2));
+      profile.lossCount = (profile.lossCount || 0) + 1;
+      addTransaction(player.userId, "app_commission", deduction, room.id, `${marker}: bot win charge.`);
+      if (deduction > 0) recordHouseRevenue("bot_result", deduction, `${room.id}:${player.userId}`, `Bot game charge from ${player.userId}.`);
+    }
+    broadcastUserUpdate(player.userId);
+  });
+  saveStore();
+  void persistRoomUserProfiles(room).catch((error) => console.error(`Failed to persist bot result for ${room.id}:`, error));
+}
 function executeBotTurnIfActive(room) {
   const activePlayer = room.players[room.gameState.turn];
   if (!activePlayer || !isBotPlayer(activePlayer.userId)) return;
@@ -2688,6 +2721,13 @@ function moveTokenLogic(room, tokenId, diceValue) {
       addLog(room, `\u{1F3C6} ${activePlayer.username} has won the tournament match!`);
       handleTournamentMatchWin(room.tournamentDetails.tournamentId, room.tournamentDetails.matchId, activePlayer.userId);
       gs.escrowBalance = 0;
+      return;
+    }
+    if (isBotEconomyRoom(room)) {
+      const botWinnerIds = room.gameMode === "team" ? room.players.filter((player) => teamColors.includes(player.color) && player.status !== "left").map((player) => player.userId) : [activePlayer.userId];
+      gs.winnerIds = botWinnerIds;
+      settleBotEconomy(room, botWinnerIds);
+      addLog(room, botWinnerIds.some((id) => !isBotPlayer(id)) ? "\u{1F3C6} Bot game won: each winning player receives $0.01." : "\u{1F916} Bot won: each human player is charged $0.02.");
       return;
     }
     if (room.gameMode === "team") {
@@ -4758,9 +4798,10 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
     teamAssistUnlocked: false
   }));
   resetPlayerInactivity(players[0]);
+  const usesBotEconomy = players.some((player) => isBotPlayer(player.userId));
   let totalEscrow = 0;
   players.forEach((p) => {
-    if (!isBotPlayer(p.userId)) {
+    if (!usesBotEconomy && !isBotPlayer(p.userId)) {
       const u = store.users[p.userId];
       if (u) {
         u.balance = Math.max(0, u.balance - bet);
@@ -4768,7 +4809,7 @@ function startMatchedRoom(matchedUsers, bet, cap, mode) {
         broadcastUserUpdate(p.userId);
       }
     }
-    if (!isBotPlayer(p.userId)) totalEscrow += bet;
+    if (!usesBotEconomy && !isBotPlayer(p.userId)) totalEscrow += bet;
   });
   const tokens = [];
   players.forEach((p) => {
@@ -5464,9 +5505,10 @@ app.post("/api/rooms/start", async (req, res) => {
     }
   });
   const bet = room.betAmount;
+  const usesBotEconomy = isBotEconomyRoom(room);
   let success = true;
   room.players.forEach((pl) => {
-    if (!isBotPlayer(pl.userId)) {
+    if (!usesBotEconomy && !isBotPlayer(pl.userId)) {
       const user = store.users[pl.userId];
       if (!user || user.balance < bet) {
         success = false;
@@ -5478,13 +5520,13 @@ app.post("/api/rooms/start", async (req, res) => {
   }
   let totalEscrow = 0;
   room.players.forEach((pl) => {
-    if (!isBotPlayer(pl.userId)) {
+    if (!usesBotEconomy && !isBotPlayer(pl.userId)) {
       const user = store.users[pl.userId];
       user.balance -= bet;
       addTransaction(pl.userId, "bet_escrow_locked", bet, room.id, `Escrow lock for Match ${room.id}`);
       broadcastUserUpdate(pl.userId);
     }
-    if (!isBotPlayer(pl.userId)) totalEscrow += bet;
+    if (!usesBotEconomy && !isBotPlayer(pl.userId)) totalEscrow += bet;
   });
   const tokens = [];
   room.players.forEach((pl) => {
