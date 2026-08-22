@@ -286,15 +286,16 @@ export default function LudoBoard({
           style={dicePosition}
           aria-label={`${activeColor} player dice ${diceValue || ''}`}
         >
-          <div className="rounded-2xl border border-white/20 bg-black/45 px-1 shadow-xl backdrop-blur-sm">
-            <PhysicalDice
-              value={diceValue}
-              isRolling={diceRolling}
-              onClick={() => undefined}
-              disabled
-              compact
-              color={COLOR_THEMES[activeColor].main}
-            />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-black/45 shadow-xl backdrop-blur-sm">
+            <div className="scale-[0.72]">
+              <PhysicalDice
+                value={diceValue}
+                isRolling={diceRolling}
+                onClick={() => undefined}
+                disabled
+                color={COLOR_THEMES[activeColor].main}
+              />
+            </div>
           </div>
         </div>
       )}

@@ -11,7 +11,6 @@ interface PhysicalDiceProps {
   onClick: () => void;
   disabled: boolean;
   color?: string;
-  compact?: boolean;
 }
 
 function PhysicalDice({
@@ -19,13 +18,11 @@ function PhysicalDice({
   isRolling,
   onClick,
   disabled,
-  color = '#E53170',
-  compact = false
+  color = '#E53170'
 }: PhysicalDiceProps) {
   const [rotation, setRotation] = useState({ x: 0, y: 0, z: 0 });
   const [shake, setShake] = useState(false);
   const latestValueRef = useRef(value);
-  const faceDepth = compact ? 16 : 24;
 
   // Map each value to standard 3D rotations to face the viewer
   const faceRotations: Record<number, { x: number; y: number; z: number }> = {
@@ -82,7 +79,7 @@ function PhysicalDice({
           <div key={idx} className="flex items-center justify-center">
             {activeDots.includes(idx) && (
               <div 
-                className={`${compact ? 'h-1.5 w-1.5' : 'h-2.5 w-2.5'} rounded-full bg-black`}
+                className="w-2.5 h-2.5 rounded-full bg-black"
               />
             )}
           </div>
@@ -95,7 +92,7 @@ function PhysicalDice({
     <div className="flex flex-col items-center justify-center py-2 sm:py-4">
       {/* 3D Perspective Container */}
       <div 
-        className={`${compact ? 'h-14 w-14' : 'h-20 w-20'} cursor-pointer flex items-center justify-center relative ${
+        className={`w-20 h-20 cursor-pointer flex items-center justify-center relative ${
           shake ? 'animate-bounce' : ''
         } ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
         style={{ perspective: '600px' }}
@@ -107,52 +104,51 @@ function PhysicalDice({
       >
         {/* The 3D Cube */}
         <div
-          className={`${compact ? 'h-8 w-8' : 'h-12 w-12'} relative transition-transform duration-500 ease-out`}
+          className="w-12 h-12 relative transition-transform duration-500 ease-out"
           style={{
             transformStyle: 'preserve-3d',
-            transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg) rotateZ(${rotation.z}deg)`,
-            filter: `drop-shadow(0 4px 8px ${color}55)`
+            transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg) rotateZ(${rotation.z}deg)`
           }}
         >
           {/* Face 1: Front */}
           <div 
             className="absolute inset-0 w-full h-full"
-            style={{ transform: `translateZ(${faceDepth}px)`, backfaceVisibility: 'hidden' }}
+            style={{ transform: 'translateZ(24px)', backfaceVisibility: 'hidden' }}
           >
             {renderFaceDots(1)}
           </div>
           {/* Face 6: Back */}
           <div 
             className="absolute inset-0 w-full h-full"
-            style={{ transform: `rotateY(180deg) translateZ(${faceDepth}px)`, backfaceVisibility: 'hidden' }}
+            style={{ transform: 'rotateY(180deg) translateZ(24px)', backfaceVisibility: 'hidden' }}
           >
             {renderFaceDots(6)}
           </div>
           {/* Face 2: Left */}
           <div 
             className="absolute inset-0 w-full h-full"
-            style={{ transform: `rotateY(-90deg) translateZ(${faceDepth}px)`, backfaceVisibility: 'hidden' }}
+            style={{ transform: 'rotateY(-90deg) translateZ(24px)', backfaceVisibility: 'hidden' }}
           >
             {renderFaceDots(2)}
           </div>
           {/* Face 5: Right */}
           <div 
             className="absolute inset-0 w-full h-full"
-            style={{ transform: `rotateY(90deg) translateZ(${faceDepth}px)`, backfaceVisibility: 'hidden' }}
+            style={{ transform: 'rotateY(90deg) translateZ(24px)', backfaceVisibility: 'hidden' }}
           >
             {renderFaceDots(5)}
           </div>
           {/* Face 3: Top */}
           <div 
             className="absolute inset-0 w-full h-full"
-            style={{ transform: `rotateX(90deg) translateZ(${faceDepth}px)`, backfaceVisibility: 'hidden' }}
+            style={{ transform: 'rotateX(90deg) translateZ(24px)', backfaceVisibility: 'hidden' }}
           >
             {renderFaceDots(3)}
           </div>
           {/* Face 4: Bottom */}
           <div 
             className="absolute inset-0 w-full h-full"
-            style={{ transform: `rotateX(-90deg) translateZ(${faceDepth}px)`, backfaceVisibility: 'hidden' }}
+            style={{ transform: 'rotateX(-90deg) translateZ(24px)', backfaceVisibility: 'hidden' }}
           >
             {renderFaceDots(4)}
           </div>
