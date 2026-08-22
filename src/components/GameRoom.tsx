@@ -186,6 +186,7 @@ export default function GameRoomView({
   const optimisticRollRef = useRef(false);
   const rollAnimationStartedAtRef = useRef<number | null>(null);
   const optimisticRollTimeoutRef = useRef<number | null>(null);
+  const autoMoveRollRef = useRef<string | null>(null);
   const lastShownInactivityStrikeAtRef = useRef(Number(
     room.players.find(player => player.userId === userId)?.lastInactivityStrikeAt || 0
   ));
@@ -587,6 +588,33 @@ export default function GameRoomView({
       return () => clearTimeout(delay);
     }
   }, [autoRoll, isActiveTurn, room.gameState.hasRolled, isRolling, requestDiceRoll]);
+
+  // Auto mode owns the complete turn: after rolling, select a legal token that
+  // matches the result. Prefer releasing a token on six, otherwise advance the
+  // token furthest along. The authoritative server still validates every move.
+  useEffect(() => {
+    const diceValue = room.gameState.diceRoll;
+    if (!autoRoll || !isActiveTurn || !room.gameState.hasRolled || diceValue === null) return;
+
+    const playableColor = room.gameMode === 'team' && myPlayer?.teamAssistUnlocked
+      ? (myPlayer.color === 'red' ? 'yellow' : myPlayer.color === 'yellow' ? 'red' : myPlayer.color === 'green' ? 'blue' : 'green')
+      : myPlayer?.color;
+    const validTokens = room.gameState.tokens.filter(token => {
+      if (token.color !== playableColor || token.position === 56) return false;
+      if (token.position === -1) return diceValue === 6;
+      return token.position + diceValue <= 56;
+    });
+    if (!validTokens.length) return;
+
+    const selectedToken = (diceValue === 6 ? validTokens.find(token => token.position === -1) : undefined)
+      || [...validTokens].sort((left, right) => right.position - left.position)[0];
+    const rollKey = `${room.id}:${room.gameState.turn}:${room.gameState.lastActivity}:${diceValue}`;
+    if (autoMoveRollRef.current === rollKey) return;
+    autoMoveRollRef.current = rollKey;
+
+    const delay = window.setTimeout(() => requestTokenMove(selectedToken.id), 650);
+    return () => window.clearTimeout(delay);
+  }, [autoRoll, isActiveTurn, room.id, room.gameMode, room.gameState.hasRolled, room.gameState.diceRoll, room.gameState.lastActivity, room.gameState.tokens, room.gameState.turn, myPlayer?.color, myPlayer?.teamAssistUnlocked, requestTokenMove]);
 
   // Remind the active player to roll after five seconds of inactivity.
   useEffect(() => {
