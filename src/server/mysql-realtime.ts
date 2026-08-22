@@ -57,10 +57,17 @@ export async function listMySqlOnlineUsers(windowMs = 45_000): Promise<Array<{ i
   await ensureMySqlRealtimeSchema();
   const cutoff = Date.now() - windowMs;
   const [rows] = await getMySqlPool().execute<any[]>('SELECT user_id, profile_json FROM user_presence WHERE last_seen_at >= ?', [cutoff]);
-  return rows.map(row => ({
-    id: String(row.user_id),
-    profile: typeof row.profile_json === 'string' ? JSON.parse(row.profile_json) : (row.profile_json || undefined),
-  }));
+  return rows.map(row => {
+    let profile: Record<string, any> | undefined;
+    try {
+      const value = Buffer.isBuffer(row.profile_json) ? row.profile_json.toString('utf8') : row.profile_json;
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      profile = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+    } catch (error) {
+      console.error(`Invalid presence profile for ${String(row.user_id)}:`, error);
+    }
+    return { id: String(row.user_id), profile };
+  });
 }
 
 export async function listMySqlOnlineUserIds(windowMs = 45_000): Promise<string[]> {

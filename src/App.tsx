@@ -500,7 +500,13 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const sseUrl = `${API_BASE_URL}/api/updates?userId=${user.id}`;
+    const sseParams = new URLSearchParams({
+      userId: user.id,
+      username: user.username,
+      avatar: user.avatar || '🎮',
+      isOffline: String(Boolean(user.isOfflinePreference)),
+    });
+    const sseUrl = `${API_BASE_URL}/api/updates?${sseParams.toString()}`;
     const eventSource = new EventSource(sseUrl);
     setIsRealtimeConnected(false);
 
@@ -733,7 +739,7 @@ export default function App() {
       eventSource.close();
       setIsRealtimeConnected(false);
     };
-  }, [user?.id]);
+  }, [user?.id, user?.username, user?.avatar, user?.isOfflinePreference]);
 
   const checkAndPromptRejoin = async (userId: string) => {
     const roomId = localStorage.getItem('ludo_active_room_id');

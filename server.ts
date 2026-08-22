@@ -1432,6 +1432,7 @@ purgeSimulatedUsers();
 interface SSEClient {
   userId: string;
   res: any;
+  profile?: Partial<UserProfile>;
   spectatingRoomId?: string;
 }
 
@@ -3185,9 +3186,17 @@ app.get('/api/updates', (req, res) => {
 
 `);
 
-  const client: SSEClient = { userId, res };
+  const username = String(req.query.username || '').trim().slice(0, 20);
+  const avatar = String(req.query.avatar || '').trim().slice(0, 500);
+  const clientProfile = username ? {
+    id: userId,
+    username,
+    avatar: avatar || '🎮',
+    isOfflinePreference: req.query.isOffline === 'true',
+  } : undefined;
+  const client: SSEClient = { userId, res, profile: clientProfile };
   activeClients.push(client);
-  if (isMySqlConfigured()) void touchMySqlUserPresence([userId]).catch(error => console.error('Presence connect update failed:', error));
+  if (isMySqlConfigured()) void touchMySqlUserPresence([clientProfile || userId]).catch(error => console.error('Presence connect update failed:', error));
 
   // Handle Reconnection: Check if this user is rejoining an active game
   const activeRoom = Object.values(store.rooms).find(r =>
@@ -3528,6 +3537,14 @@ app.get('/api/users/online', async (req, res) => {
       avatar: profile?.avatar || candidateUsers.get(id)?.avatar || '🎮',
       isOfflinePreference: profile?.isOfflinePreference ?? candidateUsers.get(id)?.isOfflinePreference ?? false,
     });
+  });
+  activeClients.forEach(client => {
+    if (!client.profile?.username) return;
+    candidateUsers.set(client.userId, {
+      ...(candidateUsers.get(client.userId) || {}),
+      ...client.profile,
+      id: client.userId,
+    } as UserProfile);
   });
   // Hydrate live connections from the real user database. Never expose a
   // fabricated "Player" profile in the challenge list.

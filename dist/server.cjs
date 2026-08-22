@@ -545,10 +545,17 @@ async function listMySqlOnlineUsers(windowMs = 45e3) {
   await ensureMySqlRealtimeSchema();
   const cutoff = Date.now() - windowMs;
   const [rows] = await getMySqlPool().execute("SELECT user_id, profile_json FROM user_presence WHERE last_seen_at >= ?", [cutoff]);
-  return rows.map((row) => ({
-    id: String(row.user_id),
-    profile: typeof row.profile_json === "string" ? JSON.parse(row.profile_json) : row.profile_json || void 0
-  }));
+  return rows.map((row) => {
+    let profile;
+    try {
+      const value = Buffer.isBuffer(row.profile_json) ? row.profile_json.toString("utf8") : row.profile_json;
+      const parsed = typeof value === "string" ? JSON.parse(value) : value;
+      profile = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : void 0;
+    } catch (error) {
+      console.error(`Invalid presence profile for ${String(row.user_id)}:`, error);
+    }
+    return { id: String(row.user_id), profile };
+  });
 }
 async function upsertMySqlMatchmaking(record) {
   await ensureMySqlRealtimeSchema();
@@ -3362,9 +3369,17 @@ app.get("/api/updates", (req, res) => {
   res.write(`retry: 3000
 
 `);
-  const client = { userId, res };
+  const username = String(req.query.username || "").trim().slice(0, 20);
+  const avatar = String(req.query.avatar || "").trim().slice(0, 500);
+  const clientProfile = username ? {
+    id: userId,
+    username,
+    avatar: avatar || "\u{1F3AE}",
+    isOfflinePreference: req.query.isOffline === "true"
+  } : void 0;
+  const client = { userId, res, profile: clientProfile };
   activeClients.push(client);
-  if (isMySqlConfigured()) void touchMySqlUserPresence([userId]).catch((error) => console.error("Presence connect update failed:", error));
+  if (isMySqlConfigured()) void touchMySqlUserPresence([clientProfile || userId]).catch((error) => console.error("Presence connect update failed:", error));
   const activeRoom = Object.values(store.rooms).find(
     (r) => r.status === "playing" && r.players.some((p) => p.userId === userId && p.status === "offline")
   );
@@ -3641,6 +3656,14 @@ app.get("/api/users/online", async (req, res) => {
       username: profile?.username || candidateUsers.get(id)?.username || "Player",
       avatar: profile?.avatar || candidateUsers.get(id)?.avatar || "\u{1F3AE}",
       isOfflinePreference: profile?.isOfflinePreference ?? candidateUsers.get(id)?.isOfflinePreference ?? false
+    });
+  });
+  activeClients.forEach((client) => {
+    if (!client.profile?.username) return;
+    candidateUsers.set(client.userId, {
+      ...candidateUsers.get(client.userId) || {},
+      ...client.profile,
+      id: client.userId
     });
   });
   const missingProfileIds = [...connectedUserIds].filter((id) => {
