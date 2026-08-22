@@ -612,7 +612,9 @@ export default function GameRoomView({
     if (autoMoveRollRef.current === rollKey) return;
     autoMoveRollRef.current = rollKey;
 
-    const delay = window.setTimeout(() => requestTokenMove(selectedToken.id), 650);
+    // The physical dice animation lasts 800ms. Leave the result visible briefly
+    // so this player and every opponent can follow the roll before auto-moving.
+    const delay = window.setTimeout(() => requestTokenMove(selectedToken.id), 1100);
     return () => window.clearTimeout(delay);
   }, [autoRoll, isActiveTurn, room.id, room.gameMode, room.gameState.hasRolled, room.gameState.diceRoll, room.gameState.lastActivity, room.gameState.tokens, room.gameState.turn, myPlayer?.color, myPlayer?.teamAssistUnlocked, requestTokenMove]);
 

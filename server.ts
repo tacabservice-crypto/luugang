@@ -5972,14 +5972,38 @@ app.post('/api/rooms/roll-dice', async (req, res) => {
     : undefined;
 
   if (soleBoardToken) {
-    addLog(room, `${activePlayer.username}'s only active token moved automatically with roll ${d}.`);
-    moveTokenLogic(room, soleBoardToken.id, d);
     saveStore();
     await persistLiveRoom(room);
-    void persistRoomUserProfiles(room).catch(error => console.error(`Profile sync failed after automatic move in room ${room.id}:`, error));
+    // First publish and return the untouched roll. Both players then see the
+    // same tumble, hear the dice, and read its result before the token moves.
     broadcastToRoom(room.id, 'game_update', room);
-    executeBotTurnIfActive(room);
-    return res.json(room);
+    res.json(room);
+
+    setTimeout(async () => {
+      try {
+        const currentRoom = store.rooms[roomId];
+        if (!currentRoom || currentRoom.status !== 'playing') return;
+        const currentPlayer = currentRoom.players[currentRoom.gameState.turn];
+        const currentToken = currentRoom.gameState.tokens.find(token => token.id === soleBoardToken.id);
+        if (
+          currentPlayer?.userId !== activePlayer.userId
+          || !currentRoom.gameState.hasRolled
+          || currentRoom.gameState.diceRoll !== d
+          || !currentToken
+          || !isMoveValid(currentToken, d)
+        ) return;
+        addLog(currentRoom, `${activePlayer.username}'s only active token moved automatically with roll ${d}.`);
+        moveTokenLogic(currentRoom, currentToken.id, d);
+        saveStore();
+        await persistLiveRoom(currentRoom);
+        void persistRoomUserProfiles(currentRoom).catch(error => console.error(`Profile sync failed after automatic move in room ${currentRoom.id}:`, error));
+        broadcastToRoom(currentRoom.id, 'game_update', currentRoom);
+        executeBotTurnIfActive(currentRoom);
+      } catch (error) {
+        console.error(`Failed to move the sole token after roll animation in room ${roomId}:`, error);
+      }
+    }, 1100);
+    return;
   }
 
   if (validTokens.length === 0) {
