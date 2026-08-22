@@ -169,6 +169,12 @@ export default function GameRoomView({
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [isVoiceControlsOpen, setIsVoiceControlsOpen] = useState(false); // New state for voice controls popover
+  const [spectatorBet, setSpectatorBet] = useState<any | null>(null);
+  const [betTargetId, setBetTargetId] = useState('');
+  const [betPrediction, setBetPrediction] = useState<'W' | 'L'>('W');
+  const [betStake, setBetStake] = useState('0.10');
+  const [isPlacingBet, setIsPlacingBet] = useState(false);
+  const [betError, setBetError] = useState('');
   const panelContainerRef = useRef<HTMLDivElement>(null);
   const panelTouchStartYRef = useRef<number | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -360,6 +366,34 @@ export default function GameRoomView({
   }, [isSpectator, room.id, userId, navigate]);
 
   useEffect(() => {
+    if (!isSpectator) return;
+    void fetch(`/api/rooms/${encodeURIComponent(room.id)}/spectator-bet?userId=${encodeURIComponent(userId)}`)
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (data?.bet) setSpectatorBet(data.bet); })
+      .catch(() => undefined);
+  }, [isSpectator, room.id, userId]);
+
+  const placeSpectatorBet = async () => {
+    if (!betTargetId || isPlacingBet) return;
+    setIsPlacingBet(true);
+    setBetError('');
+    try {
+      const response = await fetch(`/api/rooms/${encodeURIComponent(room.id)}/spectator-bet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, targetPlayerId: betTargetId, prediction: betPrediction, stake: Number(betStake) }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Bet-ka lama dhigi karin.');
+      setSpectatorBet(data.bet);
+    } catch (error) {
+      setBetError(error instanceof Error ? error.message : 'Bet-ka lama dhigi karin.');
+    } finally {
+      setIsPlacingBet(false);
+    }
+  };
+
+  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
@@ -510,7 +544,9 @@ export default function GameRoomView({
       resultSoundPlayedRef.current = resultKey;
       if (!isSpeakerOn) return;
       const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : [room.gameState.winnerId];
-      if (winnerIds.includes(userId)) {
+      if (isSpectator) {
+        winAudioRef.current?.play().catch(() => undefined);
+      } else if (winnerIds.includes(userId)) {
         // I am the winner
         if (winAudioRef.current) {
           winAudioRef.current.volume = 0.7;
@@ -524,7 +560,7 @@ export default function GameRoomView({
         }
       }
     }
-  }, [room.status, room.gameState.winnerId, room.gameState.winnerIds, userId, isSpeakerOn]);
+  }, [room.status, room.gameState.winnerId, room.gameState.winnerIds, userId, isSpeakerOn, isSpectator]);
 
   // Sound effects based on token state changes (Capture, Token Out)
   useEffect(() => {
@@ -968,7 +1004,7 @@ export default function GameRoomView({
   const topBoxColor = myPlayer?.isHost ? challengerPlayer?.color : hostPlayer?.color;
 
   return (
-    <><LiveAdBanner placement="game" />
+    <>{!isSpectator && <LiveAdBanner placement="game" />}
     <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col pb-10 selection:bg-purple-500 selection:text-white relative overflow-hidden">
       {/* Concentric ripples background like the image */}
       <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
@@ -995,7 +1031,11 @@ export default function GameRoomView({
           <span className="font-black text-sm tracking-widest text-blue-400 block">{room.id}</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        {isSpectator ? (
+          <div className="flex items-center gap-1.5 rounded-full border border-red-400/30 bg-red-500/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-red-300">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" /> Live Spectator
+          </div>
+        ) : <div className="flex items-center gap-3">
           {/* Voice Controls Popover Trigger */}
           <div className="relative" ref={voiceControlsRef}>
             <button
@@ -1080,7 +1120,7 @@ export default function GameRoomView({
                 </div>
               )}
           </div>
-        </div>
+        </div>}
       </header>
 
       {noticeSlot}
@@ -1269,7 +1309,57 @@ export default function GameRoomView({
         {/* ==========================================
             4. ACTIVE CONTROLLER PANEL (DICE ROLLER)
            ========================================== */}
-        {room.status === 'playing' ? (
+        {room.status === 'playing' ? (isSpectator ? (
+          <div className="relative overflow-hidden rounded-2xl border border-emerald-400/20 bg-gradient-to-br from-slate-950/95 via-[#111936] to-emerald-950/40 p-3 shadow-xl shadow-emerald-950/20">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-400">Live Match Market</div>
+                <div className="text-xs font-black text-white">Saadaali W / L</div>
+              </div>
+              <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-right">
+                <div className="text-[7px] font-black uppercase text-amber-300">Odds</div>
+                <div className="font-mono text-sm font-black text-white">1.80</div>
+              </div>
+            </div>
+
+            {spectatorBet ? (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/25 p-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-[11px] font-black text-white">{spectatorBet.targetUsername} · {spectatorBet.prediction}</div>
+                  <div className="text-[9px] font-bold text-slate-400">Stake ${Number(spectatorBet.stake).toFixed(2)} · Return ${Number(spectatorBet.potentialPayout).toFixed(2)}</div>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase ${spectatorBet.status === 'won' ? 'bg-emerald-500/20 text-emerald-300' : spectatorBet.status === 'lost' ? 'bg-red-500/20 text-red-300' : 'bg-blue-500/20 text-blue-300'}`}>
+                  {spectatorBet.status}
+                </span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {room.players.filter(player => player.status !== 'left').map(player => (
+                    <button key={player.userId} type="button" onClick={() => setBetTargetId(player.userId)} className={`flex min-w-0 items-center gap-1.5 rounded-lg border p-1.5 text-left transition ${betTargetId === player.userId ? 'border-emerald-400 bg-emerald-500/15' : 'border-white/10 bg-black/20'}`}>
+                      <PlayerAvatar avatar={player.avatar} className="h-6 w-6 text-base" />
+                      <span className="truncate text-[9px] font-black text-white">{player.username}</span>
+                      <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${COLOR_MAP[player.color]}`} />
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-[1fr_1fr_1.3fr] gap-1.5">
+                  {(['W', 'L'] as const).map(choice => (
+                    <button key={choice} type="button" onClick={() => setBetPrediction(choice)} className={`rounded-lg border py-2 text-[10px] font-black ${betPrediction === choice ? (choice === 'W' ? 'border-emerald-300 bg-emerald-500 text-slate-950' : 'border-red-300 bg-red-500 text-white') : 'border-white/10 bg-white/5 text-slate-400'}`}>
+                      {choice === 'W' ? 'W · WIN' : 'L · LOSS'}
+                    </button>
+                  ))}
+                  <input value={betStake} onChange={event => setBetStake(event.target.value)} type="number" min="0.10" max="10" step="0.10" className="min-w-0 rounded-lg border border-white/10 bg-black/30 px-2 text-center font-mono text-xs font-black text-white outline-none focus:border-emerald-400" aria-label="Bet stake" />
+                </div>
+                <button type="button" disabled={!betTargetId || isPlacingBet} onClick={() => void placeSpectatorBet()} className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 py-2.5 text-[10px] font-black uppercase tracking-wider text-slate-950 shadow-lg shadow-emerald-950/30 disabled:opacity-40">
+                  {isPlacingBet ? 'Confirming…' : `Place Bet · Return $${(Number(betStake || 0) * 1.8).toFixed(2)}`}
+                </button>
+                {betError && <p className="text-center text-[9px] font-bold text-red-300">{betError}</p>}
+                <p className="text-center text-[8px] font-semibold text-slate-500">Min $0.10 · Max $10 · Hal bet ciyaar kasta · Market closes at home stretch</p>
+              </div>
+            )}
+          </div>
+        ) : (
           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 sm:p-4 flex flex-col items-center justify-center space-y-2 sm:space-y-3 relative overflow-hidden shadow-xl">
             {/* Turn Announcement Banner */}
             <div className="hidden text-center sm:block">
@@ -1389,7 +1479,7 @@ export default function GameRoomView({
               </div>
             </div>
           </div>
-        ) : (
+        )) : (
           /* ==========================================
               LOBBY / WAITING SCREEN SETUP
              ========================================== */

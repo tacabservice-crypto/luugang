@@ -1442,7 +1442,8 @@ var store = {
   agentTransactions: [],
   tournaments: {},
   adSettings: { ...DEFAULT_AD_SETTINGS },
-  adCampaigns: []
+  adCampaigns: [],
+  spectatorBets: []
 };
 var adminUsersCache = /* @__PURE__ */ new Map();
 var agentCache = /* @__PURE__ */ new Map();
@@ -1624,6 +1625,7 @@ function loadStore() {
       const parsed = JSON.parse(raw);
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
+      store.spectatorBets = parsed.spectatorBets || [];
       store.rooms = parsed.rooms || {};
       store.matchmakingQueues = {
         0: [],
@@ -1691,6 +1693,7 @@ async function loadStoreFromFirestore() {
         const parsed = JSON.parse(payload.data);
         store.users = parsed.users || {};
         store.transactions = parsed.transactions || [];
+        store.spectatorBets = parsed.spectatorBets || [];
         store.rooms = parsed.rooms || {};
         store.matchmakingQueues = {
           0: [],
@@ -2149,6 +2152,10 @@ function broadcastToRoomLocal(roomId, eventName, data) {
 function broadcastToRoom(roomId, eventName, data) {
   broadcastToRoomLocal(roomId, eventName, data);
   publishRealtimeEvent("room", roomId, eventName, data);
+  const room = store.rooms[roomId];
+  if (room && (room.status === "completed" || room.status === "cancelled")) {
+    void settleSpectatorBets(room).catch((error) => console.error(`Spectator bet settlement failed for ${roomId}:`, error));
+  }
 }
 function broadcastUserUpdate(userId) {
   const user = store.users[userId];
@@ -2420,6 +2427,45 @@ function hasMatchPayout(userId, matchId) {
   return store.transactions.some(
     (tx) => tx.userId === userId && tx.matchId === matchId && tx.type === "win_payout"
   );
+}
+var settlingSpectatorRooms = /* @__PURE__ */ new Set();
+async function settleSpectatorBets(room) {
+  if (settlingSpectatorRooms.has(room.id)) return;
+  const openBets = store.spectatorBets.filter((bet) => bet.roomId === room.id && bet.status === "open");
+  if (!openBets.length) return;
+  settlingSpectatorRooms.add(room.id);
+  try {
+    const winnerIds = room.gameState.winnerIds?.length ? room.gameState.winnerIds : room.gameState.winnerId ? [room.gameState.winnerId] : [];
+    for (const bet of openBets) {
+      const bettor = store.users[bet.userId];
+      if (!bettor) continue;
+      bet.settledAt = Date.now();
+      if (room.status === "cancelled" || winnerIds.length === 0) {
+        bet.status = "refunded";
+        bet.payout = bet.stake;
+        bettor.balance = Number((bettor.balance + bet.stake).toFixed(2));
+        addTransaction(bet.userId, "refund", bet.stake, room.id, `Spectator bet refund ${bet.id}.`);
+      } else {
+        const targetWon = winnerIds.includes(bet.targetPlayerId);
+        const correct = bet.prediction === "W" ? targetWon : !targetWon;
+        if (correct) {
+          bet.status = "won";
+          bet.payout = bet.potentialPayout;
+          bettor.balance = Number((bettor.balance + bet.potentialPayout).toFixed(2));
+          addTransaction(bet.userId, "win_payout", bet.potentialPayout, room.id, `Spectator ${bet.prediction} bet won on ${bet.targetUsername} (${bet.odds.toFixed(2)} odds).`);
+        } else {
+          bet.status = "lost";
+          bet.payout = 0;
+          recordHouseRevenue("betting_margin", bet.stake, bet.id, `Lost spectator bet on match ${room.id}.`);
+        }
+      }
+      broadcastUserUpdate(bet.userId);
+      await saveUserProfileToFirestore(bettor);
+    }
+    await saveStoreAndWait();
+  } finally {
+    settlingSpectatorRooms.delete(room.id);
+  }
 }
 async function persistLiveRoom(room) {
   if (!isMySqlConfigured()) return;
@@ -4519,6 +4565,55 @@ app.get("/api/rooms/active", (req, res) => {
     capacity: r.capacity
   }));
   res.json(activeGames);
+});
+app.get("/api/rooms/:roomId/spectator-bet", (req, res) => {
+  const userId = String(req.query.userId || "");
+  const bet = store.spectatorBets.find((item) => item.roomId === req.params.roomId && item.userId === userId) || null;
+  res.json({ bet, odds: 1.8, minStake: 0.1, maxStake: 10 });
+});
+app.post("/api/rooms/:roomId/spectator-bet", async (req, res) => {
+  const roomId = req.params.roomId;
+  const userId = String(req.body.userId || "");
+  const targetPlayerId = String(req.body.targetPlayerId || "");
+  const prediction = req.body.prediction === "L" ? "L" : req.body.prediction === "W" ? "W" : "";
+  const stake = Number(Number(req.body.stake || 0).toFixed(2));
+  let room = store.rooms[roomId];
+  if (!room && isMySqlConfigured()) room = await loadMySqlGameRoom(roomId) || void 0;
+  let bettor = store.users[userId];
+  if (!bettor && isMySqlConfigured()) bettor = await loadMySqlRuntimeUser(userId) || void 0;
+  if (!room) return res.status(404).json({ error: "Ciyaarta lama helin." });
+  if (!bettor) return res.status(404).json({ error: "Account-ka lama helin." });
+  if (room.status !== "playing" || room.gameState.winnerId) return res.status(409).json({ error: "Betting-ka ciyaartan wuu xirmay." });
+  if (room.players.some((player) => player.userId === userId)) return res.status(403).json({ error: "Ciyaaryahan kama bet-gareyn karo ciyaartiisa." });
+  if (!room.players.some((player) => player.userId === targetPlayerId && player.status !== "left")) return res.status(400).json({ error: "Dooro ciyaaryahan firfircoon." });
+  if (!prediction) return res.status(400).json({ error: "Dooro W ama L." });
+  if (stake < 0.1 || stake > 10) return res.status(400).json({ error: "Bet-ku waa inuu u dhexeeyaa $0.10 iyo $10." });
+  if (bettor.balance < stake) return res.status(400).json({ error: "Balance-ka kuma filna bet-kan." });
+  if (store.spectatorBets.some((bet2) => bet2.roomId === roomId && bet2.userId === userId)) return res.status(409).json({ error: "Ciyaartan hore ayaad bet uga dhigatay." });
+  const marketClosed = room.gameState.tokens.some((token) => token.position >= 51);
+  if (marketClosed) return res.status(409).json({ error: "Market-ku wuu xirmay maadaama ciyaartu dhammaad ku dhowdahay." });
+  const target = room.players.find((player) => player.userId === targetPlayerId);
+  const bet = {
+    id: `sbet_${Date.now()}_${import_crypto.default.randomUUID().slice(0, 8)}`,
+    roomId,
+    userId,
+    targetPlayerId,
+    targetUsername: target.username,
+    prediction,
+    stake,
+    odds: 1.8,
+    potentialPayout: Number((stake * 1.8).toFixed(2)),
+    status: "open",
+    createdAt: Date.now()
+  };
+  bettor.balance = Number((bettor.balance - stake).toFixed(2));
+  store.users[userId] = bettor;
+  store.spectatorBets.unshift(bet);
+  addTransaction(userId, "bet_escrow_locked", stake, roomId, `Spectator ${prediction} bet on ${target.username} at 1.80 odds.`);
+  await saveUserProfileToFirestore(bettor);
+  await saveStoreAndWait();
+  broadcastUserUpdate(userId);
+  res.json({ bet });
 });
 app.post("/api/rooms/:roomId/spectate", (req, res) => {
   const { roomId } = req.params;
@@ -6633,6 +6728,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     team_game_rake: 0,
     forfeit_rake: 0,
     bot_result: 0,
+    betting_margin: 0,
     withdrawal_fee: 0,
     vip_subscription: 0,
     tournament_margin: 0,

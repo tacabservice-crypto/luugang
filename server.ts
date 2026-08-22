@@ -642,6 +642,22 @@ interface AdminSettings {
   phoneAuthEnabled: boolean;
 }
 
+interface SpectatorBet {
+  id: string;
+  roomId: string;
+  userId: string;
+  targetPlayerId: string;
+  targetUsername: string;
+  prediction: 'W' | 'L';
+  stake: number;
+  odds: number;
+  potentialPayout: number;
+  status: 'open' | 'won' | 'lost' | 'refunded';
+  createdAt: number;
+  settledAt?: number;
+  payout?: number;
+}
+
 interface DBStore {
   users: Record<string, UserProfile>;
   transactions: WalletTransaction[];
@@ -658,6 +674,7 @@ interface DBStore {
   tournaments: Record<string, Tournament>;
   adSettings: PlatformAdSettings;
   adCampaigns: PlatformAdSettings[];
+  spectatorBets: SpectatorBet[];
 }
 
 const DEFAULT_AD_SETTINGS: PlatformAdSettings = { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' };
@@ -718,7 +735,8 @@ let store: DBStore = {
   agentTransactions: [],
   tournaments: {},
   adSettings: { ...DEFAULT_AD_SETTINGS },
-  adCampaigns: []
+  adCampaigns: [],
+  spectatorBets: [],
 };
 
 // One live listener per collection replaces thousands of identical reads from
@@ -911,6 +929,7 @@ function loadStore() {
       // Re-initialize lists to make sure they match expected shapes
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
+      store.spectatorBets = parsed.spectatorBets || [];
       store.rooms = parsed.rooms || {};
       // Matchmaking queues are transient live state and must always start fresh
       store.matchmakingQueues = {
@@ -977,6 +996,7 @@ async function loadStoreFromFirestore(): Promise<boolean> {
         const parsed = JSON.parse(payload.data);
         store.users = parsed.users || {};
         store.transactions = parsed.transactions || [];
+        store.spectatorBets = parsed.spectatorBets || [];
         store.rooms = parsed.rooms || {};
         // Matchmaking queues are transient live state and must always start fresh
         store.matchmakingQueues = {
@@ -1540,6 +1560,10 @@ function broadcastToRoomLocal(roomId: string, eventName: string, data: any) {
 function broadcastToRoom(roomId: string, eventName: string, data: any) {
   broadcastToRoomLocal(roomId, eventName, data);
   publishRealtimeEvent('room', roomId, eventName, data);
+  const room = store.rooms[roomId];
+  if (room && (room.status === 'completed' || room.status === 'cancelled')) {
+    void settleSpectatorBets(room).catch(error => console.error(`Spectator bet settlement failed for ${roomId}:`, error));
+  }
 }
 
 // Global user update broadcast (for dashboard balance/profile syncing)
@@ -1885,6 +1909,48 @@ function hasMatchPayout(userId: string, matchId: string): boolean {
   return store.transactions.some(tx =>
     tx.userId === userId && tx.matchId === matchId && tx.type === 'win_payout'
   );
+}
+
+const settlingSpectatorRooms = new Set<string>();
+async function settleSpectatorBets(room: GameRoom) {
+  if (settlingSpectatorRooms.has(room.id)) return;
+  const openBets = store.spectatorBets.filter(bet => bet.roomId === room.id && bet.status === 'open');
+  if (!openBets.length) return;
+  settlingSpectatorRooms.add(room.id);
+  try {
+    const winnerIds = room.gameState.winnerIds?.length
+      ? room.gameState.winnerIds
+      : (room.gameState.winnerId ? [room.gameState.winnerId] : []);
+    for (const bet of openBets) {
+      const bettor = store.users[bet.userId];
+      if (!bettor) continue;
+      bet.settledAt = Date.now();
+      if (room.status === 'cancelled' || winnerIds.length === 0) {
+        bet.status = 'refunded';
+        bet.payout = bet.stake;
+        bettor.balance = Number((bettor.balance + bet.stake).toFixed(2));
+        addTransaction(bet.userId, 'refund', bet.stake, room.id, `Spectator bet refund ${bet.id}.`);
+      } else {
+        const targetWon = winnerIds.includes(bet.targetPlayerId);
+        const correct = bet.prediction === 'W' ? targetWon : !targetWon;
+        if (correct) {
+          bet.status = 'won';
+          bet.payout = bet.potentialPayout;
+          bettor.balance = Number((bettor.balance + bet.potentialPayout).toFixed(2));
+          addTransaction(bet.userId, 'win_payout', bet.potentialPayout, room.id, `Spectator ${bet.prediction} bet won on ${bet.targetUsername} (${bet.odds.toFixed(2)} odds).`);
+        } else {
+          bet.status = 'lost';
+          bet.payout = 0;
+          recordHouseRevenue('betting_margin', bet.stake, bet.id, `Lost spectator bet on match ${room.id}.`);
+        }
+      }
+      broadcastUserUpdate(bet.userId);
+      await saveUserProfileToFirestore(bettor);
+    }
+    await saveStoreAndWait();
+  } finally {
+    settlingSpectatorRooms.delete(room.id);
+  }
 }
 
 async function persistLiveRoom(room: GameRoom): Promise<void> {
@@ -4579,6 +4645,58 @@ app.get('/api/rooms/active', (req, res) => {
   res.json(activeGames);
 });
 
+app.get('/api/rooms/:roomId/spectator-bet', (req, res) => {
+  const userId = String(req.query.userId || '');
+  const bet = store.spectatorBets.find(item => item.roomId === req.params.roomId && item.userId === userId) || null;
+  res.json({ bet, odds: 1.8, minStake: 0.10, maxStake: 10 });
+});
+
+app.post('/api/rooms/:roomId/spectator-bet', async (req, res) => {
+  const roomId = req.params.roomId;
+  const userId = String(req.body.userId || '');
+  const targetPlayerId = String(req.body.targetPlayerId || '');
+  const prediction = req.body.prediction === 'L' ? 'L' : req.body.prediction === 'W' ? 'W' : '';
+  const stake = Number(Number(req.body.stake || 0).toFixed(2));
+  let room = store.rooms[roomId];
+  if (!room && isMySqlConfigured()) room = await loadMySqlGameRoom(roomId) || undefined;
+  let bettor = store.users[userId];
+  if (!bettor && isMySqlConfigured()) bettor = await loadMySqlRuntimeUser(userId) || undefined;
+  if (!room) return res.status(404).json({ error: 'Ciyaarta lama helin.' });
+  if (!bettor) return res.status(404).json({ error: 'Account-ka lama helin.' });
+  if (room.status !== 'playing' || room.gameState.winnerId) return res.status(409).json({ error: 'Betting-ka ciyaartan wuu xirmay.' });
+  if (room.players.some(player => player.userId === userId)) return res.status(403).json({ error: 'Ciyaaryahan kama bet-gareyn karo ciyaartiisa.' });
+  if (!room.players.some(player => player.userId === targetPlayerId && player.status !== 'left')) return res.status(400).json({ error: 'Dooro ciyaaryahan firfircoon.' });
+  if (!prediction) return res.status(400).json({ error: 'Dooro W ama L.' });
+  if (stake < 0.10 || stake > 10) return res.status(400).json({ error: 'Bet-ku waa inuu u dhexeeyaa $0.10 iyo $10.' });
+  if (bettor.balance < stake) return res.status(400).json({ error: 'Balance-ka kuma filna bet-kan.' });
+  if (store.spectatorBets.some(bet => bet.roomId === roomId && bet.userId === userId)) return res.status(409).json({ error: 'Ciyaartan hore ayaad bet uga dhigatay.' });
+  const marketClosed = room.gameState.tokens.some(token => token.position >= 51);
+  if (marketClosed) return res.status(409).json({ error: 'Market-ku wuu xirmay maadaama ciyaartu dhammaad ku dhowdahay.' });
+
+  const target = room.players.find(player => player.userId === targetPlayerId)!;
+  const bet: SpectatorBet = {
+    id: `sbet_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
+    roomId,
+    userId,
+    targetPlayerId,
+    targetUsername: target.username,
+    prediction,
+    stake,
+    odds: 1.8,
+    potentialPayout: Number((stake * 1.8).toFixed(2)),
+    status: 'open',
+    createdAt: Date.now(),
+  };
+  bettor.balance = Number((bettor.balance - stake).toFixed(2));
+  store.users[userId] = bettor;
+  store.spectatorBets.unshift(bet);
+  addTransaction(userId, 'bet_escrow_locked', stake, roomId, `Spectator ${prediction} bet on ${target.username} at 1.80 odds.`);
+  await saveUserProfileToFirestore(bettor);
+  await saveStoreAndWait();
+  broadcastUserUpdate(userId);
+  res.json({ bet });
+});
+
 // POST /api/rooms/:roomId/spectate
 // Allows a user to start spectating a game.
 app.post('/api/rooms/:roomId/spectate', (req, res) => {
@@ -7267,6 +7385,7 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
         team_game_rake: 0,
         forfeit_rake: 0,
         bot_result: 0,
+        betting_margin: 0,
         withdrawal_fee: 0,
         vip_subscription: 0,
         tournament_margin: 0,

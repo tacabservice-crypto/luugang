@@ -36,7 +36,7 @@ export interface WalletTransaction {
   matchId?: string;
   description: string;
   status?: 'pending' | 'approved' | 'rejected' | 'completed';
-  revenueCategory?: 'game_rake' | 'team_game_rake' | 'forfeit_rake' | 'bot_result' | 'withdrawal_fee' | 'vip_subscription' | 'tournament_margin' | 'tournament_cancellation_fee';
+  revenueCategory?: 'game_rake' | 'team_game_rake' | 'forfeit_rake' | 'bot_result' | 'betting_margin' | 'withdrawal_fee' | 'vip_subscription' | 'tournament_margin' | 'tournament_cancellation_fee';
 }
 
 export interface ManualTransactionRequest {
