@@ -253,6 +253,7 @@ export default function App() {
   }, [API_BASE_URL]);
 
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [displayedErrorToast, setDisplayedErrorToast] = useState<string | null>(null);
   const [showConfirmLeave, setShowConfirmLeave] = useState(false);
   const [activeReaction, setActiveReaction] = useState<{
     id: string; senderName: string; targetId: string; targetName: string; reactionId: string; emoji: string;
@@ -1400,10 +1401,17 @@ export default function App() {
   // Auto dismiss toast after 5 seconds
   useEffect(() => {
     if (errorToast) {
+      setDisplayedErrorToast(errorToast);
       const t = setTimeout(() => setErrorToast(null), 5000);
       return () => clearTimeout(t);
     }
   }, [errorToast]);
+
+  useEffect(() => {
+    if (errorToast || !displayedErrorToast) return;
+    const t = window.setTimeout(() => setDisplayedErrorToast(null), 350);
+    return () => window.clearTimeout(t);
+  }, [errorToast, displayedErrorToast]);
 
   // Rendering orchestration
   if (authLoading) {
@@ -1454,6 +1462,34 @@ export default function App() {
     return <AuthScreen onLoginSuccess={handleLoginSuccess} initialError={error} />;
   }
 
+  const renderNoticeSlot = () => (
+    <div
+      className={`relative z-20 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out ${
+        errorToast ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+      }`}
+      aria-live="assertive"
+    >
+      <div className="overflow-hidden">
+        <div
+          className={`mx-auto flex w-full max-w-md items-center gap-3 border-b border-red-400/25 bg-gradient-to-r from-red-950/95 via-slate-950/95 to-red-950/95 px-4 py-2.5 shadow-lg backdrop-blur-xl transition-transform duration-300 ease-out ${
+            errorToast ? 'translate-y-0' : '-translate-y-full'
+          }`}
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-400/30 bg-red-500/15 text-sm">!</span>
+          <p className="min-w-0 flex-1 text-xs font-bold leading-relaxed text-red-100">{displayedErrorToast}</p>
+          <button
+            type="button"
+            onClick={() => setErrorToast(null)}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black text-red-300 transition hover:bg-white/10 hover:text-white"
+            aria-label="Close message"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // This function renders overlays that should appear above the main content.
   const renderOverlays = () => (
     <>
@@ -1477,13 +1513,6 @@ export default function App() {
             <div className="text-4xl font-black tracking-[0.2em] text-yellow-300 sm:text-6xl">CIYAAR</div>
             <div className="mt-2 text-xs font-bold text-white">{activePlayNudge.nudgedBy} ayaa ku xusuusinaya</div>
           </div>
-        </div>
-      )}
-
-      {errorToast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[99] max-w-sm w-[90%] bg-red-950/95 border border-red-500/40 p-3.5 rounded-xl shadow-2xl shadow-red-950/50 flex items-center justify-between backdrop-blur-md">
-          <p className="text-xs font-bold text-red-400 leading-relaxed">{errorToast}</p>
-          <button onClick={() => setErrorToast(null)} className="text-red-400 hover:text-white text-xs font-black p-1 ml-2 cursor-pointer">✕</button>
         </div>
       )}
 
@@ -1578,6 +1607,7 @@ export default function App() {
       <>
         <VoiceChatProvider>
           <GameRoomView
+            noticeSlot={renderNoticeSlot()}
             room={activeRoom}
             user={user}
             userId={user.id}
@@ -1612,6 +1642,7 @@ export default function App() {
       return (
         <VoiceChatProvider>
           <GameRoomView
+            noticeSlot={renderNoticeSlot()}
             room={activeRoom}
             user={user}
             userId={user.id}
@@ -1642,6 +1673,7 @@ export default function App() {
     return (
       <VoiceChatProvider>
           <Dashboard
+            noticeSlot={renderNoticeSlot()}
             user={user}
             onOpenWallet={() => setIsWalletOpen(true)}
             onLogout={handleLogout}

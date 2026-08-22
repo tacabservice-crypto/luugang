@@ -62,6 +62,7 @@ import captureAudioSrc from '../assets/capture.mp3';
 import tokenOutAudioSrc from '../assets/token_out.mp3';
 
 interface GameRoomProps {
+  noticeSlot?: React.ReactNode;
   room: GameRoom;
   user: UserProfile;
   userId: string;
@@ -136,6 +137,7 @@ function useWindowSize() {
 }
 
 export default function GameRoomView({
+  noticeSlot,
   room,
   user,
   userId,
@@ -641,6 +643,7 @@ export default function GameRoomView({
             REJECTED
           </div>
         </header>
+        {noticeSlot}
         <main className="max-w-md w-full mx-auto px-4 py-12 flex flex-col justify-center items-center h-[75vh] relative z-10">
           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 text-center space-y-4 w-full shadow-2xl">
             <div className="relative w-16 h-16 mx-auto">
@@ -699,6 +702,8 @@ export default function GameRoomView({
             {room.betAmount > 0 ? `$${room.betAmount} STAKE` : 'FREE DEMO'}
           </div>
         </header>
+
+        {noticeSlot}
 
         <main className="max-w-md w-full mx-auto px-4 py-12 flex flex-col justify-center items-center h-[75vh] relative z-10">
           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 text-center space-y-4 w-full shadow-2xl">
@@ -1047,6 +1052,8 @@ export default function GameRoomView({
           </div>
         </div>
       </header>
+
+      {noticeSlot}
 
       {/* 2. GAME INFO BAR */}
       <div className="grid grid-cols-3 items-center px-4 py-2 bg-black/20 text-xs border-b border-white/10">

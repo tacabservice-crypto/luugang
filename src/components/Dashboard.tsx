@@ -42,6 +42,7 @@ import LiveAdBanner from './LiveAdBanner';
 import { useNavigate } from 'react-router-dom';
 
 interface DashboardProps {
+  noticeSlot?: React.ReactNode;
   user: UserProfile;
   onOpenWallet: () => void;
   onLogout: () => void;
@@ -62,6 +63,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({
+  noticeSlot,
   user,
   onOpenWallet,
   onLogout,
@@ -905,6 +907,8 @@ export default function Dashboard({
           </div>
         </div>
       </header>
+
+      {noticeSlot}
 
       {/* 2. BODY SCROLLER CONTAINER */}
       <main className="max-w-md w-full mx-auto px-4 py-6 relative z-10 space-y-4">
