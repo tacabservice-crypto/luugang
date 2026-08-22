@@ -3504,7 +3504,12 @@ app.get('/api/users/online', async (req, res) => {
     if (!currentProfile && isMySqlConfigured()) currentProfile = await loadMySqlRuntimeUser(currentUserId);
     if (!currentProfile && db) currentProfile = await refreshUserProfileById(currentUserId);
     if (currentProfile) {
-      const presenceProfile = { ...currentProfile, id: currentUserId, isOfflinePreference: false, presenceLocation: 'home' };
+      const presenceProfile = {
+        ...currentProfile,
+        id: currentUserId,
+        isOfflinePreference: Boolean(currentProfile.isOfflinePreference),
+        presenceLocation: 'home',
+      };
       if (isMySqlConfigured()) {
         await touchMySqlUserPresence([presenceProfile]);
       } else if (db) {
@@ -3599,7 +3604,7 @@ app.get('/api/users/online', async (req, res) => {
     // A fresh Home presence is authoritative: anyone currently on Home and
     // outside a game must be visible and challengeable. Persisted offline
     // preferences are intentionally not allowed to hide an active Home user.
-    if (isBotPlayer(u.id) || u.id === currentUserId) return;
+    if (isBotPlayer(u.id) || u.id === currentUserId || u.isOfflinePreference) return;
 
     let status = 'offline';
     let seekingDetails: any = null;
@@ -3680,7 +3685,7 @@ app.post('/api/users/:userId/update', async (req, res) => {
 });
 
 // Update online/offline status preference
-app.post('/api/users/:userId/status', (req, res) => {
+app.post('/api/users/:userId/status', async (req, res) => {
   const user = store.users[req.params.userId];
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
@@ -3689,8 +3694,23 @@ app.post('/api/users/:userId/status', (req, res) => {
   const { isOffline } = req.body;
   user.isOfflinePreference = !!isOffline;
 
-  saveStore();
+  await saveStoreAndWait();
+  const presenceProfile = { ...user, presenceLocation: 'home' };
+  try {
+    if (isMySqlConfigured()) {
+      await touchMySqlUserPresence([presenceProfile]);
+    } else if (db) {
+      await db.collection('userPresence').doc(user.id).set({
+        userId: user.id,
+        lastSeenAt: Date.now(),
+        profile: presenceProfile,
+      }, { merge: true });
+    }
+  } catch (error) {
+    console.error(`Status presence update failed for ${user.id}:`, error);
+  }
   broadcastUserUpdate(user.id);
+  broadcastToAll('online_players_updated', {});
   res.json({ success: true, isOfflinePreference: user.isOfflinePreference, user });
 });
 
@@ -5235,7 +5255,9 @@ app.post('/api/rooms/challenge/invite', async (req, res) => {
     if (isMySqlConfigured()) {
       const onlineUsers = await listMySqlOnlineUsers();
       receiverIsFreshlyHome = onlineUsers.some(user =>
-        user.id === receiverId && user.profile?.presenceLocation === 'home'
+        user.id === receiverId
+        && user.profile?.presenceLocation === 'home'
+        && user.profile?.isOfflinePreference !== true
       );
     } else if (db) {
       const presenceDoc = await db.collection('userPresence').doc(receiverId).get();
@@ -5244,6 +5266,7 @@ app.post('/api/rooms/challenge/invite', async (req, res) => {
         presenceDoc.exists
         && Number(presence?.lastSeenAt || 0) >= Date.now() - 45_000
         && presence?.profile?.presenceLocation === 'home'
+        && presence?.profile?.isOfflinePreference !== true
       );
     }
   } catch (error) {

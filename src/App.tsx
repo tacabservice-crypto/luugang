@@ -85,6 +85,28 @@ function playReactionSound(reactionId: string) {
   } catch { /* Audio can be blocked before the first user gesture. */ }
 }
 
+function playInviteSound() {
+  const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.28);
+    gain.connect(context.destination);
+    [660, 880].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.1);
+      oscillator.stop(context.currentTime + 0.16 + index * 0.1);
+    });
+    window.setTimeout(() => void context.close(), 400);
+  } catch { /* Invite remains visible when audio is unavailable. */ }
+}
+
 function playGameReminderVoice() {
   try {
     if (!('speechSynthesis' in window)) return;
@@ -640,6 +662,7 @@ export default function App() {
           roomId: string;
         };
         setIncomingInvite(data);
+        playInviteSound();
       } catch (err) {
         console.error('Failed to parse game invite', err);
       }
@@ -659,7 +682,11 @@ export default function App() {
     eventSource.addEventListener('game_invite_declined', (e: any) => {
       try {
         const data = JSON.parse(e.data) as { receiverName: string };
-        setErrorToast(`❌ ${data.receiverName} waa uu diiday martiqaadkaaga. (Declined your challenge)`);
+        setActiveRoom(null);
+        setMatchmakingState({ isQueued: false, betAmount: 0 });
+        localStorage.removeItem('ludo_active_room_id');
+        navigate('/', { replace: true });
+        setErrorToast(`❌ ${data.receiverName} wuu diiday challenge-kaaga.`);
       } catch (err) {
         console.error('Failed to parse game invite declined', err);
       }
@@ -1452,45 +1479,32 @@ export default function App() {
       )}
 
       {incomingInvite && (
-        <div className="fixed right-3 top-16 z-[130] w-[calc(100%-1.5rem)] max-w-sm animate-fade-in">
-          <div className="bg-gradient-to-b from-[#1b0d44] to-[#0d0526] border border-yellow-400/80 w-full rounded-2xl p-4 text-center space-y-3 shadow-[0_0_40px_rgba(234,179,8,0.35)] relative overflow-hidden">
-            {/* Pulsing decoration */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-yellow-400 animate-pulse" />
+        <div className="fixed right-2 top-14 z-[130] w-[min(92vw,270px)] animate-fade-in">
+          <div className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-yellow-400/60 bg-[#111827]/95 p-2 shadow-[0_8px_28px_rgba(0,0,0,0.55)] backdrop-blur-md">
+            <div className="absolute inset-y-0 left-0 w-1 bg-yellow-400" />
             
-            <div className="space-y-2">
-              <span className="inline-block text-3xl bg-black/40 border border-white/10 w-12 h-12 rounded-xl flex items-center justify-center mx-auto shadow-inner">
+            <div className="ml-1 flex min-w-0 flex-1 items-center gap-2">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/35 text-xl">
                 {incomingInvite.senderAvatar}
               </span>
-              <h3 className="font-black text-sm text-yellow-400 uppercase tracking-widest">
-                LOBBY CHALLENGE INVITE!
-              </h3>
-              <p className="text-xs text-slate-300 font-bold">
-                <span className="text-white text-sm font-black">{incomingInvite.senderName}</span> wuxuu kuu soo diray tartan Ludo ah!
-              </p>
-            </div>
-
-            <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex items-center justify-around text-xs">
-              <div className="text-center space-y-0.5">
-                <span className="text-[10px] text-slate-500 font-extrabold uppercase block">Stake Bet</span>
-                <span className="font-black text-blue-400 font-mono">${incomingInvite.betAmount}</span>
-              </div>
-              <div className="w-[1px] h-6 bg-white/10" />
-              <div className="text-center space-y-0.5">
-                <span className="text-[10px] text-slate-500 font-extrabold uppercase block">Habka</span>
-                <span className="font-black text-purple-400 uppercase">{incomingInvite.gameMode === 'team' ? 'Partnership 2v2' : 'Solo ' + incomingInvite.capacity + 'P'}</span>
+              <div className="min-w-0">
+                <div className="truncate text-[11px] font-black text-white">{incomingInvite.senderName}</div>
+                <div className="text-[9px] font-bold text-yellow-300">Challenge · ${incomingInvite.betAmount} · {incomingInvite.gameMode === 'team' ? '2v2' : '1v1'}</div>
               </div>
             </div>
 
-            <div className="flex gap-2.5 pt-1">
+            <div className="flex shrink-0 gap-1.5">
               <button
                 onClick={handleAcceptInvite}
-                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer shadow-md shadow-green-500/10 uppercase tracking-wide"
+                aria-label="Accept challenge"
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-sm font-black text-white active:scale-90"
               >
                 ✓
               </button>
               <button
                 onClick={handleDeclineInvite}
-                className="flex-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wide"
+                aria-label="Decline challenge"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/40 bg-red-500/20 text-sm font-black text-red-300 active:scale-90"
               >
                 ✕
               </button>
