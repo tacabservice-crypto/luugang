@@ -353,6 +353,7 @@ export default function Dashboard({
   const [matchmakingSeconds, setMatchmakingSeconds] = useState(0);
   const [isStartingPartialMatch, setIsStartingPartialMatch] = useState(false);
   const [removingPlayerId, setRemovingPlayerId] = useState<string | null>(null);
+  const [radarQueue, setRadarQueue] = useState<{ members: any[]; isOwner: boolean } | null>(null);
 
   useEffect(() => {
     if (!matchmakingState.isQueued) {
@@ -364,6 +365,30 @@ export default function Dashboard({
     }, 1000);
     return () => clearInterval(interval);
   }, [matchmakingState.isQueued]);
+
+  const fetchRadarQueue = async () => {
+    if (!matchmakingState.isQueued) return;
+    try {
+      const response = await fetch(apiUrl(`/api/rooms/matchmaking/status?userId=${encodeURIComponent(user.id)}&_t=${Date.now()}`));
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.active) {
+        setRadarQueue({ members: Array.isArray(data.members) ? data.members : [], isOwner: Boolean(data.isOwner) });
+      }
+    } catch {
+      // Keep the last confirmed queue visible during a transient network error.
+    }
+  };
+
+  useEffect(() => {
+    if (!matchmakingState.isQueued) {
+      setRadarQueue(null);
+      return;
+    }
+    void fetchRadarQueue();
+    const interval = window.setInterval(fetchRadarQueue, 2_000);
+    return () => window.clearInterval(interval);
+  }, [matchmakingState.isQueued, user.id]);
 
   const formatMMSS = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -401,7 +426,8 @@ export default function Dashboard({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'The player could not be removed.');
-      await fetchOnlinePlayers();
+      setRadarQueue(prev => prev ? { ...prev, members: prev.members.filter(player => player.id !== targetUserId) } : prev);
+      await Promise.all([fetchOnlinePlayers(), fetchRadarQueue()]);
     } catch (error) {
       const message = error instanceof Error && error.message
         ? error.message
@@ -565,13 +591,15 @@ export default function Dashboard({
 
     const selectedCapacity = matchmakingState.gameMode === 'team' ? 4 : (matchmakingState.capacity || 2);
     const selectedMode = matchmakingState.gameMode || 'solo';
-    const otherSeekingPlayers = allSeekingPlayers.filter(player => {
+    const presenceSeekingPlayers = allSeekingPlayers.filter(player => {
       if (player.id === user.id) return false;
       const details = player.seekingDetails;
       return Number(details?.betAmount ?? 0) === Number(matchmakingState.betAmount || 0)
         && Number(details?.capacity ?? 2) === selectedCapacity
         && (details?.gameMode || 'solo') === selectedMode;
     }).slice(0, Math.max(1, selectedCapacity - 1));
+    const confirmedQueueMembers = radarQueue?.members.filter(player => player.id !== user.id) || [];
+    const otherSeekingPlayers = radarQueue ? confirmedQueueMembers : presenceSeekingPlayers;
     const joinedCount = Math.min(selectedCapacity, 1 + otherSeekingPlayers.length);
     const compatibleQueueMembers = allSeekingPlayers.filter(player => {
       const details = player.seekingDetails;
@@ -579,7 +607,7 @@ export default function Dashboard({
         && Number(details?.capacity ?? 2) === selectedCapacity
         && (details?.gameMode || 'solo') === selectedMode;
     }).sort((a, b) => Number(a.seekingJoinedAt || 0) - Number(b.seekingJoinedAt || 0));
-    const isOriginalSeeker = compatibleQueueMembers[0]?.id === user.id;
+    const isOriginalSeeker = radarQueue?.isOwner ?? (compatibleQueueMembers[0]?.id === user.id);
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center py-8 px-4 selection:bg-purple-500 selection:text-white relative overflow-y-auto">

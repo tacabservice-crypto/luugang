@@ -5014,6 +5014,45 @@ app.post('/api/rooms/matchmaking/enter-queue', async (req, res) => {
   }
 });
 
+// Return the authoritative pending group for one Radar search. The dashboard
+// must not infer accepted players from the general online-presence list because
+// presence heartbeats can briefly disappear while the queue itself is active.
+app.get('/api/rooms/matchmaking/status', async (req, res) => {
+  const userId = String(req.query.userId || '');
+  if (!userId) return res.status(400).json({ error: 'User ID is required.' });
+
+  if (isMySqlRuntimePrimary()) await refreshMySqlMatchmakingQueues();
+  cleanupMatchmakingQueues();
+  const queueEntry = Object.entries(store.matchmakingQueues).find(([, ids]) => ids.includes(userId));
+  if (!queueEntry) return res.json({ active: false, members: [], isOwner: false });
+
+  const [queueKey, rawQueuedIds] = queueEntry;
+  const [rawBet, rawCapacity, rawMode] = queueKey.split('_');
+  const capacity = parseInt(rawCapacity) || 2;
+  const orderedIds = sortMatchmakingIdsByJoinTime(rawQueuedIds).slice(0, capacity);
+  const members = orderedIds.flatMap(id => {
+    const player = store.users[id];
+    if (!player) return [];
+    return [{
+      id: player.id,
+      username: player.username,
+      avatar: player.avatar,
+      winCount: player.winCount || 0,
+      lossCount: player.lossCount || 0,
+      balance: player.balance,
+      status: 'seeking',
+      seekingJoinedAt: Number((player as any).seekingJoinedAt || 0),
+      seekingDetails: {
+        betAmount: parseFloat(rawBet) || 0,
+        capacity,
+        gameMode: rawMode === 'team' ? 'team' : 'solo',
+      },
+    }];
+  });
+
+  res.json({ active: true, members, isOwner: orderedIds[0] === userId });
+});
+
 // Join Matchmaking Game (Challenge Player)
 app.post('/api/rooms/matchmaking/join', (req, res) => {
   const { userId, betAmount, capacity, gameMode, opponentId } = req.body;
