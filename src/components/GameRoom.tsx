@@ -44,6 +44,7 @@ import { useVoiceChat } from '../context/VoiceChatContext';
 import { formatCurrency } from '../utils/number';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { NATIVE_BACK_EVENT } from './NativeBackHandler';
+import { useLanguage } from '../context/LanguageContext';
 
 const QUICK_REACTIONS = [
   { id: 'laugh', emoji: '\u{1F602}', label: 'Qosol' },
@@ -158,6 +159,8 @@ export default function GameRoomView({
   isGuest = false,
   onRequireAuth,
 }: GameRoomProps) {
+  const { language } = useLanguage();
+  const so = language === 'so';
   const [chatInput, setChatInput] = useState('');
   const [activePanel, setActivePanel] = useState<'chat' | 'logs' | null>(null);
   const isUtilityPanelOpen = activePanel !== null;
@@ -746,12 +749,12 @@ export default function GameRoomView({
               <ShieldAlert className="w-8 h-8 text-red-400 absolute top-1/2 left-1/2 -translate-y-1/2 -translate-x-1/2" />
             </div>
             <div className="space-y-1">
-              <h3 className="font-black text-lg text-red-400 uppercase tracking-wider">Waa Lagu Diiday</h3>
+              <h3 className="font-black text-lg text-red-400 uppercase tracking-wider">{so ? 'Waa Lagu Diiday' : 'Request Declined'}</h3>
               <p className="text-sm text-slate-300 font-bold">
-                {host ? `Host-ga qolka (${host.username}) wuu diiday codsigaaga.` : (room.rejectionReason || 'Codsigaaga waa la diiday.')}
+                {host ? (so ? `Martigeliyaha qolka (${host.username}) wuu diiday codsigaaga.` : `The room host (${host.username}) declined your request.`) : (room.rejectionReason || (so ? 'Codsigaaga waa la diiday.' : 'Your request was declined.'))}
               </p>
               <p className="text-xs text-slate-500 font-semibold">
-                Ma rabtaa inaad mar kale isku daydo mise aad dashboard-ka ku laabato?
+                {so ? 'Ma rabtaa inaad mar kale isku daydo mise aad Bogga Hore ku laabato?' : 'Would you like to try again or return Home?'}
               </p>
             </div>
             <div className="flex gap-3 pt-4">
@@ -759,13 +762,13 @@ export default function GameRoomView({
                 onClick={() => onLeave(isSpectator)}
                 className="w-full bg-slate-700/50 hover:bg-slate-700/80 text-slate-300 border border-slate-600 font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
               >
-                Dashboard-ka
+                {so ? 'Bogga Hore' : 'Home'}
               </button>
               <button
                 onClick={onRetryJoin}
                 className="w-full bg-blue-500 hover:bg-blue-600 text-white font-black text-xs py-3 rounded-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
               >
-                Mar Kale Isku Day
+                {so ? 'Mar Kale Isku Day' : 'Try Again'}
               </button>
             </div>
           </div>
@@ -807,24 +810,24 @@ export default function GameRoomView({
               <Zap className="w-6 h-6 text-blue-400 absolute top-1/2 left-1/2 -translate-y-1/2 -translate-x-1/2 animate-pulse" />
             </div>
             <div className="space-y-1">
-              <h3 className="font-black text-base text-blue-400 uppercase tracking-wider">Sugida Ogolaanshaha</h3>
-              <p className="text-xs text-slate-300 font-bold">Codsigaaga ku biirista ee qolka waa la gudbiyey.</p>
+              <h3 className="font-black text-base text-blue-400 uppercase tracking-wider">{so ? 'Sugidda Oggolaanshaha' : 'Waiting for Approval'}</h3>
+              <p className="text-xs text-slate-300 font-bold">{so ? 'Codsigaaga ku biirista qolka waa la gudbiyey.' : 'Your request to join the room has been submitted.'}</p>
               <p className="text-[10px] text-slate-500 font-semibold">
-                Sug inta martigeliyaha qolka (Host) uu kaa aqbalayo si aad u bilowdo ciyaarta!
+                {so ? 'Sug inta martigeliyaha qolka uu kaa aqbalayo si aad ciyaarta u bilowdo!' : 'Wait for the room host to approve you before the game begins.'}
               </p>
             </div>
             
             <div className="border-t border-white/10 pt-4 space-y-2 text-left text-xs text-slate-400">
               <div className="flex justify-between">
-                <span>Qolka Code (Lobby Code):</span>
+                <span>{so ? 'Koodhka Qolka:' : 'Lobby Code:'}</span>
                 <span className="font-bold text-white font-mono">{room.id}</span>
               </div>
               <div className="flex justify-between">
-                <span>Lacagta ciyaarta (Bet Stake):</span>
+                <span>{so ? 'Saamiga Ciyaarta:' : 'Game Stake:'}</span>
                 <span className="font-bold text-green-400">${room.betAmount}</span>
               </div>
               <div className="flex justify-between">
-                <span>Nooca Ciyaarta (Game Mode):</span>
+                <span>{so ? 'Habka Ciyaarta:' : 'Game Mode:'}</span>
                 <span className="font-bold text-purple-400 capitalize">{room.gameMode === 'team' ? 'Partnership 2v2' : 'Solo FFA'}</span>
               </div>
             </div>
@@ -946,14 +949,14 @@ export default function GameRoomView({
                   {isBetWon ? '✅' : isBetLost ? '❌' : isBetRefunded ? '↩️' : isBetSettling ? <Timer className="h-8 w-8 animate-spin text-blue-300" /> : '🏁'}
                 </div>
                 <h2 className="text-xl font-black tracking-tight">
-                  {isBetWon ? 'Bet-kaagu Wuu Guuleystay!' :
-                   isBetLost ? 'Bet-kaaga Waa Laga Badiyey' :
-                   isBetRefunded ? 'Bet-kaaga Waa La Celiyey' :
-                   isBetSettling ? 'Bet-ka Waa La Xisaabinayaa…' :
-                   'Ciyaartu Way Dhammaatay'}
+                  {isBetWon ? (so ? 'Saadaashaadu Way Guuleysatay!' : 'Your Bet Won!') :
+                   isBetLost ? (so ? 'Saadaashaada Waa Laga Badiyey' : 'Your Bet Lost') :
+                   isBetRefunded ? (so ? 'Saadaashaada Waa La Celiyey' : 'Your Bet Was Refunded') :
+                   isBetSettling ? (so ? 'Saadaasha Waa La Xisaabinayaa…' : 'Settling Your Bet…') :
+                   (so ? 'Ciyaartu Way Dhammaatay' : 'Game Over')}
                 </h2>
                 <p className="mt-1 text-xs font-bold text-slate-400">
-                  {winnerNames || winnerPlayer?.username} ayaa ku guuleystay ciyaarta
+                  {so ? `${winnerNames || winnerPlayer?.username} ayaa ku guuleystay ciyaarta` : `${winnerNames || winnerPlayer?.username} won the game`}
                 </p>
               </div>
 
@@ -961,7 +964,7 @@ export default function GameRoomView({
                 <div className="space-y-3 bg-[#0b0820]/95 p-4">
                   <div className="grid grid-cols-3 gap-2">
                     <div className="rounded-xl border border-white/5 bg-white/[0.04] p-2 text-center">
-                      <span className="block text-[8px] font-black uppercase text-slate-500">Doorashada</span>
+                      <span className="block text-[8px] font-black uppercase text-slate-500">{so ? 'Doorashada' : 'Selection'}</span>
                       <span className="mt-1 block truncate text-xs font-black">{spectatorBet.targetUsername} · {spectatorBet.prediction}</span>
                     </div>
                     <div className="rounded-xl border border-white/5 bg-white/[0.04] p-2 text-center">
@@ -982,10 +985,10 @@ export default function GameRoomView({
                   }`}>
                     <div>
                       <span className="block text-[8px] font-black uppercase tracking-widest text-slate-400">
-                        {isBetWon ? 'Wallet-ka lagu daray' : isBetLost ? 'Stake lumay' : isBetRefunded ? 'Wallet-ka lagu celiyey' : 'Xaaladda'}
+                        {isBetWon ? (so ? 'Boorsada lagu daray' : 'Added to Wallet') : isBetLost ? (so ? 'Saamiga lumay' : 'Stake Lost') : isBetRefunded ? (so ? 'Boorsada lagu celiyey' : 'Returned to Wallet') : (so ? 'Xaaladda' : 'Status')}
                       </span>
                       <span className="mt-0.5 block text-[10px] font-bold text-slate-300">
-                        {isBetWon ? `Faa’iido saafi ah ${formatCurrency(betProfit)}` : isBetLost ? 'Saadaashu ma aysan guuleysan' : isBetRefunded ? 'Suuqa bet-ka waa la baajiyey' : 'Natiijada lacagta ayaa la xaqiijinayaa'}
+                        {isBetWon ? (so ? `Faa’iido saafi ah ${formatCurrency(betProfit)}` : `Net profit ${formatCurrency(betProfit)}`) : isBetLost ? (so ? 'Saadaashu ma aysan guuleysan' : 'The prediction did not win') : isBetRefunded ? (so ? 'Suuqa saadaasha waa la baajiyey' : 'The betting market was cancelled') : (so ? 'Natiijada lacagta ayaa la xaqiijinayaa' : 'The financial result is being confirmed')}
                       </span>
                     </div>
                     <strong className={`font-mono text-xl ${isBetWon ? 'text-emerald-300' : isBetLost ? 'text-red-300' : isBetRefunded ? 'text-amber-300' : 'text-blue-300'}`}>
@@ -996,14 +999,14 @@ export default function GameRoomView({
               ) : (
                 <div className="bg-[#0b0820]/95 p-4 text-center">
                   <ShieldCheck className="mx-auto mb-2 h-5 w-5 text-purple-300" />
-                  <p className="text-xs font-bold text-slate-300">Waxaad ciyaarta u daawatay daawade ahaan.</p>
-                  <p className="mt-1 text-[10px] text-slate-500">Bet lagama dhigin ciyaartan.</p>
+                  <p className="text-xs font-bold text-slate-300">{so ? 'Waxaad ciyaarta u daawatay daawade ahaan.' : 'You watched this game as a spectator.'}</p>
+                  <p className="mt-1 text-[10px] text-slate-500">{so ? 'Saadaal lagama dhigin ciyaartan.' : 'You did not place a bet on this game.'}</p>
                 </div>
               )}
             </section>
 
             <button onClick={() => onLeave(true)} className="mt-4 w-full rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 py-3.5 text-xs font-black uppercase tracking-widest text-black shadow-lg shadow-amber-950/20 transition active:scale-[0.98]">
-              Home-ka Ku Laabo
+              {so ? 'Bogga Hore Ku Laabo' : 'Return Home'}
             </button>
           </main>
         </div>
@@ -1119,7 +1122,7 @@ export default function GameRoomView({
             onClick={() => onLeave(isSpectator)}
             className="w-full bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-black font-black text-xs py-4 rounded-2xl active:scale-95 transition-all uppercase tracking-widest shadow-lg shadow-yellow-500/10 cursor-pointer"
           >
-            Ciyaar kale Bilow (Play Another Game) ⚔️
+            {so ? 'Ciyaar Kale Bilow' : 'Play Another Game'} ⚔️
           </button>
         </div>
 
@@ -1515,7 +1518,7 @@ export default function GameRoomView({
 
                 <div className={`rounded-xl border border-white/10 bg-black/25 p-2 transition ${betTargetId ? 'opacity-100' : 'pointer-events-none opacity-35'}`}>
                   <div className="mb-1.5 flex items-center justify-between">
-                    <span className="text-[8px] font-black uppercase tracking-wider text-slate-400">Dooro lacagta</span>
+                    <span className="text-[8px] font-black uppercase tracking-wider text-slate-400">{so ? 'Dooro lacagta' : 'Choose amount'}</span>
                     <span className="text-[8px] font-bold text-emerald-300">Min $0.10 · Max $10</span>
                   </div>
                   <div className="grid grid-cols-5 gap-1">
@@ -1585,7 +1588,7 @@ export default function GameRoomView({
 
               {showDicePrompt && isActiveTurn && !room.gameState.hasRolled && (
                 <span className="absolute right-2 top-2 z-10 animate-pulse text-[10px] font-black uppercase tracking-wide text-yellow-400 sm:right-3 sm:top-3">
-                  Taabo Laadhuuda
+                  {so ? 'Taabo Laadhuuga' : 'Tap the Dice'}
                 </span>
               )}
 
@@ -1718,7 +1721,7 @@ export default function GameRoomView({
                           }}
                           className="bg-red-600/20 hover:bg-red-600 text-red-400 border border-red-500/20 font-extrabold text-[9px] py-1 px-2.5 rounded-md active:scale-95 transition-all cursor-pointer"
                         >
-                          Diid
+                          {so ? 'Diid' : 'Decline'}
                         </button>
                       </div>
                     </div>
@@ -1729,7 +1732,7 @@ export default function GameRoomView({
 
             <div className="bg-black/20 border border-white/10 rounded-xl p-3 text-center space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                Qolka Ciyaarta Code (Lobby Code)
+                {so ? 'Koodhka Qolka Ciyaarta' : 'Game Lobby Code'}
               </span>
               <div className="flex items-center justify-center gap-2">
                 <span className="font-black text-2xl text-blue-400 tracking-widest">{room.id}</span>

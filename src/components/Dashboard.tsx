@@ -300,7 +300,7 @@ export default function Dashboard({
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 
   const handleToggleOnlineStatus = async () => {
-    if (isGuest) return onRequireAuth?.('Login samee si aad online status-kaaga u maamusho.');
+    if (isGuest) return onRequireAuth?.(language === 'so' ? 'Koontada gal si aad xaaladda Online-ka u maamusho.' : 'Sign in to manage your online status.');
     try {
       setIsTogglingStatus(true);
       const nextOffline = !user.isOfflinePreference;
@@ -347,7 +347,7 @@ export default function Dashboard({
   const [isStartingBotMatch, setIsStartingBotMatch] = useState(false);
 
   const handlePlayWithBot = async () => {
-    if (isGuest) return onRequireAuth?.('Login samee si aad Bot ula ciyaarto.');
+    if (isGuest) return onRequireAuth?.(language === 'so' ? 'Koontada gal si aad Bot ula ciyaarto.' : 'Sign in to play against the Bot.');
     try {
       setIsStartingBotMatch(true);
       const res = await fetch('/api/rooms/create-bot-room', {
@@ -462,9 +462,9 @@ export default function Dashboard({
   };
 
   const handleChallengePlayer = async (targetUserId: string, betAmount: number) => {
-    if (isGuest) return onRequireAuth?.('Login samee si aad ciyaaryahan u challenge-gareyso.');
+    if (isGuest) return onRequireAuth?.(language === 'so' ? 'Koontada gal si aad ciyaaryahan u tartansiiso.' : 'Sign in to challenge a player.');
     if (user.balance < betAmount) {
-      alert(`Wallet-kaaga kuma filna! Waxaad u baahan tahay ugu yaraan $${betAmount} si aad u tartanto.`);
+      alert(language === 'so' ? `Haraaga boorsadaadu kuma filna! Waxaad u baahan tahay ugu yaraan $${betAmount}.` : `Insufficient wallet balance! You need at least $${betAmount} to play.`);
       return;
     }
 
@@ -504,7 +504,7 @@ export default function Dashboard({
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isGuest) return onRequireAuth?.('Login samee si aad profile u yeelato.');
+    if (isGuest) return onRequireAuth?.(language === 'so' ? 'Koontada gal si aad profile u yeelato.' : 'Sign in to create and manage your profile.');
     try {
       await onProfileUpdate({ username: editName, avatar: avatarIcon });
       setSaveSuccess(true);
@@ -552,10 +552,10 @@ export default function Dashboard({
       <div className="min-h-screen bg-gradient-to-b from-[#1a0c40] to-[#020012] text-white flex flex-col items-center justify-center p-4">
         <div className="text-center space-y-4 bg-black/30 backdrop-blur-lg border border-purple-500/30 p-8 rounded-2xl shadow-2xl shadow-purple-500/20 max-w-sm w-full">
           <h1 className="text-2xl font-black tracking-wider bg-gradient-to-r from-yellow-400 to-white bg-clip-text text-transparent">
-            Ciyaar Lagu Jiro!
+            {language === 'so' ? 'Ciyaar Lagu Jiro!' : 'Active Game Found!'}
           </h1>
           <p className="text-sm text-slate-300">
-            Waxay u muuqataa inaad ka tagtay ciyaar oo ay weli socoto. Ma rabtaa inaad dib ugu biirto?
+            {language === 'so' ? 'Waxay u muuqataa inaad ka tagtay ciyaar oo ay weli socoto. Ma rabtaa inaad dib ugu biirto?' : 'You appear to have left a game that is still active. Would you like to rejoin it?'}
           </p>
           <div className="bg-black/20 border border-white/10 p-3 rounded-xl flex justify-around text-xs">
             <div>
@@ -572,7 +572,7 @@ export default function Dashboard({
               onClick={onRejoin}
               className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 text-white font-black text-base py-3 rounded-xl shadow-lg shadow-green-500/20 active:scale-95 transition-all uppercase tracking-widest cursor-pointer"
             >
-              Dib u Biiro Ciyaarta (Rejoin)
+              {language === 'so' ? 'Dib ugu Biir Ciyaarta' : 'Rejoin Game'}
             </button>
             <button
               onClick={onDismissRejoin}
@@ -854,7 +854,7 @@ export default function Dashboard({
           <img src="/ludosom-logo.png" alt="LudoSom Landhu" className="h-10 w-10 rounded-lg object-cover shadow-md shadow-purple-500/15 ring-1 ring-yellow-400/40" />
           <div>
             <span className="font-black text-sm tracking-widest block text-yellow-400">Ludo<span className="text-white">$om</span></span>
-            <span className="text-[8px] font-black text-purple-400 uppercase tracking-widest block">Ludo Arena Soomaaliyeed</span>
+            <span className="text-[8px] font-black text-purple-400 uppercase tracking-widest block">{language === 'so' ? 'Garoonka Ludo Soomaaliyeed' : 'Somali Ludo Arena'}</span>
           </div>
         </div>
 
@@ -888,7 +888,7 @@ export default function Dashboard({
                 <div className="p-1">
                   <button
                     onClick={() => {
-                      if (isGuest) onRequireAuth?.('Login samee si aad profile-kaaga u maamusho.');
+                      if (isGuest) onRequireAuth?.(language === 'so' ? 'Koontada gal si aad profile-kaaga u maamusho.' : 'Sign in to manage your profile.');
                       else setIsEditingProfile(true);
                       setIsSettingsDropdownOpen(false);
                     }}
@@ -992,7 +992,7 @@ export default function Dashboard({
                 </button>}
               </div>
 
-              {isGuest ? <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300 sm:text-xs">Faa'iido Qarsoon</div> : <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-300 font-medium whitespace-nowrap">
+              {isGuest ? <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300 sm:text-xs">{language === 'so' ? "Faa'iido Qarsoon" : 'Hidden Advantage'}</div> : <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-300 font-medium whitespace-nowrap">
                 <span className="flex items-center gap-1 text-emerald-400 font-semibold">
                   <Flame className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-400" />
                   {user.winCount} Wins
@@ -1049,7 +1049,7 @@ export default function Dashboard({
               </div>
               <div className="max-h-[48vh] space-y-1 overflow-y-auto p-2">
                 {availableHomePlayers.length === 0 ? (
-                  <div className="py-8 text-center text-[10px] font-bold text-slate-500">Hadda ma jiro ciyaaryahan Home-ka jooga.</div>
+                  <div className="py-8 text-center text-[10px] font-bold text-slate-500">{language === 'so' ? 'Hadda ma jiro ciyaaryahan Bogga Hore jooga.' : 'No players are currently waiting on Home.'}</div>
                 ) : availableHomePlayers.map(player => {
                   const status = inviteStatus[player.id] || 'idle';
                   return (

@@ -376,11 +376,11 @@ export default function App() {
     let stopped = false;
     fetch(`${API_BASE_URL}/api/rooms/${encodeURIComponent(roomId)}`)
       .then(async response => {
-        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Ciyaarta lama heli karin.');
+        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || (language === 'so' ? 'Ciyaarta lama heli karin.' : 'The game could not be found.'));
         return response.json();
       })
       .then(room => { if (!stopped) setActiveRoom(room); })
-      .catch(error => { if (!stopped) { setErrorToast(userErrorMessage(error, 'Ciyaarta lama daawan karin.')); navigate('/', { replace: true }); } });
+      .catch(error => { if (!stopped) { setErrorToast(userErrorMessage(error, language === 'so' ? 'Ciyaarta lama daawan karin.' : 'The game could not be opened for spectating.')); navigate('/', { replace: true }); } });
     return () => { stopped = true; };
   }, [roomId, user, activeRoom, location.search, API_BASE_URL, navigate]);
 
@@ -807,7 +807,7 @@ export default function App() {
           }
           return prevRoom;
         });
-        setErrorToast(`Waa lagu diiday qolka: ${data.reason}`);
+        setErrorToast(language === 'so' ? `Waa lagu diiday qolka: ${data.reason}` : `Your room request was declined: ${data.reason}`);
       } catch (err) {
         console.error('Failed to parse room_join_rejected event', err);
       }
@@ -1081,7 +1081,7 @@ export default function App() {
       window.dispatchEvent(new Event('refresh_online_players'));
     } catch (err: any) {
       if (err.message === 'Failed to fetch') {
-        setErrorToast('Lama xidhiidhi karo server-ka. Fadlan isku day mar kale hadhow. (Could not connect to the server. Please try again later.)');
+        setErrorToast(language === 'so' ? 'Lama xiriiri karo server-ka. Fadlan mar kale isku day.' : 'Could not connect to the server. Please try again later.');
       } else {
         setErrorToast(userErrorMessage(err, 'Matchmaking failed.'));
       }
@@ -1264,7 +1264,7 @@ export default function App() {
         // continues play without rolling a second time.
         if (recoveredRoom.status !== 'playing' || recoveredPlayer?.userId !== user.id || recoveredRoom.gameState.hasRolled) return;
       }
-      setErrorToast(userErrorMessage(err, 'Xiriirka server-ka wuu gaabtay. Ciyaartu ma lumin; fadlan sug ilbiriqsiyo yar oo mar kale tuur.'));
+      setErrorToast(userErrorMessage(err, language === 'so' ? 'Xiriirka server-ka wuu gaabtay. Ciyaartu ma lumin; fadlan sug ilbiriqsiyo yar oo mar kale tuur.' : 'The server connection is slow. Your game is safe; wait a few seconds and roll again.'));
     }
   };
 
@@ -1407,7 +1407,7 @@ export default function App() {
         setExitingInviteIds(new Set());
       } else {
         const err = await response.json();
-        setErrorToast(err.error || 'Ku biirista martiqaadka waa ay guuldaraysatay.');
+        setErrorToast(err.error || (language === 'so' ? 'Ku biirista martiqaadka waa ay guuldaraysatay.' : 'Could not join the invitation.'));
         retractInviteCard(invite.roomId);
       }
     } catch (err) {

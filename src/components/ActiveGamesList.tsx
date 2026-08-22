@@ -3,6 +3,7 @@ import { Eye, Gamepad2, Loader2, Radio, TrendingUp, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AvatarDisplay from './AvatarDisplay';
 import { formatCurrency } from '../utils/number';
+import { useLanguage } from '../context/LanguageContext';
 
 interface ActiveGamePlayer {
   userId: string; username: string; avatar: string;
@@ -23,6 +24,8 @@ const colorDot: Record<string, string> = { red: 'bg-rose-500', green: 'bg-emeral
 const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
   const [loadingRoomId, setLoadingRoomId] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { language } = useLanguage();
+  const so = language === 'so';
   if (games.length === 0) return null;
 
   return (
@@ -30,7 +33,7 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
       <header className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-3.5 py-3">
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-500/15 text-purple-300"><Gamepad2 className="h-4 w-4" /></span>
-          <div><h2 className="text-[11px] font-black uppercase tracking-wider text-white">Ciyaaraha Tooska Ah</h2><p className="text-[8px] font-bold text-slate-500">Daawo ciyaarta ama raac bet-kaaga</p></div>
+          <div><h2 className="text-[11px] font-black uppercase tracking-wider text-white">{so ? 'Ciyaaraha Tooska ah' : 'Live Games'}</h2><p className="text-[8px] font-bold text-slate-500">{so ? 'Daawo ciyaarta ama raac saadaashaada' : 'Watch a match or follow your bet'}</p></div>
         </div>
         <span className="flex items-center gap-1 rounded-full border border-red-400/20 bg-red-500/10 px-2 py-1 text-[8px] font-black text-red-300"><Radio className="h-2.5 w-2.5 animate-pulse" /> {games.length} LIVE</span>
       </header>
@@ -50,14 +53,14 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
                       <div className="flex -space-x-2">
                         {game.players.slice(0, 4).map(player => <div key={player.userId} className="relative"><AvatarDisplay avatar={player.avatar} username={player.username} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border-2 border-[#17142c] bg-black/40" textClassName="text-sm" /><span className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border border-[#17142c] ${colorDot[player.color || ''] || 'bg-slate-500'}`} /></div>)}
                       </div>
-                      <div className="min-w-0"><p className="truncate text-[9px] font-black text-slate-200">{game.players.map(player => player.username).join(teamMode ? ' · ' : ' vs ')}</p><p className="mt-0.5 truncate text-[8px] font-bold text-amber-300">Turn: {game.currentTurnUsername || 'Loading…'}</p></div>
+                      <div className="min-w-0"><p className="truncate text-[9px] font-black text-slate-200">{game.players.map(player => player.username).join(teamMode ? ' · ' : ' vs ')}</p><p className="mt-0.5 truncate text-[8px] font-bold text-amber-300">{so ? 'Wareegga' : 'Turn'}: {game.currentTurnUsername || (so ? 'Sugaya…' : 'Loading…')}</p></div>
                     </div>
                   </div>
-                  <div className="text-right"><span className="block font-mono text-xs font-black text-emerald-300">{game.betAmount > 0 ? formatCurrency(game.betAmount) : 'FREE'}</span><span className="text-[7px] font-bold uppercase text-slate-600">Game stake</span></div>
+                  <div className="text-right"><span className="block font-mono text-xs font-black text-emerald-300">{game.betAmount > 0 ? formatCurrency(game.betAmount) : (so ? 'BILAASH' : 'FREE')}</span><span className="text-[7px] font-bold uppercase text-slate-600">{so ? 'Saamiga ciyaarta' : 'Game stake'}</span></div>
                 </div>
 
                 <div className="mt-2.5">
-                  <div className="mb-1 flex items-center justify-between text-[7px] font-black uppercase text-slate-500"><span>Hoggaamiyaha {progress}%</span><span>{progress >= 75 ? 'Dhammaad ku dhow' : progress >= 35 ? 'Ciyaar dhexe' : 'Bilowga ciyaarta'}</span></div>
+                  <div className="mb-1 flex items-center justify-between text-[7px] font-black uppercase text-slate-500"><span>{so ? 'Horumarka' : 'Progress'} {progress}%</span><span>{progress >= 75 ? (so ? 'Dhammaad ku dhow' : 'Nearly finished') : progress >= 35 ? (so ? 'Ciyaar dhexe' : 'Mid-game') : (so ? 'Bilowga ciyaarta' : 'Early game')}</span></div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-black/40"><div className="h-full rounded-full bg-gradient-to-r from-purple-500 via-blue-400 to-emerald-400 transition-all duration-700" style={{ width: `${progress}%` }} /></div>
                 </div>
 
@@ -72,7 +75,7 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
 
               <div className="flex items-center justify-between border-t border-white/5 bg-black/15 px-2.5 py-2">
                 <div className="flex items-center gap-2.5 text-[8px] font-bold text-slate-500"><span className="flex items-center gap-1"><Users className="h-3 w-3" /> {game.spectatorCount || 0}</span><span className={game.betting?.marketOpen ? 'text-emerald-400' : 'text-amber-400'}>{game.betting?.marketOpen ? 'BET OPEN' : 'BET CLOSED'}</span></div>
-                <button onClick={() => { setLoadingRoomId(game.id); navigate(`/room/${game.id}?spectate=true`); }} disabled={loadingRoomId === game.id} className="flex items-center gap-1.5 rounded-lg bg-purple-500 px-3 py-1.5 text-[8px] font-black uppercase tracking-wider text-white shadow-md transition hover:bg-purple-400 active:scale-95 disabled:opacity-50">{loadingRoomId === game.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />} {game.myBet ? 'Raac Bet-ka' : 'Daawo'}</button>
+                <button onClick={() => { setLoadingRoomId(game.id); navigate(`/room/${game.id}?spectate=true`); }} disabled={loadingRoomId === game.id} className="flex items-center gap-1.5 rounded-lg bg-purple-500 px-3 py-1.5 text-[8px] font-black uppercase tracking-wider text-white shadow-md transition hover:bg-purple-400 active:scale-95 disabled:opacity-50">{loadingRoomId === game.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />} {game.myBet ? (so ? 'Raac Saadaasha' : 'Follow Bet') : (so ? 'Daawo' : 'Watch')}</button>
               </div>
             </article>
           );

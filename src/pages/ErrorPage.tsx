@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { useRouteError } from "react-router-dom";
 import { userErrorMessage } from "../utils/userError";
+import { useLanguage } from "../context/LanguageContext";
 
 export default function ErrorPage() {
+  const { language } = useLanguage();
+  const so = language === 'so';
   const error: any = useRouteError();
   const [recovering, setRecovering] = useState(false);
   const offline = typeof navigator !== 'undefined' && !navigator.onLine;
@@ -37,10 +40,10 @@ export default function ErrorPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex items-center justify-center">
       <div className="text-center px-6">
-        <h1 className="text-4xl font-bold">{offline ? 'Internet ma jiro' : 'Oops!'}</h1>
-        <p className="mt-4">{offline ? 'Mobile Data ama Wi-Fi ayaa dansan ama xiriirku wuu go\'ay.' : 'Sorry, an unexpected error has occurred.'}</p>
+        <h1 className="text-4xl font-bold">{offline ? (so ? 'Internet ma jiro' : 'No Internet') : (so ? 'Khalad ayaa dhacay!' : 'Oops!')}</h1>
+        <p className="mt-4">{offline ? (so ? 'Xogta moobilka ama Wi-Fi ayaa dansan ama xiriirku wuu go\'ay.' : 'Mobile data or Wi-Fi is off, or the connection was lost.') : (so ? 'Waan ka xunnahay, khalad lama filaan ah ayaa dhacay.' : 'Sorry, an unexpected error has occurred.')}</p>
         <p className="mt-2">
-          <i>{offline ? 'Fadlan shid internetka, kadibna isku day mar kale.' : userErrorMessage(error, 'This page could not be opened.')}</i>
+          <i>{offline ? (so ? 'Fadlan shid internetka, kadibna isku day mar kale.' : 'Turn on your internet connection, then try again.') : userErrorMessage(error, so ? 'Boggan lama furi karin.' : 'This page could not be opened.')}</i>
         </p>
         <button
           type="button"
@@ -48,7 +51,7 @@ export default function ErrorPage() {
           disabled={recovering}
           className="mt-6 rounded-xl bg-purple-600 px-5 py-3 font-bold text-white disabled:opacity-60"
         >
-          {recovering ? 'Checking…' : offline ? 'Isku day mar kale' : 'Retry and update app'}
+          {recovering ? (so ? 'Hubinaya…' : 'Checking…') : offline ? (so ? 'Isku day mar kale' : 'Try Again') : (so ? 'Mar kale isku day oo app-ka cusboonaysii' : 'Retry and update app')}
         </button>
       </div>
     </div>
