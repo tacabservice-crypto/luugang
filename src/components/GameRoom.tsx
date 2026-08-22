@@ -78,6 +78,8 @@ interface GameRoomProps {
   onSendChat: (text: string) => void;
   onProfileUpdate: (updatedData: Partial<UserProfile>) => Promise<void>;
   onRetryJoin: () => void;
+  isGuest?: boolean;
+  onRequireAuth?: (reason?: string) => void;
 }
 
 const COLOR_MAP: Record<PlayerColor, string> = {
@@ -153,6 +155,8 @@ export default function GameRoomView({
   onSendChat,
   onProfileUpdate,
   onRetryJoin,
+  isGuest = false,
+  onRequireAuth,
 }: GameRoomProps) {
   const [chatInput, setChatInput] = useState('');
   const [activePanel, setActivePanel] = useState<'chat' | 'logs' | null>(null);
@@ -395,6 +399,10 @@ export default function GameRoomView({
   }, [isSpectator, room.id, userId]);
 
   const placeSpectatorBet = async () => {
+    if (isGuest) {
+      onRequireAuth?.('Login ama signup samee si aad bet ugu dhigato ciyaartan.');
+      return;
+    }
     if (!betTargetId || isPlacingBet) return;
     setIsPlacingBet(true);
     setBetError('');

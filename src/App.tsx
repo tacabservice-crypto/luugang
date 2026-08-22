@@ -29,6 +29,7 @@ const AuthScreen = React.lazy(() => import('./components/AuthScreen'));
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const GameRoomView = React.lazy(() => import('./components/GameRoom'));
 const WalletModal = React.lazy(() => import('./components/WalletModal'));
+const GuestHome = React.lazy(() => import('./components/GuestHome'));
 const RejoinPrompt = React.lazy(() => import('./components/RejoinPrompt'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const BecomeVip = React.lazy(() => import('./pages/BecomeVip'));
@@ -178,6 +179,16 @@ export default function App() {
     gameMode: 'solo'
   });
   const [error, setError] = useState<string | null>(null);
+  const [authSheetOpen, setAuthSheetOpen] = useState(false);
+  const [authSheetReason, setAuthSheetReason] = useState('');
+  const guestIdRef = useRef(`guest_${sessionStorage.getItem('ludosom_guest_id') || crypto.randomUUID()}`);
+  useEffect(() => {
+    sessionStorage.setItem('ludosom_guest_id', guestIdRef.current.replace(/^guest_/, ''));
+  }, []);
+  const requireAuth = (reason = 'Login ama signup samee si aad qaybtaan u isticmaasho.') => {
+    setAuthSheetReason(reason);
+    setAuthSheetOpen(true);
+  };
 
   // Connectivity is separate from authentication. Losing mobile data/Wi-Fi
   // must never be interpreted as a logout or send a verified user to sign-in.
@@ -266,7 +277,10 @@ export default function App() {
 
   useEffect(() => {
     const handleNativeBack = (event: Event) => {
-      if (showConfirmLeave) {
+      if (authSheetOpen) {
+        event.preventDefault();
+        setAuthSheetOpen(false);
+      } else if (showConfirmLeave) {
         event.preventDefault();
         setShowConfirmLeave(false);
       } else if (isWalletOpen) {
@@ -276,7 +290,7 @@ export default function App() {
     };
     window.addEventListener(NATIVE_BACK_EVENT, handleNativeBack);
     return () => window.removeEventListener(NATIVE_BACK_EVENT, handleNativeBack);
-  }, [isWalletOpen, showConfirmLeave]);
+  }, [authSheetOpen, isWalletOpen, showConfirmLeave]);
 
   useEffect(() => {
     const audio = new Audio(playGameReminderAudioSrc);
@@ -357,6 +371,42 @@ export default function App() {
       }
     }
   }, [roomId, user, location.search]); // This effect depends on the roomId from the URL and the user's login state.
+
+  useEffect(() => {
+    if (!roomId || user || activeRoom || new URLSearchParams(location.search).get('spectate') !== 'true') return;
+    let stopped = false;
+    fetch(`${API_BASE_URL}/api/rooms/${encodeURIComponent(roomId)}`)
+      .then(async response => {
+        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Ciyaarta lama heli karin.');
+        return response.json();
+      })
+      .then(room => { if (!stopped) setActiveRoom(room); })
+      .catch(error => { if (!stopped) { setErrorToast(userErrorMessage(error, 'Ciyaarta lama daawan karin.')); navigate('/', { replace: true }); } });
+    return () => { stopped = true; };
+  }, [roomId, user, activeRoom, location.search, API_BASE_URL, navigate]);
+
+  useEffect(() => {
+    if (user || !activeRoom?.id || new URLSearchParams(location.search).get('spectate') !== 'true') return;
+    const guestId = guestIdRef.current;
+    const params = new URLSearchParams({ userId: guestId, username: 'Daawade', avatar: '👁️' });
+    const stream = new EventSource(`${API_BASE_URL}/api/updates?${params.toString()}`);
+    const register = () => void fetch(`${API_BASE_URL}/api/rooms/${encodeURIComponent(activeRoom.id)}/spectate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: guestId }),
+    });
+    stream.addEventListener('init', register);
+    stream.addEventListener('game_update', event => {
+      try {
+        const room = JSON.parse((event as MessageEvent).data) as GameRoom;
+        if (room.id === activeRoom.id) setActiveRoom(room);
+      } catch { /* A later event will retry. */ }
+    });
+    return () => {
+      stream.close();
+      void fetch(`${API_BASE_URL}/api/rooms/${encodeURIComponent(activeRoom.id)}/stop-spectating`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: guestId }),
+      });
+    };
+  }, [user, activeRoom?.id, location.search, API_BASE_URL]);
 
   // Keep game state and browser history aligned. Opening a room creates a real
   // history entry, while browser/mobile Back hides the room without forfeiting.
@@ -885,6 +935,8 @@ export default function App() {
 
   const handleLoginSuccess = (profile: UserProfile) => {
     setUser(profile);
+    setAuthSheetOpen(false);
+    setAuthSheetReason('');
     localStorage.setItem('ludosom_cached_profile', JSON.stringify(profile));
     // No need to set localStorage here, onAuthStateChanged is the source of truth
     checkAndPromptRejoin(profile.id);
@@ -1457,7 +1509,7 @@ export default function App() {
     return <RejoinPrompt rejoinableRoom={rejoinableRoom} onRejoin={handleRejoin} onDismissRejoin={handleDismissRejoin} />;
   }
 
-  if (!user) {
+  if (!user && false) {
     if (!isOnline) {
       return (
         <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex items-center justify-center p-6">
@@ -1475,6 +1527,24 @@ export default function App() {
       );
     }
     return <AuthScreen onLoginSuccess={handleLoginSuccess} initialError={error} />;
+  }
+
+  const renderAuthSheet = () => authSheetOpen ? (
+    <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center" onMouseDown={event => { if (event.target === event.currentTarget) setAuthSheetOpen(false); }}>
+      <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-[28px] border border-white/10 bg-[#0d0824] shadow-2xl sm:rounded-[28px]">
+        <div className="mx-auto mt-2.5 h-1 w-12 rounded-full bg-white/20 sm:hidden" />
+        {authSheetReason && <p className="mx-5 mt-5 rounded-xl border border-purple-400/20 bg-purple-500/10 px-3 py-2.5 text-center text-[11px] font-bold text-purple-100">{authSheetReason}</p>}
+        <AuthScreen embedded onClose={() => setAuthSheetOpen(false)} onLoginSuccess={handleLoginSuccess} initialError={error} />
+      </div>
+    </div>
+  ) : null;
+
+  if (!user) {
+    const guestProfile: UserProfile = { id: guestIdRef.current, username: 'Daawade', avatar: '👁️', balance: 0, winCount: 0, lossCount: 0 };
+    if (activeRoom) {
+      return <VoiceChatProvider><GameRoomView room={activeRoom} user={guestProfile} userId={guestProfile.id} isGuest onRequireAuth={requireAuth} onLeave={() => { setActiveRoom(null); navigate('/'); }} onLogout={() => requireAuth()} onToggleReady={() => requireAuth()} onAddBot={() => requireAuth()} onChangeTeam={() => requireAuth()} onStartMatch={() => requireAuth()} onRollDice={() => requireAuth()} onMoveToken={() => requireAuth()} onSendChat={() => requireAuth('Login samee si aad chat-ka uga qaybqaadato.')} onProfileUpdate={async () => requireAuth()} onRetryJoin={() => requireAuth()} />{renderAuthSheet()}<Toaster /></VoiceChatProvider>;
+    }
+    return <div id="app-root"><GuestHome onRequireAuth={requireAuth} />{!isOnline && <div className="fixed inset-x-3 top-16 z-[120] mx-auto max-w-md rounded-xl border border-amber-400/40 bg-amber-950/95 p-3 text-center text-xs font-black text-amber-200">Internetku wuu go'an yahay; live games-ku ma cusboonaan karaan.</div>}{renderAuthSheet()}<InstallPwaPrompt /></div>;
   }
 
   const renderNoticeSlot = () => (

@@ -60,9 +60,11 @@ function normalizePhoneNumber(value: string, callingCode: string): string {
 interface AuthScreenProps {
   onLoginSuccess: (profile: UserProfile, token: string) => void;
   initialError?: string | null;
+  embedded?: boolean;
+  onClose?: () => void;
 }
 
-export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenProps) {
+export default function AuthScreen({ onLoginSuccess, initialError, embedded = false, onClose }: AuthScreenProps) {
   const API_BASE_URL = (() => {
     if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
     if (typeof window === 'undefined') return 'http://localhost:3002';
@@ -440,17 +442,18 @@ export default function AuthScreen({ onLoginSuccess, initialError }: AuthScreenP
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-center p-4 selection:bg-purple-500 selection:text-white relative overflow-x-hidden">
-      <div className="absolute top-4 right-4 z-20">
+    <div className={`${embedded ? 'relative text-white' : 'min-h-screen bg-gradient-to-b from-[#2e1065] via-[#0f052d] to-[#020012] text-white flex flex-col items-center justify-center p-4 selection:bg-purple-500 selection:text-white relative overflow-x-hidden'}`}>
+      {!embedded && <div className="absolute top-4 right-4 z-20">
         <LanguageToggle />
-      </div>
+      </div>}
 
-      <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
+      {!embedded && <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
         <div className="absolute w-[600px] h-[600px] rounded-full border border-purple-500/10 animate-pulse" />
         <div className="absolute w-[800px] h-[800px] rounded-full border border-purple-500/5" />
-      </div>
+      </div>}
 
-      <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl shadow-blue-500/5 space-y-6 relative z-10">
+      <div className={`${embedded ? 'w-full space-y-5 p-5 sm:p-6' : 'w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl shadow-blue-500/5 space-y-6 relative z-10'}`}>
+        {embedded && onClose && <button type="button" onClick={onClose} aria-label="Close login" className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-lg font-black text-slate-300">×</button>}
         <div className="flex flex-col items-center text-center space-y-2">
           <img src="/ludosom-logo.png" alt="LudoSom Landhu" className="h-20 w-20 rounded-2xl object-cover shadow-lg shadow-purple-500/20 ring-1 ring-yellow-400/40" />
           <h1 className="text-3xl font-black tracking-widest bg-gradient-to-r from-yellow-400 via-white to-purple-400 bg-clip-text text-transparent">
