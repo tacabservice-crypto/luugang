@@ -4655,6 +4655,7 @@ app.use('/api/rooms', async (req, res, next) => {
 // Returns a list of all currently active games that can be spectated.
 app.get('/api/rooms/active', (req, res) => {
   const now = Date.now();
+  const currentUserId = String(req.query.userId || '');
   const activeGames = Object.values(store.rooms)
     .filter(r => {
       if (r.status !== 'playing') return false;
@@ -4670,18 +4671,45 @@ app.get('/api/rooms/active', (req, res) => {
 
       return true;
     })
-    .map(r => ({
-      id: r.id,
-      players: r.players.map(p => ({
+    .map(r => {
+      const openBets = store.spectatorBets.filter(bet => bet.roomId === r.id && bet.status === 'open');
+      const myBet = currentUserId ? store.spectatorBets.find(bet => bet.roomId === r.id && bet.userId === currentUserId) : undefined;
+      const activePlayers = r.players.filter(player => player.status !== 'left');
+      const activePlayer = r.players[r.gameState.turn];
+      const playerProgress = activePlayers.map(player => {
+        const tokens = r.gameState.tokens.filter(token => token.ownerId === player.userId || token.color === player.color);
+        return tokens.length ? Math.round(tokens.reduce((sum, token) => sum + Math.max(0, token.position), 0) / (tokens.length * 56) * 100) : 0;
+      });
+      return {
+        id: r.id,
+        players: r.players.map(p => ({
         userId: p.userId,
         username: p.username,
         avatar: p.avatar,
+        color: p.color,
         status: p.status,
-      })),
-      betAmount: r.betAmount,
-      gameMode: r.gameMode,
-      capacity: r.capacity,
-    }));
+        })),
+        betAmount: r.betAmount,
+        gameMode: r.gameMode,
+        capacity: r.capacity,
+        currentTurnUsername: activePlayer?.username || '',
+        progress: playerProgress.length ? Math.max(...playerProgress) : 0,
+        spectatorCount: activeClients.filter(client => client.spectatingRoomId === r.id).length,
+        betting: {
+          betCount: openBets.length,
+          totalPool: Number(openBets.reduce((sum, bet) => sum + bet.stake, 0).toFixed(2)),
+          marketOpen: !r.gameState.tokens.some(token => token.position >= 51),
+        },
+        myBet: myBet ? {
+          targetUsername: myBet.targetUsername,
+          prediction: myBet.prediction,
+          stake: myBet.stake,
+          odds: myBet.odds,
+          potentialPayout: myBet.potentialPayout,
+          status: myBet.status,
+        } : null,
+      };
+    });
   res.json(activeGames);
 });
 

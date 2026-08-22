@@ -506,7 +506,7 @@ export default function Dashboard({
 
   const fetchActiveGames = async () => {
     try {
-      const res = await fetch(`/api/rooms/active?_t=${Date.now()}`);
+      const res = await fetch(`/api/rooms/active?userId=${encodeURIComponent(user.id)}&_t=${Date.now()}`);
       if (res.ok) {
         const data = await res.json();
         setActiveGames(data);
@@ -520,7 +520,7 @@ export default function Dashboard({
     fetchActiveGames();
     const interval = setInterval(fetchActiveGames, 10000); // Poll every 10 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [user.id]);
 
   if (rejoinableRoom) {
     return (
