@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, Smartphone, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 const INSTALL_DISMISSED_KEY = 'dhili-ludo-install-dismissed';
 const DISMISS_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -14,6 +15,7 @@ interface BeforeInstallPromptEvent extends Event {
 const InstallPwaPrompt = () => {
   const [shouldRender, setShouldRender] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  useBodyScrollLock(shouldRender);
 
   useEffect(() => {
     const isNativeApp = Capacitor.isNativePlatform();

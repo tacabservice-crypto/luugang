@@ -1,5 +1,6 @@
 import { ArrowLeft, CircleDollarSign, Eye, Gamepad2, HelpCircle, Radio, Search, ShieldAlert, Smartphone, UserPlus, Users, Wallet, Wifi } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface HelpProps { onClose: () => void; }
 
@@ -28,10 +29,11 @@ const faq = {
 } as const;
 
 export default function Help({ onClose }: HelpProps) {
+  useBodyScrollLock();
   const { language } = useLanguage();
   const so = language === 'so';
   const cards = so ? [['Marti','Hore + Daawo',Eye],['Ciyaaryahan','Ciyaar + Challenge',Gamepad2],['Boorsada','Dhigaal + La-bixid',Wallet],['Toos','Daawo + Saadaal',Radio]] : [['Guest','Home + Watch',Eye],['Player','Play + Challenge',Gamepad2],['Wallet','Deposit + Withdraw',Wallet],['Live','Spectate + Bet',Radio]];
-  return <div className="fixed inset-0 z-[150] overflow-y-auto bg-[#040712] text-white">
+  return <div className="fixed inset-0 z-[150] overflow-y-auto overscroll-contain touch-pan-y bg-[#040712] text-white [-webkit-overflow-scrolling:touch]">
     <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_85%_5%,rgba(37,99,235,.24),transparent_30%),radial-gradient(circle_at_8%_35%,rgba(124,58,237,.18),transparent_32%)]" />
     <header className="sticky top-0 z-20 border-b border-white/10 bg-[#070b18]/90 backdrop-blur-xl"><div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-7"><button onClick={onClose} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"><ArrowLeft className="h-4 w-4" /> {so ? 'Bogga Hore' : 'Home'}</button><div className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/15 text-blue-300"><HelpCircle className="h-5 w-5" /></span><div><div className="text-xs font-black">{so ? 'Xarunta Caawinta LudoSom' : 'LudoSom Help Center'}</div><div className="text-[8px] font-bold uppercase tracking-widest text-blue-300">{so ? 'Tilmaamaha isticmaalka' : 'User guide'}</div></div></div></div></header>
     <main className="relative mx-auto max-w-5xl px-4 pb-20 pt-8 sm:px-7 sm:pt-12">

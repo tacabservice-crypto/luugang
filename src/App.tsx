@@ -11,6 +11,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { userErrorMessage } from './utils/userError';
 import playGameReminderAudioSrc from './assets/play_the_game.mp3';
 import { NATIVE_BACK_EVENT } from './components/NativeBackHandler';
+import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 
 // Gameplay actions must never wait forever on a slow mobile connection.
 // The server remains authoritative; this only releases the UI and allows a
@@ -266,6 +267,7 @@ export default function App() {
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [displayedErrorToast, setDisplayedErrorToast] = useState<string | null>(null);
   const [showConfirmLeave, setShowConfirmLeave] = useState(false);
+  useBodyScrollLock(authSheetOpen || isWalletOpen || showConfirmLeave);
   const [activeReaction, setActiveReaction] = useState<{
     id: string; senderName: string; targetId: string; targetName: string; reactionId: string; emoji: string;
   } | null>(null);

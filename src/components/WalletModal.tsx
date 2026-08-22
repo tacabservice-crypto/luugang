@@ -11,6 +11,7 @@ import { formatCurrency } from '../utils/number';
 import { userErrorMessage } from '../utils/userError';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface WalletModalProps {
   user: UserProfile;
@@ -65,6 +66,7 @@ const detectPlayerLocation = async (requestNativePermission = false): Promise<st
 };
 
 export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletModalProps) {
+  useBodyScrollLock();
   const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
   const [amount, setAmount] = useState('');
@@ -345,8 +347,8 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="w-full sm:max-w-md bg-white/5 backdrop-blur-xl border-t sm:border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden text-white flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 overscroll-none bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="w-full sm:max-w-md bg-white/5 backdrop-blur-xl border-t sm:border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden text-white flex flex-col max-h-[92dvh] min-h-0">
         
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-black/10">
           <div className="flex items-center gap-2">
@@ -382,7 +384,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
           ))}
         </div>
 
-        <div className="p-6 flex-1 overflow-y-auto space-y-4">
+        <div className="p-6 min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y space-y-4 [-webkit-overflow-scrolling:touch]">
           {error && (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 shrink-0" />

@@ -1,9 +1,11 @@
 import { ArrowLeft, Eye, Gamepad2, HeartHandshake, Radio, ShieldCheck, Sparkles, Target, Trophy, Users, Wallet } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface AboutUsProps { onClose: () => void; }
 
 export default function AboutUs({ onClose }: AboutUsProps) {
+  useBodyScrollLock();
   const { language } = useLanguage();
   const so = language === 'so';
   const features = [
@@ -17,7 +19,7 @@ export default function AboutUs({ onClose }: AboutUsProps) {
   const flow = so
     ? [['1','Dooro habka','Dooro saamiga, 2 ama 4 ciyaaryahan, kadib Keli ama Koox.'],['2','Hel ciyaar','Raadin Toos ah, Challenge, Qol Gaar ah ama Bot ka dooro.'],['3','Ciyaar wareeggaaga','Tuur laadhuuga, dooro dhaqaaq sax ah, kana war hay waqtiga.'],['4','Hel natiijada','Server-ku wuxuu xaqiijiyaa guusha, lacag-bixinta, tirakoobka iyo xisaabinta saadaasha.']]
     : [['1','Choose a mode','Select a stake, 2 or 4 players, then Solo or Team.'],['2','Find a match','Choose Live Search, Challenge, Private Room or Bot.'],['3','Play your turn','Roll the dice, choose a legal move and watch the timer.'],['4','Receive the result','The server confirms the winner, payout, statistics and bet settlement.']];
-  return <div className="fixed inset-0 z-[150] overflow-y-auto bg-[#050313] text-white">
+  return <div className="fixed inset-0 z-[150] overflow-y-auto overscroll-contain touch-pan-y bg-[#050313] text-white [-webkit-overflow-scrolling:touch]">
     <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_8%,rgba(124,58,237,.28),transparent_32%),radial-gradient(circle_at_88%_30%,rgba(14,165,233,.14),transparent_28%)]" />
     <header className="sticky top-0 z-20 border-b border-white/10 bg-[#08051a]/90 backdrop-blur-xl"><div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-7"><button onClick={onClose} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"><ArrowLeft className="h-4 w-4" /> {so ? 'Bogga Hore' : 'Home'}</button><div className="flex items-center gap-2"><img src="/ludosom-logo.png" alt="LudoSom" className="h-9 w-9 rounded-xl object-cover" /><div><div className="text-xs font-black">{so ? 'Nagu Saabsan' : 'About LudoSom'}</div><div className="text-[8px] font-bold uppercase tracking-widest text-purple-300">{so ? 'Cidda aan nahay' : 'Who we are'}</div></div></div></div></header>
     <main className="relative mx-auto max-w-5xl px-4 pb-20 pt-9 sm:px-7 sm:pt-14">

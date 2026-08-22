@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface ChangePasswordModalProps {
     onClose: () => void;
@@ -6,6 +7,7 @@ interface ChangePasswordModalProps {
 }
 
 const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClose, onSave }) => {
+    useBodyScrollLock();
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,8 +27,8 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClose, onSa
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+        <div className="fixed inset-0 overscroll-none bg-black bg-opacity-80 flex items-center justify-center z-50 p-3">
+            <div className="max-h-[92dvh] overflow-y-auto overscroll-contain touch-pan-y bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md [-webkit-overflow-scrolling:touch]">
                 <h2 className="text-xl font-bold mb-4 text-white">Change Password</h2>
                 
                 <div className="space-y-4">

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UserProfile } from '../types/game';
 import { isFullAdmin } from '../utils/admin';
 import FirebasePasswordSettings from './FirebasePasswordSettings';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface Role {
     id: string;
@@ -19,6 +20,7 @@ interface UserEditModalProps {
 const AVATARS = ['/ludosom-logo.png', '😀', '😎', '🚀', '🧠', '👑', '💪', '🎉', '🔥', '💯', '🎲', '🤔','😂','😃','😄','😅','😆','😉','😊','😋','😌','😍','😏','😐','😑','😒','😓','pensive','😕','😖','😗','😘','😙','😚','😛','😜','😝','😞','😟','😠','😡','😢','😣','😤','😥','😦','😧','😨','😩','😪','😫','😬','😭','😮','😯','😰','😱','😲','😳','😴','😵','😶','😷'];
 
 const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, isAdmin = false, roles = [] }) => {
+    useBodyScrollLock();
     const isProtected = isFullAdmin(user);
     const [formData, setFormData] = useState({
         username: user.username,
@@ -64,8 +66,8 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
 
     return (
         <>
-            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-                <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div className="fixed inset-0 overscroll-none bg-black bg-opacity-70 flex items-center justify-center z-50 p-3">
+                <div className="max-h-[92dvh] overflow-y-auto overscroll-contain touch-pan-y bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md [-webkit-overflow-scrolling:touch]">
                     <h2 className="text-xl font-bold mb-4 text-white">Edit {isAdmin ? `User: ${user.username}` : "Your Profile"}</h2>
                     
                     {isProtected && (
