@@ -3523,6 +3523,21 @@ app.get('/api/users/online', async (req, res) => {
       isOfflinePreference: profile?.isOfflinePreference ?? candidateUsers.get(id)?.isOfflinePreference ?? false,
     });
   });
+  // A live SSE connection is authoritative even if the cross-process
+  // presence write is delayed or unavailable. Keep a minimal candidate so
+  // users connected from another browser/device cannot disappear from Home.
+  activeClients.forEach(client => {
+    if (!candidateUsers.has(client.userId)) {
+      candidateUsers.set(client.userId, {
+        id: client.userId,
+        username: 'Player',
+        avatar: '🎮',
+        winCount: 0,
+        lossCount: 0,
+        isOfflinePreference: false,
+      });
+    }
+  });
   const busyUserIds = new Set<string>();
   Object.values(store.rooms).forEach(room => {
     if (room.status !== 'waiting' && room.status !== 'playing') return;
