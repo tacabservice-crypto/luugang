@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { UserProfile } from '../types/game';
 import { isFullAdmin } from '../utils/admin';
 import FirebasePasswordSettings from './FirebasePasswordSettings';
@@ -116,7 +117,7 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
     };
 
     const previewAvatar = uploadedAvatar || formData.avatar;
-    return <div style={{ height: visualViewport.height, top: visualViewport.top, bottom: 'auto' }} className="fixed inset-x-0 z-[160] flex items-stretch justify-center overscroll-none bg-[#02010a]/85 p-0 backdrop-blur-md sm:items-center sm:p-4">
+    return createPortal(<div style={{ height: visualViewport.height, top: visualViewport.top, bottom: 'auto' }} className="fixed inset-x-0 z-[160] flex items-stretch justify-center overscroll-none bg-[#02010a]/85 p-0 backdrop-blur-md sm:items-center sm:p-4">
         <section role="dialog" aria-modal="true" aria-label={so ? 'Habaynta profile-ka' : 'Profile settings'} className="flex h-full max-h-full min-h-0 w-full max-w-lg flex-col overflow-hidden border-purple-400/20 bg-gradient-to-b from-[#171035] via-[#0d0920] to-[#070511] text-white shadow-[0_0_80px_rgba(88,28,135,.35)] sm:h-auto sm:max-h-[94dvh] sm:rounded-[30px] sm:border">
             <header className="relative shrink-0 overflow-hidden border-b border-white/10 px-5 pb-5 pt-4">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,rgba(250,204,21,.18),transparent_32%),radial-gradient(circle_at_85%_20%,rgba(59,130,246,.22),transparent_38%)]" />
@@ -150,7 +151,7 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
 
             <footer className="sticky bottom-0 z-30 grid shrink-0 grid-cols-[.8fr_1.2fr] gap-2 border-t border-white/10 bg-[#090617] p-3 pb-[max(.75rem,env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(0,0,0,.45)] backdrop-blur-xl sm:p-4 sm:pb-4"><button type="button" onClick={onClose} className="rounded-xl border border-white/10 bg-white/5 py-3 text-xs font-black text-slate-300 transition active:scale-95">{so ? 'Ka Noqo' : 'Cancel'}</button><button type="button" onClick={handleSave} disabled={isSaving || isProtected || !formData.username.trim()} className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 py-3 text-xs font-black text-white shadow-lg shadow-purple-900/30 transition active:scale-95 disabled:opacity-45"><Save className="h-4 w-4" /> {isSaving ? (so ? 'Kaydinaya…' : 'Saving…') : (so ? 'Kaydi Isbeddelka' : 'Save Changes')}</button></footer>
         </section>
-    </div>;
+    </div>, document.body);
 };
 
 export default UserEditModal;
