@@ -5425,10 +5425,25 @@ app.post("/api/rooms/matchmaking/leave", async (req, res) => {
   }
   res.json({ success: true });
 });
-app.post("/api/rooms/voice-signaling", (req, res) => {
+app.post("/api/rooms/voice-signaling", verifyFirebaseToken, async (req, res) => {
   const { roomId, senderId, targetId, signal } = req.body;
   if (!roomId || !senderId || !targetId || !signal) {
     return res.status(400).json({ error: "Missing required signaling fields" });
+  }
+  let sender = store.users[senderId];
+  if (!sender && isMySqlConfigured()) sender = await loadMySqlRuntimeUser(senderId);
+  if (!sender || sender.firebaseUid !== req.user.uid) {
+    return res.status(403).json({ error: "Voice sender identity is invalid." });
+  }
+  const room = store.rooms[String(roomId).trim().toUpperCase()];
+  if (!room) return res.status(404).json({ error: "Voice room was not found." });
+  const senderIsPlayer = room.players.some((player) => player.userId === senderId);
+  const targetIsPlayer = room.players.some((player) => player.userId === targetId);
+  if (!senderIsPlayer && !targetIsPlayer) {
+    return res.status(403).json({ error: "Voice participants are not members of this room." });
+  }
+  if (!["offer", "answer", "candidate"].includes(String(signal.type || ""))) {
+    return res.status(400).json({ error: "Unsupported voice signal." });
   }
   sendEventToUser(targetId, "voice_signal", {
     roomId,

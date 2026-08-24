@@ -221,7 +221,12 @@ export default function GameRoomView({
     isMuted, 
     toggleMute, 
     isSpeakerOn, 
-    toggleSpeaker 
+    toggleSpeaker,
+    voiceStatus,
+    voiceError,
+    retryVoiceChat,
+    unlockAudio,
+    audioNeedsUnlock,
   } = useVoiceChat();
   const speakerOnRef = useRef(isSpeakerOn);
 
@@ -452,9 +457,14 @@ export default function GameRoomView({
       }
     };
 
-  // Initialize voice chat media and signaling once per room session.
+  const hasVoicePeer = isSpectator
+    ? room.players.some(player => !/^(bot_|bot-|computer_|computer-|user_sim_|sim_)/i.test(player.userId))
+    : [...room.players, ...(room.pendingPlayers || [])].some(player => player.userId !== userId && !/^(bot_|bot-|computer_|computer-|user_sim_|sim_)/i.test(player.userId));
+
+  // Initialize only when another real person can participate. Bot-only games
+  // must not request microphone permission or create dead signaling traffic.
   useEffect(() => {
-    if (room.id && userId) {
+    if (room.id && userId && hasVoicePeer) {
       // Pass the isSpectator flag to the initialization function
       initializeVoiceChat(userId, room.id, isSpectator);
     }
@@ -462,7 +472,7 @@ export default function GameRoomView({
     return () => {
       closeVoiceChat();
     };
-  }, [userId, room.id, isSpectator, initializeVoiceChat, closeVoiceChat]);
+  }, [userId, room.id, isSpectator, hasVoicePeer, initializeVoiceChat, closeVoiceChat]);
 
   // Update peer connections whenever the player list changes.
   useEffect(() => {
@@ -1179,15 +1189,17 @@ export default function GameRoomView({
         </div>
 
         {isSpectator ? (
-          <div className="flex items-center gap-1.5 rounded-full border border-red-400/30 bg-red-500/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-red-300">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" /> Live Spectator
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 rounded-full border border-red-400/30 bg-red-500/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-red-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" /> Live</div>
+            <button onClick={audioNeedsUnlock ? unlockAudio : toggleSpeaker} className={`rounded-lg border p-1.5 ${audioNeedsUnlock ? 'animate-pulse border-amber-400/50 bg-amber-400/20 text-amber-200' : 'border-blue-400/30 bg-blue-500/15 text-blue-300'}`} title={audioNeedsUnlock ? 'Tap to hear players' : 'Toggle player audio'}>{isSpeakerOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}</button>
+            {(voiceStatus === 'failed' || voiceStatus === 'blocked') && <button onClick={retryVoiceChat} className="rounded-lg border border-red-400/40 bg-red-500/15 px-2 py-1.5 text-[8px] font-black text-red-200">RETRY AUDIO</button>}
           </div>
         ) : <div className="flex items-center gap-3">
           {/* Voice Controls Popover Trigger */}
-          <div className="relative" ref={voiceControlsRef}>
+          {hasVoicePeer && <div className="relative" ref={voiceControlsRef}>
             <button
               onClick={() => setIsVoiceControlsOpen(prev => !prev)}
-              className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
+              className={`relative p-1.5 rounded-xl border transition-all cursor-pointer ${
                 (!isMuted || isSpeakerOn) 
                   ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
                   : 'bg-black/40 text-slate-400 border-white/10 hover:text-white'
@@ -1195,10 +1207,13 @@ export default function GameRoomView({
               title="Voice Controls"
             >
               <Users className="w-3.5 h-3.5" />
+              <span className={`absolute -right-1 -top-1 h-2 w-2 rounded-full ${voiceStatus === 'connected' ? 'bg-emerald-400' : voiceStatus === 'blocked' || voiceStatus === 'failed' ? 'bg-red-400' : 'animate-pulse bg-amber-300'}`} />
             </button>
 
             {isVoiceControlsOpen && (
-              <div className="absolute top-full right-0 mt-2 p-1.5 bg-black/40 border border-white/10 rounded-xl shadow-lg z-50 flex items-center gap-2">
+              <div className="absolute top-full right-0 mt-2 min-w-48 p-2 bg-[#100a29]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-lg z-50">
+                <div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-[9px] font-black uppercase text-white">Voice · {voiceStatus}</p><p className="max-w-36 text-[8px] text-slate-400">{voiceError || 'Mic and player audio controls'}</p></div>{(voiceStatus === 'failed' || voiceStatus === 'blocked') && <button onClick={retryVoiceChat} className="rounded-lg bg-red-500/20 px-2 py-1 text-[8px] font-black text-red-200">RETRY</button>}</div>
+                <div className="flex items-center gap-2">
                 <button
                   onClick={toggleMute}
                   className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
@@ -1211,7 +1226,7 @@ export default function GameRoomView({
                   {!isMuted ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5 text-slate-500" />}
                 </button>
                 <button
-                  onClick={toggleSpeaker}
+                  onClick={audioNeedsUnlock ? unlockAudio : toggleSpeaker}
                   className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
                     isSpeakerOn
                       ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
@@ -1221,9 +1236,11 @@ export default function GameRoomView({
                 >
                   {isSpeakerOn ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5 text-slate-500" />}
                 </button>
+                {audioNeedsUnlock && <button onClick={unlockAudio} className="animate-pulse rounded-lg bg-amber-400 px-2 py-1.5 text-[8px] font-black text-slate-950">TAP TO HEAR</button>}
+                </div>
               </div>
             )}
-          </div>
+          </div>}
         
           <div ref={userMenuRef} className="relative">
               <div

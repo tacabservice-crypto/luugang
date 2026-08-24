@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { LudoPlayer } from '../types/game';
 import { useStableCallback } from '../hooks/useStableCallback';
+import { auth } from '../firebase-client';
+
+type VoiceStatus = 'idle' | 'requesting' | 'connecting' | 'connected' | 'blocked' | 'failed';
 
 interface VoiceChatContextType {
   isMuted: boolean;
@@ -11,6 +14,11 @@ interface VoiceChatContextType {
   updatePlayers: (players: LudoPlayer[]) => void;
   closeVoiceChat: () => void;
   speakingPlayers: Record<string, boolean>;
+  voiceStatus: VoiceStatus;
+  voiceError: string | null;
+  retryVoiceChat: () => void;
+  unlockAudio: () => void;
+  audioNeedsUnlock: boolean;
 }
 
 const VoiceChatContext = createContext<VoiceChatContextType | undefined>(undefined);
@@ -28,6 +36,7 @@ interface VoiceChatProviderProps {
 }
 
 const LOG_PREFIX = '[VOICE_CHAT]';
+const isBotPeer = (userId: string) => /^(bot_|bot-|computer_|computer-|user_sim_|sim_)/i.test(userId);
 
 const getIceServers = (): RTCIceServer[] => {
   // Default Google STUN servers
@@ -39,17 +48,18 @@ const getIceServers = (): RTCIceServer[] => {
 
   // Add TURN server from environment variables if configured
   const turnUrl = import.meta.env.VITE_TURN_URL;
+  const turnUrls = String(import.meta.env.VITE_TURN_URLS || turnUrl || '').split(',').map(url => url.trim()).filter(Boolean);
   const turnUsername = import.meta.env.VITE_TURN_USERNAME;
   const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
 
-  if (turnUrl) {
-    const turnServer: RTCIceServer = { urls: turnUrl };
+  if (turnUrls.length) {
+    const turnServer: RTCIceServer = { urls: turnUrls };
     if (turnUsername && turnCredential) {
       turnServer.username = turnUsername;
       turnServer.credential = turnCredential;
     }
     iceServers.push(turnServer);
-    console.log(`${LOG_PREFIX} TURN server configured. URL: ${turnUrl}, Has Username: ${!!turnUsername}, Has Credential: ${!!turnCredential}`);
+    console.log(`${LOG_PREFIX} TURN server configured (${turnUrls.length} transport URL(s)). Has Username: ${!!turnUsername}, Has Credential: ${!!turnCredential}`);
   } else {
     console.log(`${LOG_PREFIX} VITE_TURN_URL not found. Using STUN servers only.`);
   }
@@ -64,6 +74,9 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [speakingPlayers, setSpeakingPlayers] = useState<Record<string, boolean>>({});
   const [peerIds, setPeerIds] = useState<string[]>([]);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [audioNeedsUnlock, setAudioNeedsUnlock] = useState(false);
 
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
   const remoteAudioRefs = useRef<Record<string, HTMLAudioElement>>({});
@@ -72,6 +85,8 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
   const initializedRef = useRef(false);
   const latestPlayersRef = useRef<LudoPlayer[]>([]);
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  const spectatorRef = useRef(false);
+  const reconnectAttemptsRef = useRef<Record<string, number>>({});
 
   const attachRemoteAudio = useStableCallback((peerId: string, stream: MediaStream) => {
     let audio = remoteAudioRefs.current[peerId];
@@ -83,7 +98,10 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     }
     audio.srcObject = stream;
     audio.muted = !isSpeakerOn;
-    void audio.play().catch(e => console.warn(`${LOG_PREFIX} Browser deferred remote audio for ${peerId}:`, e));
+    void audio.play().then(() => setAudioNeedsUnlock(false)).catch(e => {
+      setAudioNeedsUnlock(true);
+      console.warn(`${LOG_PREFIX} Browser deferred remote audio for ${peerId}:`, e);
+    });
   });
 
   const sendSignalingMessage = useStableCallback(async (targetId: string, signal: any) => {
@@ -93,9 +111,11 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     }
     console.log(`${LOG_PREFIX} Sending signal to ${targetId}:`, signal.type);
     try {
-      await fetch('/api/rooms/voice-signaling', {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Voice signaling requires an authenticated session.');
+      const response = await fetch('/api/rooms/voice-signaling', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({
           roomId: roomIdRef.current,
           senderId: localUserIdRef.current,
@@ -103,6 +123,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
           signal
         })
       });
+      if (!response.ok) throw new Error(`Voice signaling failed (${response.status}).`);
     } catch (err) {
       console.error(`${LOG_PREFIX} Failed to send voice signaling message:`, err);
     }
@@ -118,6 +139,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     const audio = remoteAudioRefs.current[peerId];
     if (audio) {
       audio.srcObject = null;
+      delete remoteAudioRefs.current[peerId];
     }
   }, []);
 
@@ -133,8 +155,12 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     initializedRef.current = false;
     latestPlayersRef.current = [];
     pendingCandidatesRef.current = {};
+    reconnectAttemptsRef.current = {};
     setIsInitialized(false);
     setPeerIds([]);
+    setVoiceStatus('idle');
+    setVoiceError(null);
+    setAudioNeedsUnlock(false);
   }, [closeSinglePeerConnection]);
 
   const updatePlayers = useStableCallback((players: LudoPlayer[]) => {
@@ -145,7 +171,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
 
     const localUserId = localUserIdRef.current;
     const isSpectator = !localStreamRef.current;
-    const otherPlayers = players.filter(p => p.userId !== localUserId);
+    const otherPlayers = players.filter(p => p.userId !== localUserId && !isBotPeer(p.userId));
     const existingPeerIds = Object.keys(peerConnectionsRef.current);
 
     // Remove connections to players who have left
@@ -163,7 +189,25 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
           iceServers: getIceServers()
         });
 
-        pc.onconnectionstatechange = () => console.log(`${LOG_PREFIX} Connection state with ${p.userId}: ${pc.connectionState}`);
+        pc.onconnectionstatechange = () => {
+          console.log(`${LOG_PREFIX} Connection state with ${p.userId}: ${pc.connectionState}`);
+          if (pc.connectionState === 'connected') {
+            reconnectAttemptsRef.current[p.userId] = 0;
+            setVoiceStatus('connected');
+            setVoiceError(null);
+          } else if (pc.connectionState === 'connecting') {
+            setVoiceStatus('connecting');
+          } else if (pc.connectionState === 'failed' && (reconnectAttemptsRef.current[p.userId] || 0) < 2) {
+            reconnectAttemptsRef.current[p.userId] = (reconnectAttemptsRef.current[p.userId] || 0) + 1;
+            pc.restartIce();
+            void pc.createOffer({ iceRestart: true }).then(offer => pc.setLocalDescription(offer)).then(() => {
+              if (pc.localDescription) return sendSignalingMessage(p.userId, { type: 'offer', sdp: pc.localDescription.toJSON() });
+            }).catch(error => console.error(`${LOG_PREFIX} ICE restart failed:`, error));
+          } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+            setVoiceStatus('failed');
+            setVoiceError('Players could not connect by voice. Tap retry.');
+          }
+        };
         
         if (isSpectator) {
           // Spectators only receive audio
@@ -182,7 +226,7 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
         // Resolve glare: only one peer (the one with the "smaller" userId) creates the offer.
         const shouldMakeOffer = localUserId < p.userId;
         
-        if (!isSpectator && shouldMakeOffer) {
+        if (shouldMakeOffer || isSpectator) {
           console.log(`${LOG_PREFIX} I have the smaller ID. Creating offer for ${p.userId}.`);
           pc.createOffer()
             .then(offer => pc.setLocalDescription(offer))
@@ -204,30 +248,42 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
   });
 
   const initializeVoiceChat = useStableCallback(async (userId: string, roomId: string, isSpectator: boolean = false) => {
-    if (isInitialized || localStreamRef.current) return;
+    if (initializedRef.current || localStreamRef.current) return;
     
     localUserIdRef.current = userId;
     roomIdRef.current = roomId;
+    spectatorRef.current = isSpectator;
+    setVoiceError(null);
 
     if (isSpectator) {
       console.log(`${LOG_PREFIX} Initializing voice chat for SPECTATOR ${userId} in room ${roomId}.`);
       initializedRef.current = true;
       setIsInitialized(true);
+      setVoiceStatus('connecting');
       updatePlayers(latestPlayersRef.current);
     } else {
       console.log(`${LOG_PREFIX} Initializing voice chat for PLAYER ${userId} in room ${roomId}.`);
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+        setVoiceStatus('requesting');
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Voice chat is not supported on this device.');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: false,
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
         console.log(`${LOG_PREFIX} Successfully acquired microphone stream.`);
         stream.getAudioTracks().forEach(track => track.enabled = true);
         localStreamRef.current = stream;
         initializedRef.current = true;
         setIsMuted(false);
         setIsInitialized(true);
+        setVoiceStatus('connecting');
         updatePlayers(latestPlayersRef.current);
       } catch (err) {
         console.error(`${LOG_PREFIX} Could not get microphone access:`, err);
         setIsInitialized(false);
+        const permissionBlocked = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+        setVoiceStatus(permissionBlocked ? 'blocked' : 'failed');
+        setVoiceError(permissionBlocked ? 'Microphone access is blocked. Allow it, then tap retry.' : 'The microphone could not start. Tap retry.');
       }
     }
   });
@@ -239,6 +295,13 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
 
         let pc = peerConnectionsRef.current[senderId];
         const isSpectator = !localStreamRef.current;
+
+        // ICE messages can race ahead of the SDP offer because signaling uses
+        // separate HTTP requests. Never discard them while the peer is forming.
+        if (signal.type === 'candidate' && !pc) {
+          (pendingCandidatesRef.current[senderId] ||= []).push(signal.candidate);
+          return;
+        }
         
         if (signal.type === 'offer' && !pc) {
             console.log(`${LOG_PREFIX} Received offer from new peer ${senderId}. Setting up connection.`);
@@ -247,7 +310,18 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
               iceServers: getIceServers()
             });
 
-            pc.onconnectionstatechange = () => console.log(`${LOG_PREFIX} Connection state with ${senderId}: ${pc.connectionState}`);
+            pc.onconnectionstatechange = () => {
+              console.log(`${LOG_PREFIX} Connection state with ${senderId}: ${pc.connectionState}`);
+              if (pc?.connectionState === 'connected') {
+                setVoiceStatus('connected');
+                setVoiceError(null);
+              } else if (pc?.connectionState === 'connecting') {
+                setVoiceStatus('connecting');
+              } else if (pc?.connectionState === 'failed' || pc?.connectionState === 'disconnected') {
+                setVoiceStatus('failed');
+                setVoiceError('Players could not connect by voice. Tap retry.');
+              }
+            };
             
             if (isSpectator) {
               pc.addTransceiver('audio', { direction: 'recvonly' });
@@ -314,6 +388,33 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     });
   }, [isSpeakerOn]);
 
+  const unlockAudio = useCallback(() => {
+    setIsSpeakerOn(true);
+    Object.values(remoteAudioRefs.current).forEach(audio => {
+      if (!audio) return;
+      audio.muted = false;
+      void audio.play().then(() => setAudioNeedsUnlock(false)).catch(() => setAudioNeedsUnlock(true));
+    });
+  }, []);
+
+  const retryVoiceChat = useStableCallback(() => {
+    const userId = localUserIdRef.current;
+    const roomId = roomIdRef.current;
+    const isSpectator = spectatorRef.current;
+    if (!userId || !roomId) return;
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    Object.keys(peerConnectionsRef.current).forEach(closeSinglePeerConnection);
+    pendingCandidatesRef.current = {};
+    reconnectAttemptsRef.current = {};
+    initializedRef.current = false;
+    setIsInitialized(false);
+    setPeerIds([]);
+    void initializeVoiceChat(userId, roomId, isSpectator);
+  });
+
   const value = {
     isMuted,
     isSpeakerOn,
@@ -323,6 +424,11 @@ export const VoiceChatProvider: React.FC<VoiceChatProviderProps> = ({ children }
     updatePlayers,
     closeVoiceChat,
     speakingPlayers,
+    voiceStatus,
+    voiceError,
+    retryVoiceChat,
+    unlockAudio,
+    audioNeedsUnlock,
   };
 
   return (
