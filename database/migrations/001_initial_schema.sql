@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS app_users (
   INDEX idx_users_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS user_profile_images (
+  user_id VARCHAR(191) PRIMARY KEY,
+  content_type VARCHAR(32) NOT NULL,
+  image_data MEDIUMBLOB NOT NULL,
+  updated_at BIGINT UNSIGNED NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS wallet_transactions (
   id VARCHAR(191) PRIMARY KEY,
   user_id VARCHAR(191) NOT NULL,

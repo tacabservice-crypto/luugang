@@ -34,7 +34,7 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
     });
     const [newPassword, setNewPassword] = useState('');
     const [uploadedAvatar, setUploadedAvatar] = useState('');
-    const [avatarType, setAvatarType] = useState<'emoji' | 'upload'>(user.avatar?.startsWith('/uploads/avatars/') || /^https?:\/\//i.test(user.avatar || '') ? 'upload' : 'emoji');
+    const [avatarType, setAvatarType] = useState<'emoji' | 'upload'>(user.avatar?.startsWith('/uploads/avatars/') || user.avatar?.startsWith('/api/profile-images/') || /^https?:\/\//i.test(user.avatar || '') ? 'upload' : 'emoji');
     const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const [isSaving, setIsSaving] = useState(false);

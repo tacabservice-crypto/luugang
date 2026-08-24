@@ -41,7 +41,6 @@ function getDistDirectory(): string {
 }
 import { initializeApp, cert, getApp } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
-import { getStorage } from 'firebase-admin/storage';
 import { migrateFirestoreToMySql } from './scripts/migrate-firestore-to-mysql.ts';
 import { getMySqlGameplayLockPool, getMySqlPool, isMySqlConfigured, testMySqlConnection } from './src/server/mysql.ts';
 import { cleanupMySqlRealtimeEvents, deleteMySqlGameRoom, ensureMySqlGameTimerLeadership, latestMySqlRealtimeEventId, listMySqlActiveGameRooms, listMySqlRealtimeEvents, loadMySqlGameRoom, loadMySqlRuntimeUser, loadRuntimeStoreFromMySql, mysqlRuntimeStoreMode, publishMySqlRealtimeEvent, saveMySqlGameRoom, saveRuntimeStoreToMySql } from './src/server/mysql-runtime-store.ts';
@@ -3826,6 +3825,36 @@ app.get('/api/users/:userId', async (req, res) => {
 });
 
 // Update profile
+let profileImageSchemaPromise: Promise<unknown> | null = null;
+function ensureProfileImageSchema() {
+  if (!profileImageSchemaPromise) {
+    profileImageSchemaPromise = getMySqlPool().execute(`CREATE TABLE IF NOT EXISTS user_profile_images (
+      user_id VARCHAR(191) PRIMARY KEY,
+      content_type VARCHAR(32) NOT NULL,
+      image_data MEDIUMBLOB NOT NULL,
+      updated_at BIGINT UNSIGNED NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+  }
+  return profileImageSchemaPromise;
+}
+
+app.get('/api/profile-images/:imageId', async (req, res) => {
+  const imageId = String(req.params.imageId || '');
+  if (!/^[a-f0-9]{20}$/i.test(imageId) || !isMySqlConfigured()) return res.status(404).end();
+  try {
+    await ensureProfileImageSchema();
+    const [rows] = await getMySqlPool().execute<any[]>('SELECT content_type, image_data FROM user_profile_images WHERE user_id = ? LIMIT 1', [imageId]);
+    const image = rows[0];
+    if (!image?.image_data) return res.status(404).end();
+    res.setHeader('Content-Type', image.content_type);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.send(image.image_data);
+  } catch (imageError) {
+    console.error('Profile image read failed:', imageError);
+    return res.status(503).end();
+  }
+});
+
 app.post('/api/users/:userId/avatar', express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '2mb' }), async (req, res) => {
   const user = store.users[req.params.userId];
   if (!user) return res.status(404).json({ error: 'User not found' });
@@ -3836,24 +3865,16 @@ app.post('/api/users/:userId/avatar', express.raw({ type: ['image/jpeg', 'image/
   }
   const safeUserId = crypto.createHash('sha256').update(user.id).digest('hex').slice(0, 20);
   const previousAvatar = String(user.avatar || '');
-  const bucketName = String(process.env.FIREBASE_STORAGE_BUCKET || (serviceAccount?.project_id ? `${serviceAccount.project_id}.firebasestorage.app` : '')).trim();
-  if (!bucketName) {
-    return res.status(503).json({ error: 'Permanent profile-photo storage is not configured.' });
-  }
-
   try {
-    const bucket = getStorage(getApp()).bucket(bucketName);
-    const objectName = `avatars/${safeUserId}/profile.${extension}`;
-    const downloadToken = crypto.randomUUID();
-    await bucket.file(objectName).save(req.body, {
-      resumable: false,
-      contentType: mime,
-      metadata: {
-        cacheControl: 'public, max-age=3600',
-        metadata: { firebaseStorageDownloadTokens: downloadToken },
-      },
-    });
-    user.avatar = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectName)}?alt=media&token=${downloadToken}`;
+    if (!isMySqlConfigured()) throw new Error('MySQL is not configured for permanent profile photos.');
+    await ensureProfileImageSchema();
+    const updatedAt = Date.now();
+    await getMySqlPool().execute(
+      `INSERT INTO user_profile_images (user_id, content_type, image_data, updated_at) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE content_type=VALUES(content_type), image_data=VALUES(image_data), updated_at=VALUES(updated_at)`,
+      [safeUserId, mime, req.body, updatedAt]
+    );
+    user.avatar = `/api/profile-images/${safeUserId}?v=${updatedAt}`;
   } catch (uploadError) {
     console.error('Permanent avatar upload failed:', uploadError);
     return res.status(503).json({ error: 'The profile photo could not be saved permanently. Please try again.' });
