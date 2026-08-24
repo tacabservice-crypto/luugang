@@ -1086,9 +1086,15 @@ export default function Dashboard({
         />
 
         {/* 3. CORE BETTING MATCHMAKER BLOCK */}
-        <div className="bg-slate-900/90 border border-white/10 rounded-2xl shadow-2xl space-y-0 relative">
-          <div className="bg-black/30 px-4 py-3 border-b border-white/10 flex items-center justify-between rounded-t-2xl">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Choose Bet Stake</span>
+        <div className="relative overflow-visible rounded-2xl border border-purple-500/25 bg-gradient-to-br from-slate-900/95 via-[#120b2d]/95 to-indigo-950/90 shadow-2xl shadow-purple-950/25">
+          <div className="flex items-center justify-between rounded-t-2xl border-b border-white/10 bg-black/30 px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-purple-400/20 bg-purple-500/15"><Users className="h-4 w-4 text-yellow-300" /></span>
+              <div>
+                <span className="block text-xs font-black uppercase tracking-wider text-slate-200">{t('privateMatchTitle')}</span>
+                <span className="block text-[9px] font-bold text-purple-300">Choose Bet Stake · {capacity} {t('players')} · {capacity === 4 && gameMode === 'team' ? '2v2' : t('soloMode')}</span>
+              </div>
+            </div>
             <button onClick={() => { setShowOnlinePlayers(true); void fetchOnlinePlayers(); }} className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
     <TrendingUp className="w-3.5 h-3.5" /> {availableHomePlayers.length} Online
 </button>
@@ -1262,14 +1268,15 @@ export default function Dashboard({
               </div>
             )}
           </div>
-        </div>
 
-
-        {/* 4. PRIVATE ROOM CODES WITH FRIENDS */}
-        <div className="bg-gradient-to-br from-purple-900/50 to-indigo-900/50 backdrop-blur-md border border-purple-700/50 rounded-2xl p-4 space-y-4 shadow-lg">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-yellow-400" />
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">{t('privateMatchTitle')}</h3>
+          {/* 4. PRIVATE ROOM CODES WITH FRIENDS — same game setup, one visual card */}
+          <div className="space-y-4 rounded-b-2xl border-t border-purple-400/20 bg-gradient-to-r from-purple-950/35 to-indigo-950/35 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-yellow-400" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">{t('privateMatchTitle')}</h3>
+            </div>
+            <span className="rounded-lg border border-white/10 bg-black/25 px-2 py-1 text-[9px] font-black text-purple-200">${selectedStake} · {capacity}P · {capacity === 4 && gameMode === 'team' ? '2v2' : t('soloMode')}</span>
           </div>
 
           <div className="text-xs text-slate-300 font-medium leading-normal bg-black/40 p-3 rounded-xl border border-purple-800/60 text-center shadow-inner">
@@ -1311,6 +1318,7 @@ export default function Dashboard({
               </button>
             </form>
           </div>
+        </div>
         </div>
 
         {/* ACTIVE GAMES (SPECTATOR) LIST */}
