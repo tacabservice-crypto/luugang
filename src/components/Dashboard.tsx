@@ -41,6 +41,7 @@ import AvatarDisplay from './AvatarDisplay';
 import LiveAdBanner from './LiveAdBanner';
 import { useNavigate } from 'react-router-dom';
 import { NATIVE_BACK_EVENT } from './NativeBackHandler';
+import { usePullRefreshBlock } from '../hooks/useBodyScrollLock';
 
 interface DashboardProps {
   noticeSlot?: React.ReactNode;
@@ -88,6 +89,7 @@ export default function Dashboard({
   const [customStakeInput, setCustomStakeInput] = useState('');
   const [customStakeError, setCustomStakeError] = useState('');
   const [isStakeDropdownOpen, setIsStakeDropdownOpen] = useState<boolean>(false);
+  usePullRefreshBlock(isStakeDropdownOpen);
   const [isSettingsDropdownOpen, setIsSettingsDropdownOpen] = useState<boolean>(false);
   const [showAboutUs, setShowAboutUs] = useState<boolean>(false);
   const [showHelp, setShowHelp] = useState<boolean>(false);
@@ -1126,10 +1128,6 @@ export default function Dashboard({
           <div className="p-4 space-y-4">
             {/* COLLAPSIBLE / DROPDOWN SELECTOR FOR STAKE */}
             <div className="relative rounded-2xl border border-yellow-300/30 bg-gradient-to-r from-yellow-400/[0.08] via-purple-500/[0.08] to-blue-500/[0.08] p-2.5 shadow-[0_0_24px_rgba(250,204,21,0.08)]" ref={dropdownRef}>
-              <div className="mb-2 flex items-center justify-between px-1">
-                <div><span className="block text-[9px] font-black uppercase tracking-[0.2em] text-yellow-300">{language === 'so' ? 'Dooro Lacagta Ciyaarta' : 'Choose Game Stake'}</span><span className="mt-0.5 block text-[9px] font-semibold text-slate-400">{language === 'so' ? 'Lacagtan ayaa lagu abuurayaa ama lagu raadinayaa ciyaarta' : 'This amount is used to create or search for your match'}</span></div>
-                <span className="rounded-xl border border-yellow-300/30 bg-yellow-400/10 px-2.5 py-1 font-mono text-sm font-black text-yellow-200">${selectedStake.toFixed(2)}</span>
-              </div>
               {/* Dropdown Trigger Button */}
               <button
                 type="button"

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 let activeLocks = 0;
+let activePullRefreshBlocks = 0;
 let lockedScrollY = 0;
 let originalBodyStyles: Partial<CSSStyleDeclaration> | null = null;
 
@@ -43,6 +44,20 @@ export function useBodyScrollLock(active = true) {
       body.style.width = saved.width || '';
       body.style.overflow = saved.overflow || '';
       window.scrollTo(0, lockedScrollY);
+    };
+  }, [active]);
+}
+
+export function usePullRefreshBlock(active = true) {
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return;
+    const body = document.body;
+    activePullRefreshBlocks += 1;
+    body.dataset.ludosomPullRefreshBlocked = 'true';
+    window.dispatchEvent(new Event('ludosom:overlay-lock'));
+    return () => {
+      activePullRefreshBlocks = Math.max(0, activePullRefreshBlocks - 1);
+      if (activePullRefreshBlocks === 0) delete body.dataset.ludosomPullRefreshBlocked;
     };
   }, [active]);
 }

@@ -13,7 +13,8 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    const overlayIsOpen = () => document.body.dataset.ludosomOverlayOpen === 'true';
+    const overlayIsOpen = () => document.body.dataset.ludosomOverlayOpen === 'true'
+      || document.body.dataset.ludosomPullRefreshBlocked === 'true';
     const cancelPull = () => {
       startYRef.current = null;
       distanceRef.current = 0;
