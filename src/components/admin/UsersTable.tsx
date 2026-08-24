@@ -15,7 +15,7 @@ interface UsersTableProps {
 
 const UserAvatar: React.FC<{ user: UserProfile }> = ({ user }) => {
   const avatar = String(user.avatar || '').trim();
-  const isImage = /^(https?:\/\/|data:image\/|blob:)/i.test(avatar);
+  const isImage = /^(https?:\/\/|data:image\/|blob:|\/api\/profile-images\/|\/uploads\/)/i.test(avatar);
   return (
     <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-gray-200 bg-gray-100 text-xl shadow-sm">
       {isImage ? <img src={avatar} alt={user.username || 'User'} className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : (avatar || '🎮')}
