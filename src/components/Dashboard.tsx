@@ -24,6 +24,8 @@ import {
   MoreVertical,
   HelpCircle,
   Download,
+  CalendarDays,
+  MessageCircle,
   X
 } from 'lucide-react';
 import { UserProfile, GameRoom } from '../types/game';
@@ -42,6 +44,7 @@ import LiveAdBanner from './LiveAdBanner';
 import { useNavigate } from 'react-router-dom';
 import { NATIVE_BACK_EVENT } from './NativeBackHandler';
 import { usePullRefreshBlock } from '../hooks/useBodyScrollLock';
+import { auth } from '../firebase-client';
 
 interface DashboardProps {
   noticeSlot?: React.ReactNode;
@@ -217,6 +220,28 @@ export default function Dashboard({
 
   const [onlinePlayers, setOnlinePlayers] = useState<any[]>([]);
   const [showOnlinePlayers, setShowOnlinePlayers] = useState(false);
+  const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
+  const [playerMessage, setPlayerMessage] = useState('');
+  const [messageState, setMessageState] = useState<'idle' | 'sending' | 'sent'>('idle');
+
+  const sendPlayerMessage = async (playerId: string) => {
+    const text = playerMessage.trim();
+    if (!text || messageState === 'sending') return;
+    setMessageState('sending');
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error(language === 'so' ? 'Fadlan mar kale gal koontada.' : 'Please sign in again.');
+      const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(playerId)}/message`), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ text }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Message could not be sent.');
+      setPlayerMessage('');
+      setMessageState('sent');
+      window.setTimeout(() => setMessageState('idle'), 1800);
+    } catch (error) {
+      setMessageState('idle');
+      alert(error instanceof Error ? error.message : 'Message could not be sent.');
+    }
+  };
 
   useEffect(() => {
     const handleNativeBack = (event: Event) => {
@@ -1077,13 +1102,19 @@ export default function Dashboard({
                   <div className="py-8 text-center text-[10px] font-bold text-slate-500">{language === 'so' ? 'Hadda ma jiro ciyaaryahan Bogga Hore jooga.' : 'No players are currently waiting on Home.'}</div>
                 ) : availableHomePlayers.map(player => {
                   const status = inviteStatus[player.id] || 'idle';
+                  const expanded = expandedPlayerId === player.id && player.allowProfilePreview !== false;
+                  const coverClass = player.profileCover === 'ocean' ? 'from-cyan-600 to-blue-800' : player.profileCover === 'sunset' ? 'from-orange-500 to-fuchsia-800' : player.profileCover === 'emerald' ? 'from-emerald-500 to-teal-900' : 'from-purple-700 to-indigo-800';
                   return (
-                    <div key={player.id} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.035] px-2 py-1.5">
-                      <AvatarDisplay avatar={player.avatar} username={player.username} className="h-8 w-8 shrink-0 rounded-lg" />
-                      <div className="min-w-0 flex-1">
+                    <div key={player.id} className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.035]">
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                      <button type="button" disabled={player.allowProfilePreview === false} onClick={() => { setExpandedPlayerId(expanded ? null : player.id); setPlayerMessage(''); setMessageState('idle'); }} className="relative shrink-0 disabled:cursor-default">
+                        <AvatarDisplay avatar={player.avatar} username={player.username} className="h-8 w-8 rounded-lg" />
+                        {player.allowProfilePreview !== false && <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-[#0b1220] bg-blue-400" />}
+                      </button>
+                      <button type="button" disabled={player.allowProfilePreview === false} onClick={() => setExpandedPlayerId(expanded ? null : player.id)} className="min-w-0 flex-1 text-left disabled:cursor-default">
                         <div className="truncate text-[11px] font-black text-white">{player.username}</div>
                         <div className="flex items-center gap-1 text-[8px] font-bold text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Online · Home</div>
-                      </div>
+                      </button>
                       <button
                         disabled={status !== 'idle'}
                         onClick={() => void handleChallengePlayer(player.id, selectedStake)}
@@ -1091,6 +1122,14 @@ export default function Dashboard({
                       >
                         {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent ✓' : 'Challenge'}
                       </button>
+                      </div>
+                      {expanded && <div className="border-t border-white/10 bg-[#080d18]">
+                        <div className={`relative h-16 bg-gradient-to-r ${coverClass}`}><div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_10%,rgba(255,255,255,.28),transparent_35%)]" /><AvatarDisplay avatar={player.avatar} username={player.username} className="absolute -bottom-5 left-3 h-12 w-12 rounded-xl border-2 border-[#080d18] bg-slate-900 shadow-lg" /></div>
+                        <div className="px-3 pb-3 pt-7">
+                          <div className="flex items-start justify-between gap-2"><div><div className="text-sm font-black text-white">{player.username}</div><div className="mt-1 flex items-center gap-1 text-[8px] font-bold text-slate-400"><CalendarDays className="h-3 w-3" />{player.createdAt ? `${language === 'so' ? 'Ku biiray' : 'Joined'} ${new Date(player.createdAt).toLocaleDateString(language === 'so' ? 'so-SO' : 'en-US', { month: 'short', year: 'numeric' })}` : (language === 'so' ? 'Xubin LudoSom ah' : 'LudoSom player')}</div></div><div className="flex gap-1.5"><span className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-center text-[8px] font-bold text-emerald-300"><b className="block text-xs">{player.winCount || 0}</b>{language === 'so' ? 'Guul' : 'Wins'}</span><span className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-center text-[8px] font-bold text-rose-300"><b className="block text-xs">{player.lossCount || 0}</b>{language === 'so' ? 'Guuldarro' : 'Defeats'}</span></div></div>
+                          {player.allowDirectMessages !== false ? <div className="mt-3 flex gap-1.5"><input value={playerMessage} maxLength={160} onChange={event => setPlayerMessage(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void sendPlayerMessage(player.id); }} placeholder={language === 'so' ? 'Fariin gaaban u qor…' : 'Write a short message…'} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-[10px] text-white outline-none focus:border-blue-400" /><button type="button" disabled={!playerMessage.trim() || messageState === 'sending'} onClick={() => void sendPlayerMessage(player.id)} className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-[9px] font-black text-white disabled:opacity-40"><MessageCircle className="h-3 w-3" />{messageState === 'sent' ? '✓' : language === 'so' ? 'Dir' : 'Send'}</button></div> : <p className="mt-3 rounded-lg bg-white/[.04] px-2.5 py-2 text-[9px] font-semibold text-slate-500">{language === 'so' ? 'Ciyaaryahankani fariimaha wuu xiray.' : 'This player has turned messages off.'}</p>}
+                        </div>
+                      </div>}
                     </div>
                   );
                 })}

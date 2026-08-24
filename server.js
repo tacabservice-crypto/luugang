@@ -3427,7 +3427,8 @@ app.get("/api/admin/migrate-users", async (req, res) => {
             balance: 1,
             // New user bonus
             winCount: 0,
-            lossCount: 0
+            lossCount: 0,
+            createdAt: Date.now()
           };
           store.users[userId] = newUser;
           addTransaction(userId, "deposit", 1, void 0, "Welcome bonus (migrated user)");
@@ -3691,6 +3692,7 @@ app.post("/api/auth/login", verifyFirebaseToken, checkVipStatus, async (req, res
     balance: WELCOME_BONUS,
     winCount: 0,
     lossCount: 0,
+    createdAt: Date.now(),
     linkedAgentId,
     // Add the linked agent ID
     appliedPromoCode: normalizedPromoCode || void 0,
@@ -3876,6 +3878,10 @@ app.get("/api/users/online", async (req, res) => {
         avatar: u.avatar,
         winCount: u.winCount || 0,
         lossCount: u.lossCount || 0,
+        createdAt: u.createdAt || Number(/^user_(\d+)/.exec(u.id)?.[1]) || void 0,
+        profileCover: u.profileCover || "royal",
+        allowProfilePreview: u.allowProfilePreview !== false,
+        allowDirectMessages: u.allowDirectMessages !== false,
         balance: u.balance,
         isSimulated: false,
         status,
@@ -3968,13 +3974,32 @@ app.post("/api/users/:userId/update", async (req, res) => {
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
-  const { username, avatar, isOfflinePreference } = req.body;
+  const { username, avatar, isOfflinePreference, profileCover, allowProfilePreview, allowDirectMessages } = req.body;
   if (username) user.username = username.trim().substring(0, 20);
   if (avatar) user.avatar = avatar;
   if (typeof isOfflinePreference === "boolean") user.isOfflinePreference = isOfflinePreference;
+  if (["royal", "ocean", "sunset", "emerald"].includes(profileCover)) user.profileCover = profileCover;
+  if (typeof allowProfilePreview === "boolean") user.allowProfilePreview = allowProfilePreview;
+  if (typeof allowDirectMessages === "boolean") user.allowDirectMessages = allowDirectMessages;
   await saveStoreAndWait();
   broadcastUserUpdate(user.id);
   res.json(user);
+});
+var directMessageCooldowns = /* @__PURE__ */ new Map();
+app.post("/api/users/:userId/message", verifyFirebaseToken, (req, res) => {
+  const receiver = store.users[req.params.userId];
+  const sender = Object.values(store.users).find((candidate) => candidate.firebaseUid === req.user.uid);
+  const text = String(req.body?.text || "").trim().replace(/\s+/g, " ").slice(0, 160);
+  if (!receiver || !sender) return res.status(404).json({ error: "Player not found." });
+  if (receiver.id === sender.id) return res.status(400).json({ error: "You cannot message yourself." });
+  if (receiver.allowDirectMessages === false) return res.status(403).json({ error: "This player is not accepting messages." });
+  if (!text) return res.status(400).json({ error: "Write a message first." });
+  const cooldownKey = `${sender.id}:${receiver.id}`;
+  const now2 = Date.now();
+  if (now2 - (directMessageCooldowns.get(cooldownKey) || 0) < 3e3) return res.status(429).json({ error: "Please wait before sending another message." });
+  directMessageCooldowns.set(cooldownKey, now2);
+  sendEventToUser(receiver.id, "direct_message", { senderId: sender.id, senderName: sender.username, senderAvatar: sender.avatar, text, timestamp: Date.now() });
+  res.json({ success: true });
 });
 app.post("/api/users/:userId/status", async (req, res) => {
   const user = store.users[req.params.userId];

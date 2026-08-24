@@ -3,7 +3,7 @@ import { UserProfile } from '../types/game';
 import { isFullAdmin } from '../utils/admin';
 import FirebasePasswordSettings from './FirebasePasswordSettings';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
-import { Camera, Check, LockKeyhole, Save, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react';
+import { Camera, Check, Eye, LockKeyhole, MessageCircle, Save, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react';
 import AvatarDisplay from './AvatarDisplay';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -31,6 +31,9 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
         username: user.username,
         avatar: user.avatar,
         role: user.role || 'player',
+        profileCover: user.profileCover || 'royal',
+        allowProfilePreview: user.allowProfilePreview !== false,
+        allowDirectMessages: user.allowDirectMessages !== false,
     });
     const [newPassword, setNewPassword] = useState('');
     const [uploadedAvatar, setUploadedAvatar] = useState('');
@@ -112,6 +115,15 @@ const UserEditModal: React.FC<UserEditModalProps> = ({ user, onClose, onSave, is
                 <div className="rounded-2xl border border-white/10 bg-white/[.045] p-4"><label className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400"><UserRound className="h-3.5 w-3.5 text-purple-300" /> {so ? 'Magaca Ciyaarta' : 'Player Name'}</label><input type="text" name="username" value={formData.username} onChange={event => setFormData(prev => ({ ...prev, username: event.target.value }))} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none transition focus:border-purple-400 focus:ring-2 focus:ring-purple-500/15" /></div>
 
                 {!isAdmin && <>
+                    <div className="rounded-2xl border border-white/10 bg-white/[.045] p-4">
+                        <h3 className="text-xs font-black">{so ? 'Bogga Ciyaaryahanka' : 'Player Card'}</h3>
+                        <p className="mt-1 text-[9px] text-slate-500">{so ? 'Dooro cover-ka iyo cidda arki karta xogtaada.' : 'Choose your cover and who can open your details.'}</p>
+                        <div className="mt-3 grid grid-cols-4 gap-2">{['royal','ocean','sunset','emerald'].map(cover => <button key={cover} type="button" aria-label={cover} onClick={() => setFormData(previous => ({...previous, profileCover: cover}))} className={`h-10 rounded-xl border ${formData.profileCover === cover ? 'border-yellow-300 ring-2 ring-yellow-300/20' : 'border-white/10'} ${cover === 'royal' ? 'bg-gradient-to-r from-purple-700 to-indigo-600' : cover === 'ocean' ? 'bg-gradient-to-r from-cyan-600 to-blue-700' : cover === 'sunset' ? 'bg-gradient-to-r from-orange-500 to-fuchsia-700' : 'bg-gradient-to-r from-emerald-500 to-teal-800'}`} />)}</div>
+                        <div className="mt-4 space-y-2">
+                            <label className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2.5"><span className="flex items-center gap-2 text-[10px] font-bold"><Eye className="h-4 w-4 text-purple-300" />{so ? 'Avatar-kayga xog ha laga furo' : 'Allow profile preview'}</span><input type="checkbox" checked={formData.allowProfilePreview} onChange={event => setFormData(previous => ({...previous, allowProfilePreview: event.target.checked}))} className="h-4 w-4 accent-purple-500" /></label>
+                            <label className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2.5"><span className="flex items-center gap-2 text-[10px] font-bold"><MessageCircle className="h-4 w-4 text-blue-300" />{so ? 'Dadku fariin ha ii soo diri karaan' : 'Allow player messages'}</span><input type="checkbox" checked={formData.allowDirectMessages} onChange={event => setFormData(previous => ({...previous, allowDirectMessages: event.target.checked}))} className="h-4 w-4 accent-blue-500" /></label>
+                        </div>
+                    </div>
                     <div className="rounded-2xl border border-white/10 bg-white/[.045] p-4"><div className="mb-3 flex items-center justify-between"><div><h3 className="text-xs font-black">{so ? 'Dooro Astaantaada' : 'Choose Your Avatar'}</h3><p className="mt-1 text-[9px] font-semibold text-slate-500">{so ? 'Emoji ama sawir kuu gaar ah' : 'Use an emoji or your own photo'}</p></div><div className="flex rounded-xl border border-white/10 bg-black/25 p-1"><button type="button" onClick={() => setAvatarType('emoji')} className={`rounded-lg px-3 py-1.5 text-[9px] font-black transition ${avatarType === 'emoji' ? 'bg-purple-500 text-white shadow' : 'text-slate-400'}`}>Emoji</button><button type="button" onClick={() => { setAvatarType('upload'); fileInputRef.current?.click(); }} className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[9px] font-black transition ${avatarType === 'upload' ? 'bg-purple-500 text-white shadow' : 'text-slate-400'}`}><Camera className="h-3 w-3" /> {so ? 'Sawir' : 'Photo'}</button></div></div>
                     {avatarType === 'emoji' ? <div className="grid max-h-52 grid-cols-7 gap-2 overflow-y-auto rounded-xl border border-white/[.06] bg-black/20 p-2.5 sm:grid-cols-8">{AVATARS.map(avatar => <button type="button" key={avatar} onClick={() => handleAvatarSelect(avatar)} className={`relative flex aspect-square items-center justify-center rounded-xl text-xl transition active:scale-90 ${formData.avatar === avatar ? 'bg-gradient-to-br from-purple-500 to-blue-500 ring-2 ring-yellow-300/70' : 'bg-white/[.04] hover:bg-white/10'}`}>{avatar.startsWith('/') ? <img src={avatar} alt="LudoSom avatar" className="h-8 w-8 rounded-lg object-cover" /> : avatar}{formData.avatar === avatar && <Check className="absolute right-0.5 top-0.5 h-2.5 w-2.5 text-yellow-200" />}</button>)}</div> : <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploadingAvatar} className="flex w-full flex-col items-center justify-center rounded-2xl border border-dashed border-blue-400/30 bg-blue-500/[.06] px-4 py-7 text-center transition hover:bg-blue-500/10 disabled:opacity-60"><Camera className="h-7 w-7 text-blue-300" /><span className="mt-2 text-xs font-black">{isUploadingAvatar ? (so ? 'Kaydinaya sawirka…' : 'Uploading photo…') : (so ? 'Ka dooro sawir telefoonka' : 'Choose a photo from your device')}</span><span className="mt-1 text-[9px] font-semibold text-slate-500">JPEG, PNG, WebP · Max 2MB</span></button>}
                     </div>

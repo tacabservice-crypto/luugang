@@ -15,6 +15,10 @@ export interface UserProfile {
   winCount: number;
   lossCount: number;
   isOfflinePreference?: boolean;
+  createdAt?: number;
+  profileCover?: string;
+  allowProfilePreview?: boolean;
+  allowDirectMessages?: boolean;
   vip?: { tier: string; expires: number; };
   role?: string;
   password?: string; // In a real app, this should be securely hashed.

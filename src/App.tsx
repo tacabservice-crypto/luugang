@@ -871,6 +871,13 @@ export default function App() {
       window.dispatchEvent(new Event('refresh_online_players'));
     });
 
+    eventSource.addEventListener('direct_message', (e: any) => {
+      try {
+        const data = JSON.parse(e.data) as { senderName?: string; text?: string };
+        setErrorToast(`💬 ${data.senderName || 'Player'}: ${data.text || ''}`);
+      } catch { /* Ignore malformed realtime messages. */ }
+    });
+
     eventSource.addEventListener('voice_signal', (e: any) => {
       try {
         const data = JSON.parse(e.data);
