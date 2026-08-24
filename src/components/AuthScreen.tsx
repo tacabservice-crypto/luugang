@@ -135,7 +135,7 @@ export default function AuthScreen({ onLoginSuccess, initialError, embedded = fa
           username: pendingSignup?.username || (onboardingComplete ? firebaseUser.displayName || undefined : (isLogin ? undefined : username)),
           email: verifiedPhone ? undefined : firebaseUser.email,
           phone: verifiedPhone || firebaseUser.phoneNumber || undefined,
-          avatar: pendingSignup?.avatar || (onboardingComplete ? undefined : (isLogin ? undefined : avatar)),
+          avatar: pendingSignup?.avatar || firebaseUser.photoURL || (onboardingComplete ? undefined : (isLogin ? undefined : avatar)),
           // Keep the entered promo code on a retry/login too. Firebase Auth may
           // have created the account even when the first backend sync failed.
           promoCode: pendingSignup?.promoCode || promoCode.trim() || undefined,

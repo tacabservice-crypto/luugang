@@ -48,7 +48,7 @@ export const useAuth = () => {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${idToken}`,
             },
-            body: JSON.stringify({ email: authUser.email }),
+            body: JSON.stringify({ email: authUser.email, avatar: authUser.photoURL || undefined }),
           });
 
           if (res.ok) {

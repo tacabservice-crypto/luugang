@@ -504,7 +504,7 @@ export default function App() {
               response = await fetchWithTimeout(`${API_BASE_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ email: firebaseUser.email, username: undefined, avatar: undefined }),
+                body: JSON.stringify({ email: firebaseUser.email, username: undefined, avatar: firebaseUser.photoURL || undefined }),
               }, 8_000);
               if (response.ok) {
                 profileData = await response.json();

@@ -339,7 +339,31 @@ function normalizePromoCode(value: unknown): string {
 
 function normalizeAppAvatar(value: unknown): string {
   const avatar = typeof value === 'string' ? value.trim() : '';
-  return /^https?:\/\//i.test(avatar) || !avatar ? '🎮' : avatar;
+  if (!avatar) return '🎮';
+  if (!/^https?:\/\//i.test(avatar)) return avatar;
+  try {
+    const hostname = new URL(avatar).hostname.toLowerCase();
+    return hostname === 'googleusercontent.com' || hostname.endsWith('.googleusercontent.com') ? avatar : '🎮';
+  } catch {
+    return '🎮';
+  }
+}
+
+function verifiedGoogleAvatar(req: any): string {
+  if (req.user?.firebase?.sign_in_provider !== 'google.com') return '';
+  const picture = normalizeAppAvatar(req.user?.picture);
+  return /^https?:\/\//i.test(picture) ? picture : '';
+}
+
+function shouldUseGoogleAvatar(currentAvatar: unknown): boolean {
+  const avatar = typeof currentAvatar === 'string' ? currentAvatar.trim() : '';
+  if (!avatar || avatar === '🎮') return true;
+  try {
+    const hostname = new URL(avatar).hostname.toLowerCase();
+    return hostname === 'googleusercontent.com' || hostname.endsWith('.googleusercontent.com');
+  } catch {
+    return false;
+  }
 }
 
 async function findAgentDocsByPromoCode(agentsRef: FirebaseFirestore.CollectionReference, promoCode: string) {
@@ -3430,6 +3454,8 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     // authenticated this existing account, including legacy profiles created
     // before emailOtpVerifiedAt was introduced.
     foundUser.avatar = normalizeAppAvatar(foundUser.avatar);
+    const googleAvatar = verifiedGoogleAvatar(req);
+    if (googleAvatar && shouldUseGoogleAvatar(foundUser.avatar)) foundUser.avatar = googleAvatar;
     foundUser.phone = foundUser.phone || aliasPhone || req.user.phone_number || phone || undefined;
     if (!foundUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
@@ -3449,6 +3475,8 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     persistedUser.email = persistedUser.email || email || undefined;
     persistedUser.phone = persistedUser.phone || aliasPhone || req.user.phone_number || phone || undefined;
     persistedUser.avatar = normalizeAppAvatar(persistedUser.avatar);
+    const googleAvatar = verifiedGoogleAvatar(req);
+    if (googleAvatar && shouldUseGoogleAvatar(persistedUser.avatar)) persistedUser.avatar = googleAvatar;
     if (!persistedUser.linkedAgentId && normalizePromoCode(promoCode)) {
       const linkedAgent = await resolveActiveAgentByPromoCode(promoCode);
       if (!linkedAgent) return res.status(400).json({ error: 'Invalid, expired, or inactive promo code.' });
@@ -3558,7 +3586,7 @@ app.post('/api/auth/login', verifyFirebaseToken, checkVipStatus, async (req: any
     username: cleanUsername,
     email: isPhonePasswordLogin ? undefined : email?.trim().toLowerCase() || undefined,
     phone: aliasPhone || req.user.phone_number || (typeof phone === 'string' ? phone.trim() : undefined),
-    avatar: normalizeAppAvatar(avatar),
+    avatar: normalizeAppAvatar(avatar || verifiedGoogleAvatar(req)),
     balance: WELCOME_BONUS,
     winCount: 0,
     lossCount: 0,
