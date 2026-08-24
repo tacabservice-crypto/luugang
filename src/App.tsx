@@ -181,6 +181,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [authSheetOpen, setAuthSheetOpen] = useState(false);
   const [authSheetReason, setAuthSheetReason] = useState('');
+  const [authViewport, setAuthViewport] = useState(() => ({ height: window.innerHeight, top: 0 }));
   const guestIdRef = useRef(`guest_${sessionStorage.getItem('ludosom_guest_id') || crypto.randomUUID()}`);
   useEffect(() => {
     sessionStorage.setItem('ludosom_guest_id', guestIdRef.current.replace(/^guest_/, ''));
@@ -189,6 +190,26 @@ export default function App() {
     setAuthSheetReason(reason);
     setAuthSheetOpen(true);
   };
+
+  useEffect(() => {
+    if (!authSheetOpen) return;
+    const viewport = window.visualViewport;
+    const syncAuthViewport = () => {
+      setAuthViewport({
+        height: Math.round(viewport?.height || window.innerHeight),
+        top: Math.round(viewport?.offsetTop || 0),
+      });
+    };
+    syncAuthViewport();
+    viewport?.addEventListener('resize', syncAuthViewport);
+    viewport?.addEventListener('scroll', syncAuthViewport);
+    window.addEventListener('resize', syncAuthViewport);
+    return () => {
+      viewport?.removeEventListener('resize', syncAuthViewport);
+      viewport?.removeEventListener('scroll', syncAuthViewport);
+      window.removeEventListener('resize', syncAuthViewport);
+    };
+  }, [authSheetOpen]);
 
   // Connectivity is separate from authentication. Losing mobile data/Wi-Fi
   // must never be interpreted as a logout or send a verified user to sign-in.
@@ -1531,8 +1552,18 @@ export default function App() {
   }
 
   const renderAuthSheet = () => authSheetOpen ? (
-    <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center" onMouseDown={event => { if (event.target === event.currentTarget) setAuthSheetOpen(false); }}>
-      <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-[28px] border border-white/10 bg-[#0d0824] shadow-2xl sm:rounded-[28px]">
+    <div
+      className="fixed inset-x-0 z-[1000] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center"
+      style={{ height: `${authViewport.height}px`, top: `${authViewport.top}px` }}
+      onMouseDown={event => { if (event.target === event.currentTarget) setAuthSheetOpen(false); }}
+    >
+      <div
+        className="h-full max-h-full w-full max-w-md overflow-y-auto overscroll-contain touch-pan-y scroll-pb-32 rounded-t-[28px] border border-white/10 bg-[#0d0824] pb-[env(safe-area-inset-bottom)] shadow-2xl [-webkit-overflow-scrolling:touch] sm:h-auto sm:max-h-[92dvh] sm:rounded-[28px]"
+        onFocusCapture={event => {
+          const field = event.target as HTMLElement;
+          window.setTimeout(() => field.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }), 280);
+        }}
+      >
         <div className="mx-auto mt-2.5 h-1 w-12 rounded-full bg-white/20 sm:hidden" />
         {authSheetReason && <p className="mx-5 mt-5 rounded-xl border border-purple-400/20 bg-purple-500/10 px-3 py-2.5 text-center text-[11px] font-bold text-purple-100">{authSheetReason}</p>}
         <AuthScreen embedded onClose={() => setAuthSheetOpen(false)} onLoginSuccess={handleLoginSuccess} initialError={error} />
