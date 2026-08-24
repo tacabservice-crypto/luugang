@@ -798,11 +798,22 @@ export default function App() {
 
     eventSource.addEventListener('game_invite_declined', (e: any) => {
       try {
-        const data = JSON.parse(e.data) as { receiverName: string; roomId?: string; reason?: string };
-        setActiveRoom(null);
-        setMatchmakingState({ isQueued: false, betAmount: 0 });
-        localStorage.removeItem('ludo_active_room_id');
-        navigate('/', { replace: true });
+        const data = JSON.parse(e.data) as { receiverName: string; roomId?: string; reason?: string; attempt?: number; final?: boolean; room?: GameRoom };
+        const isFinal = data.final !== false;
+        if (isFinal) {
+          setActiveRoom(null);
+          setMatchmakingState({ isQueued: false, betAmount: 0 });
+          localStorage.removeItem('ludo_active_room_id');
+          navigate('/', { replace: true });
+        } else {
+          setActiveRoom(previous => data.room || (previous ? {
+            ...previous,
+            challengeStatus: 'declined',
+            challengeAttempt: data.attempt || previous.challengeAttempt || 1,
+            challengeReason: data.reason || 'declined',
+            invitedUserId: undefined,
+          } : previous));
+        }
         setErrorToast(data.reason === 'timeout'
           ? `⏱️ ${data.receiverName} kama jawaabin challenge-ka.`
           : data.reason === 'accepted_another'
@@ -1060,6 +1071,28 @@ export default function App() {
       setActiveRoom(roomData);
     } catch (err: any) {
       setErrorToast(userErrorMessage(err, 'Could not join the lobby.'));
+    }
+  };
+
+  const handleRetryRoom = async () => {
+    if (!user || !activeRoom) return;
+    if (activeRoom.challengeStatus !== 'declined') {
+      setActiveRoom(previous => previous ? { ...previous, rejectionReason: undefined } : null);
+      await handleJoinPrivateRoom(activeRoom.id);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/rooms/challenge/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, roomId: activeRoom.id })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Challenge-ka dib looma diri karin.');
+      setActiveRoom(result.room);
+    } catch (err: any) {
+      setErrorToast(userErrorMessage(err, 'Challenge-ka dib looma diri karin.'));
     }
   };
 
@@ -1750,13 +1783,7 @@ export default function App() {
             onMoveToken={handleMoveToken}
             onSendChat={handleSendChat}
             onProfileUpdate={handleProfileUpdate}
-            onRetryJoin={() => {
-              if (activeRoom) {
-                // Clear the rejection reason and retry joining
-                setActiveRoom(prev => prev ? { ...prev, rejectionReason: undefined } : null);
-                handleJoinPrivateRoom(activeRoom.id);
-              }
-            }}
+            onRetryJoin={handleRetryRoom}
           />
         {renderWallet()}
         {renderOverlays()}
@@ -1785,12 +1812,7 @@ export default function App() {
             onMoveToken={handleMoveToken}
             onSendChat={handleSendChat}
             onProfileUpdate={handleProfileUpdate}
-            onRetryJoin={() => {
-              if (activeRoom) {
-                setActiveRoom(prev => prev ? { ...prev, rejectionReason: undefined } : null);
-                handleJoinPrivateRoom(activeRoom.id);
-              }
-            }}
+            onRetryJoin={handleRetryRoom}
           />
           {renderWallet()}
           {renderOverlays()}

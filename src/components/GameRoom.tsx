@@ -1858,14 +1858,25 @@ export default function GameRoomView({
               ))}
 
               {/* Empty slot indicators */}
-              {[...Array(Math.max(0, (room.capacity || 2) - room.players.length))].map((_, idx) => (
-                <div 
+              {[...Array(Math.max(0, (room.capacity || 2) - room.players.length))].map((_, idx) => {
+                const isChallengeSlot = idx === 0 && myPlayer?.isHost && Boolean(room.challengeTargetUserId);
+                const canRetryChallenge = isChallengeSlot && room.challengeStatus === 'declined' && (room.challengeAttempt || 1) < 3;
+                return (
+                <div
                   key={idx} 
                   className="bg-black/20 border border-dashed border-white/10 p-2 rounded-xl flex items-center justify-center text-slate-500 text-[9px] font-semibold"
                 >
-                  ⌛ Open Slot
+                  {canRetryChallenge ? (
+                    <button onClick={onRetryJoin} className="rounded-lg bg-amber-500/15 px-3 py-1 font-black text-amber-300 transition active:scale-95">
+                      ↻ Retry
+                    </button>
+                  ) : isChallengeSlot && room.challengeStatus === 'pending' ? (
+                    <span className="animate-pulse text-cyan-300">⌛ {so ? 'Sugid...' : 'Waiting...'}</span>
+                  ) : (
+                    <>⌛ {so ? 'Boos Bannaan' : 'Open Slot'}</>
+                  )}
                 </div>
-              ))}
+              )})}
             </div>
             )}
 

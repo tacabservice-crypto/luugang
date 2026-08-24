@@ -5589,6 +5589,9 @@ app.post("/api/rooms/challenge/invite", async (req, res) => {
     createdAt: Date.now()
   };
   newRoom.invitedUserId = receiverId;
+  newRoom.challengeTargetUserId = receiverId;
+  newRoom.challengeAttempt = 1;
+  newRoom.challengeStatus = "pending";
   store.rooms[roomId] = newRoom;
   for (const qKey of Object.keys(store.matchmakingQueues)) {
     store.matchmakingQueues[qKey] = store.matchmakingQueues[qKey].filter((id) => id !== senderId && id !== receiverId);
@@ -5734,16 +5737,79 @@ app.post("/api/rooms/challenge/decline", async (req, res) => {
   if (!room && isMySqlConfigured()) room = await loadMySqlGameRoom(roomId) || void 0;
   if (room) {
     const hostId = room.players.find((p) => p.isHost)?.userId;
+    const attempt = Math.max(1, Number(room.challengeAttempt || 1));
+    const isFinalAttempt = attempt >= 3;
     if (hostId) {
-      const payload = { receiverName: user.username, roomId, reason: reason || "declined" };
+      const payload = {
+        receiverName: user.username,
+        roomId,
+        reason: reason || "declined",
+        attempt,
+        final: isFinalAttempt,
+        room: isFinalAttempt ? void 0 : {
+          ...room,
+          challengeStatus: "declined",
+          challengeReason: reason || "declined",
+          invitedUserId: void 0
+        }
+      };
       sendEventToUser(hostId, "game_invite_declined", payload);
       publishRealtimeEvent("user", hostId, "game_invite_declined", payload);
     }
-    delete store.rooms[roomId];
-    await saveStoreAndWait();
-    if (isMySqlConfigured()) await deleteMySqlGameRoom(roomId);
+    if (isFinalAttempt) {
+      delete store.rooms[roomId];
+      await saveStoreAndWait();
+      if (isMySqlConfigured()) await deleteMySqlGameRoom(roomId);
+    } else {
+      room.challengeStatus = "declined";
+      room.challengeReason = reason || "declined";
+      delete room.invitedUserId;
+      touchRoom(room);
+      store.rooms[roomId] = room;
+      await saveStoreAndWait();
+      await persistLiveRoom(room);
+      broadcastToRoom(room.id, "game_update", room);
+    }
   }
   res.json({ success: true });
+});
+app.post("/api/rooms/challenge/retry", async (req, res) => {
+  const { userId, roomId } = req.body;
+  let room = store.rooms[roomId];
+  if (!room && isMySqlConfigured()) room = await loadMySqlGameRoom(roomId) || void 0;
+  if (!room) return res.status(404).json({ error: "Challenge lobby no longer exists." });
+  const host = room.players.find((player) => player.isHost);
+  if (!host || host.userId !== userId) return res.status(403).json({ error: "Only the challenger can retry." });
+  if (room.status !== "waiting" || room.challengeStatus !== "declined") {
+    return res.status(409).json({ error: "This challenge is not ready to retry." });
+  }
+  const attempt = Math.max(1, Number(room.challengeAttempt || 1));
+  if (attempt >= 3) return res.status(409).json({ error: "The maximum challenge attempts have been reached." });
+  const receiverId = String(room.challengeTargetUserId || "");
+  let receiver = store.users[receiverId];
+  if (!receiver && isMySqlConfigured()) receiver = await loadMySqlRuntimeUser(receiverId);
+  if (!receiver) return res.status(409).json({ error: "Ciyaaryahankan hadda online ma aha." });
+  room.challengeAttempt = attempt + 1;
+  room.challengeStatus = "pending";
+  room.invitedUserId = receiverId;
+  delete room.challengeReason;
+  touchRoom(room);
+  store.rooms[room.id] = room;
+  await saveStoreAndWait();
+  await persistLiveRoom(room);
+  const invitePayload = {
+    senderId: host.userId,
+    senderName: host.username,
+    senderAvatar: host.avatar,
+    betAmount: room.betAmount,
+    capacity: room.capacity || 2,
+    gameMode: room.gameMode || "solo",
+    roomId: room.id
+  };
+  sendEventToUser(receiverId, "game_invite", invitePayload);
+  publishRealtimeEvent("user", receiverId, "game_invite", invitePayload);
+  broadcastToRoom(room.id, "game_update", room);
+  res.json({ success: true, room });
 });
 app.post("/api/rooms/ready", (req, res) => {
   const { userId, roomId } = req.body;

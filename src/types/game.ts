@@ -152,6 +152,11 @@ export interface GameRoom {
   gameMode?: 'solo' | 'team'; // 'solo' or 'team'
   pendingPlayers?: LudoPlayer[]; // Players waiting for host approval
   rejectionReason?: string; // Reason for join rejection, for client-side feedback
+  challengeTargetUserId?: string;
+  challengeAttempt?: number;
+  challengeStatus?: 'pending' | 'declined';
+  challengeReason?: string;
+  invitedUserId?: string;
   tournamentDetails?: { tournamentId: string; matchId: string; };
 }
 
