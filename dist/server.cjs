@@ -7183,7 +7183,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
   for (let offset = 5; offset >= 0; offset--) {
     const date = new Date(now2.getFullYear(), now2.getMonth() - offset, 1);
     const key = `${date.getFullYear()}-${date.getMonth()}`;
-    monthBuckets.set(key, { month: date.toLocaleString("en", { month: "short" }), deposits: 0, withdrawals: 0, transactions: 0 });
+    monthBuckets.set(key, { month: date.toLocaleString("en", { month: "short" }), deposits: 0, withdrawals: 0, revenue: 0, transactions: 0 });
   }
   store.transactions.forEach((tx) => {
     const date = new Date(tx.timestamp);
@@ -7192,6 +7192,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     bucket.transactions += 1;
     if (tx.type === "deposit") bucket.deposits += Number(tx.amount || 0);
     if (tx.type === "withdrawal") bucket.withdrawals += Number(tx.amount || 0);
+    if (tx.type === "app_commission") bucket.revenue += Number(tx.amount || 0);
   });
   let totalAgents = 0;
   let activeAgents = 0;
@@ -7214,6 +7215,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     ...store.transactions.slice(0, 8).map((tx) => ({ id: tx.id, kind: "transaction", title: tx.description, amount: tx.amount, status: tx.status || "completed", timestamp: tx.timestamp })),
     ...manualTransactions.slice(0, 8).map((tx) => ({ id: tx.id, kind: "manual", title: `${tx.username} requested a ${tx.transactionType}`, amount: tx.amount, status: tx.status, timestamp: tx.createdAt }))
   ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+  const isSuperAdmin = (req.adminPermissions || []).includes("all");
   res.json({
     totalUsers: users.length,
     totalRooms: rooms.length,
@@ -7241,6 +7243,7 @@ app.get("/api/admin/stats", hasPermission("stats"), async (req, res) => {
     activeTournaments: tournaments.filter((t) => t.status === "in_progress").length,
     totalTournamentPlayers: tournaments.reduce((sum, tournament) => sum + tournament.players.length, 0),
     monthlyActivity: [...monthBuckets.values()],
+    revenueControl: isSuperAdmin ? store.revenueSettings : void 0,
     recentActivity
   });
 });

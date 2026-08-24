@@ -1,97 +1,49 @@
 import React from 'react';
-import { Users, Home, Activity, DollarSign, Wifi, AlertTriangle, ArrowUpCircle, ArrowDownCircle, Eye, TrendingUp, ShieldCheck, Trophy, ReceiptText, Clock3, ChevronRight, CircleDollarSign } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownCircle, ArrowUpCircle, Bot, ChevronRight, CircleDollarSign, Clock3, Crown, DollarSign, Eye, Home, Landmark, ReceiptText, ShieldCheck, Trophy, Users, WalletCards, Wifi } from 'lucide-react';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { formatCurrency } from '../../utils/number';
 import MonthlyStatsChart from './MonthlyStatsChart';
 
-const StatCard = ({ title, value, icon: Icon, color, detail }) => (
-  <div className="rounded-xl p-4 text-white shadow-lg sm:p-5" style={{ background: `linear-gradient(135deg, ${color[0]} 0%, ${color[1]} 100%)` }}>
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0"><p className="text-sm font-medium opacity-80">{title}</p><p className="mt-1 truncate text-2xl font-bold sm:text-3xl">{value}</p></div>
-      <div className="shrink-0 rounded-lg bg-white/20 p-3"><Icon size={24} /></div>
-    </div>
-    <div className="mt-3 flex items-center text-xs opacity-90"><TrendingUp size={15} className="mr-1" /><span>{detail}</span></div>
-  </div>
-);
+const REVENUE_META = [
+  ['game_rake', 'Solo rake', '#f59e0b'], ['team_game_rake', 'Team rake', '#3b82f6'], ['forfeit_rake', 'Forfeit rake', '#f97316'],
+  ['betting_margin', 'Live-bet commission', '#10b981'], ['bot_result', 'Bot economy', '#8b5cf6'], ['vip_subscription', 'VIP sales', '#ec4899'],
+  ['tournament_margin', 'Tournament margin', '#06b6d4'], ['tournament_cancellation_fee', 'Tournament cancellation', '#64748b'], ['withdrawal_fee', 'Withdrawal fees', '#ef4444'],
+] as const;
+const RATE_META = [
+  ['gameRakeRate', 'Game rake', 'rate'], ['spectatorBetCommissionRate', 'Live bet', 'rate'], ['botWinCharge', 'Bot loss charge', 'amount'],
+  ['botPlayerWinReward', 'Bot win reward', 'amount'], ['tournamentCommissionRate', 'Tournament margin', 'rate'], ['noPlayWithdrawalFeeRate', 'No-play withdrawal', 'rate'],
+  ['normalWithdrawalFeeRate', 'Standard withdrawal', 'rate'], ['manualForfeitPenaltyRate', 'Manual exit', 'rate'], ['inactivityPenaltyRate', 'Inactivity', 'rate'],
+  ['depositFeeRate', 'Deposit fee', 'rate'], ['privateMatchFeeRate', 'Private match', 'rate'],
+] as const;
 
-const SummaryItem = ({ icon: Icon, label, value, note, color = 'text-blue-600', onClick = undefined }) => (
-  <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-left transition hover:border-purple-200 hover:bg-purple-50/50">
-    <span className={`rounded-lg bg-white p-2.5 shadow-sm ${color}`}><Icon size={19}/></span>
-    <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-gray-500">{label}</span><span className="block text-lg font-bold text-gray-900">{value}</span>{note && <span className="block truncate text-[11px] text-gray-400">{note}</span>}</span>
-    {onClick && <ChevronRight size={17} className="text-gray-300"/>}
-  </button>
-);
-
-const RoomCard = ({ room }) => (
-  <div className="flex flex-col justify-between rounded-xl bg-white p-4 shadow-lg transition-shadow hover:shadow-xl">
-    <div><div className="mb-3 flex items-center justify-between"><p className="rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-500">#{room.id}</p><span className="text-sm font-bold text-green-600">{formatCurrency(room.betAmount)}</span></div><div className="flex items-center -space-x-2">{room.players.map(p => <div key={p.userId} className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-gray-200" title={p.username}><span className="text-xl">{p.avatar}</span></div>)}</div></div>
-    <button onClick={() => window.open(`/${room.id}?spectate=true`, '_blank')} className="mt-4 flex w-full items-center justify-center rounded-lg bg-blue-500 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-600"><Eye size={16} className="mr-2"/>Spectate</button>
-  </div>
-);
+const MetricCard = ({ label, value, note, icon: Icon, tone = 'indigo' }) => {
+  const tones = { indigo: 'from-indigo-600 to-violet-700', emerald: 'from-emerald-500 to-teal-700', rose: 'from-rose-500 to-red-700', sky: 'from-sky-500 to-blue-700' };
+  return <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${tones[tone]} p-5 text-white shadow-[0_14px_35px_rgba(15,23,42,.13)]`}><div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/10"/><div className="relative flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-white/65">{label}</p><p className="mt-2 text-3xl font-black tracking-tight">{value}</p><p className="mt-2 text-xs text-white/70">{note}</p></div><span className="rounded-2xl border border-white/15 bg-white/10 p-3"><Icon size={23}/></span></div></div>;
+};
+const ActionRow = ({ icon: Icon, label, value, note, color = 'text-indigo-600', onClick = undefined }) => <button type="button" onClick={onClick} className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-slate-50"><span className={`rounded-xl bg-slate-50 p-2.5 ${color}`}><Icon size={18}/></span><span className="min-w-0 flex-1"><span className="block text-xs font-bold text-slate-500">{label}</span><span className="block truncate text-[11px] text-slate-400">{note}</span></span><strong className="text-sm text-slate-900">{value}</strong>{onClick && <ChevronRight size={16} className="text-slate-300 group-hover:text-indigo-500"/>}</button>;
+const RoomCard = ({ room }) => <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><span className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-[10px] font-bold text-slate-500">#{room.id}</span><strong className="text-sm text-emerald-600">{formatCurrency(room.betAmount)}</strong></div><div className="mt-4 flex items-center justify-between"><div className="flex -space-x-2">{room.players.map(player => <span key={player.userId} title={player.username} className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-lg">{player.avatar}</span>)}</div><button onClick={() => window.open(`/${room.id}?spectate=true`, '_blank')} className="flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white"><Eye size={14}/> Watch</button></div></div>;
 
 const StatsGrid = ({ stats, rooms = [], manualTransactions = [], setView }) => {
-  if (!stats) return <div className="rounded-xl bg-white p-10 text-center text-gray-500 shadow">Loading platform overview...</div>;
-
-  const pendingDeposits = manualTransactions.filter(tx => tx.managedBy !== 'agent' && tx.transactionType === 'deposit' && tx.status === 'pending');
-  const pendingWithdrawals = manualTransactions.filter(tx => tx.managedBy !== 'agent' && tx.transactionType === 'withdraw' && tx.status === 'pending');
-  const activeRooms = rooms.filter(room => room.status === 'playing');
-  const mainStats = [
-    { title: 'Total Users', value: stats.totalUsers, icon: Users, color: ['#2563eb', '#1d4ed8'], detail: `${stats.onlineClients || 0} live connections` },
-    { title: 'House Revenue', value: formatCurrency(stats.houseRevenue), icon: DollarSign, color: ['#10b981', '#059669'], detail: 'Recorded platform earnings' },
-    { title: 'Active Games', value: stats.activeRooms, icon: Activity, color: ['#ef4444', '#dc2626'], detail: `${stats.waitingRooms || 0} waiting rooms` },
-    { title: 'Transactions', value: stats.totalTransactions || 0, icon: ReceiptText, color: ['#8b5cf6', '#6d28d9'], detail: `${stats.pendingAdminTransactions || 0} need admin review` },
-  ];
+  if (!stats) return <div className="rounded-2xl bg-white p-12 text-center text-slate-500 shadow-sm">Loading platform intelligence...</div>;
   const revenue = stats.revenueBreakdown || {};
+  const revenueChart = REVENUE_META.map(([key, name, color]) => ({ key, name, color, value: Number(revenue[key] || 0) })).filter(item => item.value > 0);
+  const activeRooms = rooms.filter(room => room.status === 'playing');
+  const pendingDeposits = manualTransactions.filter(tx => tx.managedBy !== 'agent' && tx.transactionType === 'deposit' && tx.status === 'pending').length;
+  const pendingWithdrawals = manualTransactions.filter(tx => tx.managedBy !== 'agent' && tx.transactionType === 'withdraw' && tx.status === 'pending').length;
+  const totalCosts = Number(stats.welcomeBonusCost || 0) + Number(stats.agentCommissionDiscounts || 0) + Number(stats.cashierPayrollPaid || 0);
+  const revenueIcons = [Trophy, Users, Activity, CircleDollarSign, Bot, Crown, Trophy, ReceiptText, ArrowDownCircle];
 
-  return (
-    <div className="min-w-0 space-y-6 sm:space-y-8">
-      <section className="overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 p-5 text-white shadow-xl sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-purple-300">Platform overview</p><h2 className="mt-1 text-2xl font-black sm:text-3xl">Operations at a glance</h2><p className="mt-1 max-w-2xl text-sm text-slate-300">A live summary of players, games, money movement, agents, tournaments and items requiring attention.</p></div><div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3"><Wifi size={19} className="text-emerald-400"/><div><span className="block text-xs text-slate-400">Live connections</span><strong className="text-xl">{stats.onlineClients || 0}</strong></div></div></div>
-      </section>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{mainStats.map(item => <StatCard key={item.title} {...item}/>)}</div>
-
-      <section className="rounded-xl bg-white p-4 shadow-lg sm:p-6">
-        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div><h3 className="text-xl font-bold text-gray-800">Revenue & Cash-flow Breakdown</h3><p className="text-sm text-gray-500">Earned platform income is separated from agent float and promotional costs.</p></div>
-          <div className="rounded-xl bg-emerald-50 px-4 py-2 text-right"><span className="block text-xs font-bold uppercase text-emerald-600">Net platform earnings</span><strong className="text-2xl text-emerald-700">{formatCurrency(stats.netPlatformEarnings || 0)}</strong></div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryItem icon={Trophy} label="Solo game rake" value={formatCurrency(revenue.game_rake || 0)} note="Completed solo matches" color="text-amber-600" />
-          <SummaryItem icon={Users} label="Team-game rake" value={formatCurrency(revenue.team_game_rake || 0)} note="Completed team matches" color="text-blue-600" />
-          <SummaryItem icon={Activity} label="Forfeit rake" value={formatCurrency(revenue.forfeit_rake || 0)} note="Forfeit and inactivity wins" color="text-orange-600" />
-          <SummaryItem icon={CircleDollarSign} label="Bot results" value={formatCurrency(revenue.bot_result || 0)} note="Real stakes retained on bot wins" color="text-indigo-600" />
-          <SummaryItem icon={ArrowDownCircle} label="Withdrawal fees" value={formatCurrency(revenue.withdrawal_fee || 0)} note="No-play fees only" color="text-red-600" />
-          <SummaryItem icon={ShieldCheck} label="VIP subscriptions" value={formatCurrency(revenue.vip_subscription || 0)} note="Realized VIP sales" color="text-purple-600" />
-          <SummaryItem icon={Trophy} label="Tournament margin" value={formatCurrency(revenue.tournament_margin || 0)} note="Entry fees minus prizes" color="text-yellow-600" />
-          <SummaryItem icon={ArrowDownCircle} label="Tournament cancellation fees" value={formatCurrency(revenue.tournament_cancellation_fee || 0)} note="10% voluntary unregister fee" color="text-orange-600" />
-          <SummaryItem icon={DollarSign} label="Welcome bonus cost" value={formatCurrency(stats.welcomeBonusCost || 0)} note="Promotional wallet credits" color="text-rose-600" />
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 border-t border-gray-100 pt-4 sm:grid-cols-3">
-          <SummaryItem icon={CircleDollarSign} label="Agent float issued" value={formatCurrency(stats.agentFloatIssued || 0)} note="Liability issued, not revenue" color="text-slate-600" />
-          <SummaryItem icon={ArrowUpCircle} label="Agent cash received" value={formatCurrency(stats.agentFloatCash || 0)} note="Float value less commission" color="text-emerald-600" />
-          <SummaryItem icon={ArrowDownCircle} label="Agent commissions" value={formatCurrency(stats.agentCommissionDiscounts || 0)} note="Deducted in net earnings" color="text-red-600" />
-          <SummaryItem icon={Users} label="Monthly agents" value={stats.monthlyAgents || 0} note={`${formatCurrency(stats.monthlySalaryLiability || 0)} monthly payroll`} color="text-indigo-600" />
-          <SummaryItem icon={DollarSign} label="Cashier payroll paid" value={formatCurrency(stats.cashierPayrollPaid || 0)} note="Salary and earned performance bonuses" color="text-violet-600" />
-        </div>
-      </section>
-
-      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3">
-        <section className="rounded-xl bg-white p-4 shadow-lg sm:p-6 xl:col-span-2">
-          <h3 className="mb-4 flex items-center text-xl font-bold text-gray-800"><AlertTriangle size={22} className="mr-3 text-amber-500"/>Pending Actions</h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <SummaryItem icon={ArrowUpCircle} label="Pending Deposits" value={pendingDeposits.length} note="Admin-managed requests" color="text-green-600" onClick={() => setView('manual-transactions')}/>
-            <SummaryItem icon={ArrowDownCircle} label="Pending Withdrawals" value={pendingWithdrawals.length} note="Admin-managed requests" color="text-red-600" onClick={() => setView('manual-transactions')}/>
-            <SummaryItem icon={CircleDollarSign} label="Agent Float Requests" value={stats.pendingAgentRequests || 0} note="Awaiting admin decision" color="text-purple-600" onClick={() => setView('agent-requests')}/>
-          </div>
-        </section>
-        <section className="rounded-xl bg-white p-4 shadow-lg sm:p-6"><h3 className="mb-4 text-xl font-bold text-gray-800">System Snapshot</h3><div className="space-y-2"><SummaryItem icon={Home} label="All Rooms" value={stats.totalRooms || 0} note={`${stats.completedRooms || 0} completed`} color="text-indigo-600" onClick={() => setView('rooms')}/><SummaryItem icon={ShieldCheck} label="Active Agents" value={`${stats.activeAgents || 0} / ${stats.totalAgents || 0}`} note="Active / total agents" color="text-purple-600" onClick={() => setView('agents')}/><SummaryItem icon={Trophy} label="Open Tournaments" value={stats.openTournaments || 0} note={`${stats.activeTournaments || 0} currently running`} color="text-amber-600" onClick={() => setView('tournaments')}/></div></section>
-      </div>
-
-      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3"><div className="min-w-0 xl:col-span-2"><MonthlyStatsChart data={stats.monthlyActivity}/></div><section className="rounded-xl bg-white p-4 shadow-lg sm:p-6"><div className="mb-4 flex items-center justify-between"><h3 className="text-xl font-bold text-gray-800">Recent Activity</h3><Clock3 size={20} className="text-gray-400"/></div><div className="space-y-3">{(stats.recentActivity || []).map(activity => <div key={`${activity.kind}-${activity.id}`} className="border-b border-gray-100 pb-3 last:border-0"><div className="flex items-start justify-between gap-3"><p className="line-clamp-2 text-sm font-medium text-gray-700">{activity.title}</p>{activity.amount !== undefined && <span className="whitespace-nowrap text-sm font-bold text-gray-900">{formatCurrency(activity.amount)}</span>}</div><div className="mt-1 flex items-center justify-between text-xs text-gray-400"><span className="capitalize">{activity.status}</span><span>{new Date(activity.timestamp).toLocaleString()}</span></div></div>)}{(!stats.recentActivity || stats.recentActivity.length === 0) && <p className="py-8 text-center text-sm text-gray-400">No recent activity recorded.</p>}</div></section></div>
-
-      <section><div className="mb-4 flex items-center justify-between"><h3 className="flex items-center text-xl font-bold text-gray-800"><Home size={22} className="mr-3 text-indigo-500"/>Active Games ({activeRooms.length})</h3>{stats.waitingRooms > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">{stats.waitingRooms} waiting</span>}</div>{activeRooms.length > 0 ? <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{activeRooms.slice(0, 8).map(room => <RoomCard key={room.id} room={room}/>)}</div> : <div className="rounded-xl bg-white py-10 text-center shadow-lg"><Activity className="mx-auto mb-2 text-gray-300" size={32}/><p className="text-gray-500">No active games at the moment.</p></div>}</section>
-    </div>
-  );
+  return <div className="min-w-0 space-y-5 pb-8">
+    <section className="relative overflow-hidden rounded-[28px] bg-[#08111f] p-5 text-white shadow-2xl sm:p-7"><div className="absolute inset-0 bg-[radial-gradient(circle_at_85%_15%,rgba(16,185,129,.25),transparent_35%),radial-gradient(circle_at_20%_80%,rgba(79,70,229,.3),transparent_38%)]"/><div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[.25em] text-emerald-300"><ShieldCheck size={15}/> Super Admin Intelligence</div><h2 className="mt-3 text-2xl font-black tracking-tight sm:text-4xl">Platform command center</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">Revenue, operations, customer activity and financial risk—organized into one clear live view.</p></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3"><MiniDark label="Live users" value={stats.onlineClients || 0} icon={Wifi}/><MiniDark label="Playing" value={stats.activeRooms || 0}/><MiniDark label="Waiting" value={stats.waitingRooms || 0}/></div></div></section>
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Net earnings" value={formatCurrency(stats.netPlatformEarnings || 0)} note={`Revenue less ${formatCurrency(totalCosts)} costs`} icon={Landmark} tone="emerald"/><MetricCard label="Gross revenue" value={formatCurrency(stats.houseRevenue || 0)} note="All recorded platform income" icon={CircleDollarSign}/><MetricCard label="Registered users" value={stats.totalUsers || 0} note={`${stats.onlineClients || 0} connected right now`} icon={Users} tone="sky"/><MetricCard label="Pending review" value={stats.pendingAdminTransactions || 0} note={`${stats.totalTransactions || 0} wallet records`} icon={AlertTriangle} tone="rose"/></section>
+    <section className="grid min-w-0 gap-5 xl:grid-cols-5"><div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm xl:col-span-3"><MonthlyStatsChart data={stats.monthlyActivity}/></div><div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 xl:col-span-2"><p className="text-[10px] font-black uppercase tracking-[.18em] text-emerald-600">Revenue mix</p><h3 className="mt-1 text-xl font-black text-slate-900">Where income comes from</h3>{revenueChart.length ? <><div className="h-52"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueChart} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3}>{revenueChart.map(item => <Cell key={item.key} fill={item.color}/>)}</Pie><Tooltip formatter={(value: number) => formatCurrency(value)}/></PieChart></ResponsiveContainer></div><div className="grid grid-cols-2 gap-2">{revenueChart.map(item => <div key={item.key} className="flex min-w-0 items-center gap-2 text-xs"><i className="h-2.5 w-2.5 shrink-0 rounded-full" style={{background:item.color}}/><span className="min-w-0 flex-1 truncate text-slate-500">{item.name}</span><strong>{formatCurrency(item.value)}</strong></div>)}</div></> : <div className="flex h-64 items-center justify-center text-sm text-slate-400">Revenue appears here after settlements.</div>}</div></section>
+    <section className="grid gap-5 xl:grid-cols-3"><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2"><SectionTitle kicker="Income ledger" title="Revenue sources" value={formatCurrency(stats.houseRevenue || 0)}/><div className="grid gap-1 sm:grid-cols-2">{REVENUE_META.map(([key,label], index) => <ActionRow key={key} icon={revenueIcons[index]} label={label} value={formatCurrency(revenue[key] || 0)} note={Number(revenue[key] || 0) > 0 ? 'Recorded earnings' : 'No earnings recorded yet'} color={Number(revenue[key] || 0) > 0 ? 'text-emerald-600' : 'text-slate-400'}/>)}</div></div><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle kicker="Costs & obligations" title="Not revenue"/><ActionRow icon={DollarSign} label="Welcome bonuses" value={formatCurrency(stats.welcomeBonusCost || 0)} note="Promotional cost" color="text-rose-500"/><ActionRow icon={ArrowDownCircle} label="Agent commissions" value={formatCurrency(stats.agentCommissionDiscounts || 0)} note="Distribution cost" color="text-orange-500"/><ActionRow icon={WalletCards} label="Cashier payroll" value={formatCurrency(stats.cashierPayrollPaid || 0)} note="Salary and bonuses" color="text-violet-500"/><ActionRow icon={CircleDollarSign} label="Agent float issued" value={formatCurrency(stats.agentFloatIssued || 0)} note="Liability, not income" color="text-slate-500"/></div></section>
+    {stats.revenueControl && <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle kicker="Configured economics" title="Active rates & future controls"/><p className="mb-4 text-xs text-slate-500">A zero value is inactive. Change these only from Settings → Revenue Control.</p><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{RATE_META.map(([key,label,kind]) => { const value=Number(stats.revenueControl[key]||0); return <div key={key} className={`rounded-xl border p-3 ${value>0?'border-emerald-200 bg-emerald-50/60':'border-slate-200 bg-slate-50'}`}><div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-slate-600">{label}</span><i className={`h-2 w-2 rounded-full ${value>0?'bg-emerald-500':'bg-slate-300'}`}/></div><strong className={`mt-2 block text-xl ${value>0?'text-emerald-700':'text-slate-400'}`}>{kind==='rate'?`${(value*100).toFixed(2)}%`:formatCurrency(value)}</strong></div>})}</div></section>}
+    <section className="grid gap-5 xl:grid-cols-3"><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2"><h3 className="mb-3 flex items-center gap-2 text-lg font-black text-slate-900"><AlertTriangle className="text-amber-500" size={20}/> Action queue</h3><div className="grid gap-1 sm:grid-cols-3"><ActionRow icon={ArrowUpCircle} label="Pending deposits" value={pendingDeposits} note="Requires decision" color="text-emerald-600" onClick={()=>setView('manual-transactions')}/><ActionRow icon={ArrowDownCircle} label="Pending withdrawals" value={pendingWithdrawals} note="Requires decision" color="text-red-600" onClick={()=>setView('manual-transactions')}/><ActionRow icon={CircleDollarSign} label="Agent requests" value={stats.pendingAgentRequests||0} note="Float approvals" color="text-violet-600" onClick={()=>setView('agent-requests')}/></div></div><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="mb-3 text-lg font-black text-slate-900">Operations</h3><ActionRow icon={Home} label="Rooms" value={stats.totalRooms||0} note={`${stats.completedRooms||0} completed`} onClick={()=>setView('rooms')}/><ActionRow icon={ShieldCheck} label="Agents" value={`${stats.activeAgents||0}/${stats.totalAgents||0}`} note="Active / total" onClick={()=>setView('agents')}/><ActionRow icon={Trophy} label="Tournaments" value={stats.openTournaments||0} note={`${stats.activeTournaments||0} running`} onClick={()=>setView('tournaments')}/></div></section>
+    <section className="grid gap-5 xl:grid-cols-3"><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2"><div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-black text-slate-900">Live games</h3><span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">{activeRooms.length} active</span></div>{activeRooms.length?<div className="grid gap-3 sm:grid-cols-2">{activeRooms.slice(0,6).map(room=><RoomCard key={room.id} room={room}/>)}</div>:<div className="py-12 text-center text-sm text-slate-400"><Activity className="mx-auto mb-2"/>No live games right now.</div>}</div><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-black text-slate-900">Recent activity</h3><Clock3 size={18} className="text-slate-400"/></div>{(stats.recentActivity||[]).slice(0,6).map(item=><div key={`${item.kind}-${item.id}`} className="rounded-xl px-3 py-3 hover:bg-slate-50"><div className="flex justify-between gap-3"><p className="line-clamp-2 text-xs font-bold text-slate-700">{item.title}</p>{item.amount!==undefined&&<strong className="whitespace-nowrap text-xs">{formatCurrency(item.amount)}</strong>}</div><p className="mt-1 text-[10px] text-slate-400">{new Date(item.timestamp).toLocaleString()}</p></div>)}</div></section>
+  </div>;
 };
 
+const MiniDark = ({label,value,icon:Icon = null}) => <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"><span className="text-[10px] uppercase text-slate-500">{label}</span><strong className="mt-1 flex items-center gap-2 text-xl">{Icon&&<Icon size={16} className="text-emerald-400"/>}{value}</strong></div>;
+const SectionTitle = ({kicker,title,value = undefined}) => <div className="mb-4 flex items-end justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[.18em] text-indigo-600">{kicker}</p><h3 className="text-xl font-black text-slate-900">{title}</h3></div>{value&&<strong className="text-xl text-emerald-600">{value}</strong>}</div>;
 export default StatsGrid;

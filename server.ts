@@ -7855,7 +7855,7 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
     const rooms = Object.values(store.rooms);
     const tournaments = Object.values(store.tournaments);
     const manualTransactions = store.pendingManualTransactions || [];
-    const monthBuckets = new Map<string, { month: string; deposits: number; withdrawals: number; transactions: number }>();
+    const monthBuckets = new Map<string, { month: string; deposits: number; withdrawals: number; revenue: number; transactions: number }>();
     const now = new Date();
     const revenueBreakdown: Record<RevenueCategory, number> = {
         game_rake: 0,
@@ -7896,7 +7896,7 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
     for (let offset = 5; offset >= 0; offset--) {
         const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
         const key = `${date.getFullYear()}-${date.getMonth()}`;
-        monthBuckets.set(key, { month: date.toLocaleString('en', { month: 'short' }), deposits: 0, withdrawals: 0, transactions: 0 });
+        monthBuckets.set(key, { month: date.toLocaleString('en', { month: 'short' }), deposits: 0, withdrawals: 0, revenue: 0, transactions: 0 });
     }
     store.transactions.forEach(tx => {
         const date = new Date(tx.timestamp);
@@ -7905,6 +7905,7 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
         bucket.transactions += 1;
         if (tx.type === 'deposit') bucket.deposits += Number(tx.amount || 0);
         if (tx.type === 'withdrawal') bucket.withdrawals += Number(tx.amount || 0);
+        if (tx.type === 'app_commission') bucket.revenue += Number(tx.amount || 0);
     });
 
     let totalAgents = 0;
@@ -7930,6 +7931,7 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
         ...manualTransactions.slice(0, 8).map(tx => ({ id: tx.id, kind: 'manual', title: `${tx.username} requested a ${tx.transactionType}`, amount: tx.amount, status: tx.status, timestamp: tx.createdAt })),
     ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
 
+    const isSuperAdmin = ((req as any).adminPermissions as string[] || []).includes('all');
     res.json({
         totalUsers: users.length,
         totalRooms: rooms.length,
@@ -7957,6 +7959,7 @@ app.get('/api/admin/stats', hasPermission('stats'), async (req, res) => {
         activeTournaments: tournaments.filter(t => t.status === 'in_progress').length,
         totalTournamentPlayers: tournaments.reduce((sum, tournament) => sum + tournament.players.length, 0),
         monthlyActivity: [...monthBuckets.values()],
+        revenueControl: isSuperAdmin ? store.revenueSettings : undefined,
         recentActivity,
     });
 });
