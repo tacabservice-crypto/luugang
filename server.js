@@ -1455,7 +1455,8 @@ var store = {
   tournaments: {},
   adSettings: { ...DEFAULT_AD_SETTINGS },
   adCampaigns: [],
-  spectatorBets: []
+  spectatorBets: [],
+  directMessages: []
 };
 var adminUsersCache = /* @__PURE__ */ new Map();
 var agentCache = /* @__PURE__ */ new Map();
@@ -1638,6 +1639,7 @@ function loadStore() {
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
       store.spectatorBets = parsed.spectatorBets || [];
+      store.directMessages = parsed.directMessages || [];
       store.rooms = parsed.rooms || {};
       store.matchmakingQueues = {
         0: [],
@@ -1706,6 +1708,7 @@ async function loadStoreFromFirestore() {
         store.users = parsed.users || {};
         store.transactions = parsed.transactions || [];
         store.spectatorBets = parsed.spectatorBets || [];
+        store.directMessages = parsed.directMessages || [];
         store.rooms = parsed.rooms || {};
         store.matchmakingQueues = {
           0: [],
@@ -3882,6 +3885,7 @@ app.get("/api/users/online", async (req, res) => {
         profileCover: u.profileCover || "royal",
         allowProfilePreview: u.allowProfilePreview !== false,
         allowDirectMessages: u.allowDirectMessages !== false,
+        vip: u.vip && u.vip.expires > Date.now() ? { tier: u.vip.tier, expires: u.vip.expires } : void 0,
         balance: u.balance,
         isSimulated: false,
         status,
@@ -3986,7 +3990,7 @@ app.post("/api/users/:userId/update", async (req, res) => {
   res.json(user);
 });
 var directMessageCooldowns = /* @__PURE__ */ new Map();
-app.post("/api/users/:userId/message", verifyFirebaseToken, (req, res) => {
+app.post("/api/users/:userId/message", verifyFirebaseToken, async (req, res) => {
   const receiver = store.users[req.params.userId];
   const sender = Object.values(store.users).find((candidate) => candidate.firebaseUid === req.user.uid);
   const text = String(req.body?.text || "").trim().replace(/\s+/g, " ").slice(0, 160);
@@ -3998,8 +4002,28 @@ app.post("/api/users/:userId/message", verifyFirebaseToken, (req, res) => {
   const now2 = Date.now();
   if (now2 - (directMessageCooldowns.get(cooldownKey) || 0) < 3e3) return res.status(429).json({ error: "Please wait before sending another message." });
   directMessageCooldowns.set(cooldownKey, now2);
-  sendEventToUser(receiver.id, "direct_message", { senderId: sender.id, senderName: sender.username, senderAvatar: sender.avatar, text, timestamp: Date.now() });
+  const message = { id: `dm_${now2}_${crypto.randomBytes(4).toString("hex")}`, senderId: sender.id, receiverId: receiver.id, senderName: sender.username, senderAvatar: sender.avatar, text, createdAt: now2 };
+  store.directMessages.push(message);
+  const receiverMessages = store.directMessages.filter((candidate) => candidate.receiverId === receiver.id);
+  if (receiverMessages.length > 30) {
+    const removeIds = new Set(receiverMessages.slice(0, receiverMessages.length - 30).map((candidate) => candidate.id));
+    store.directMessages = store.directMessages.filter((candidate) => !removeIds.has(candidate.id));
+  }
+  await saveStoreAndWait();
+  sendEventToUser(receiver.id, "direct_message", message);
   res.json({ success: true });
+});
+app.get("/api/users/messages/pending", verifyFirebaseToken, async (req, res) => {
+  const receiver = Object.values(store.users).find((candidate) => candidate.firebaseUid === req.user.uid);
+  if (!receiver) return res.status(404).json({ error: "Player not found." });
+  const messages = store.directMessages.filter((candidate) => candidate.receiverId === receiver.id).sort((a, b) => b.createdAt - a.createdAt);
+  const consume = String(req.query.consume || "") === "true";
+  if (consume && messages.length) {
+    const ids = new Set(messages.map((message) => message.id));
+    store.directMessages = store.directMessages.filter((message) => !ids.has(message.id));
+    await saveStoreAndWait();
+  }
+  res.json(consume ? { messages } : { count: messages.length });
 });
 app.post("/api/users/:userId/status", async (req, res) => {
   const user = store.users[req.params.userId];

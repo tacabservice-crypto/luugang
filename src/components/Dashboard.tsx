@@ -26,6 +26,7 @@ import {
   Download,
   CalendarDays,
   MessageCircle,
+  Clock3,
   X
 } from 'lucide-react';
 import { UserProfile, GameRoom } from '../types/game';
@@ -223,6 +224,44 @@ export default function Dashboard({
   const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
   const [playerMessage, setPlayerMessage] = useState('');
   const [messageState, setMessageState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [showMessageInbox, setShowMessageInbox] = useState(false);
+  const [inboxMessages, setInboxMessages] = useState<Array<{ id: string; senderName: string; senderAvatar: string; text: string; createdAt: number }>>([]);
+
+  const authenticatedHeaders = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Authentication required.');
+    return { Authorization: `Bearer ${token}` };
+  };
+
+  useEffect(() => {
+    if (isGuest) return;
+    const refreshCount = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/users/messages/pending'), { headers: await authenticatedHeaders() });
+        if (response.ok) setUnreadMessageCount(Number((await response.json()).count || 0));
+      } catch { /* Realtime will retry on the next app visit. */ }
+    };
+    const onMessage = () => setUnreadMessageCount(count => Math.min(30, count + 1));
+    void refreshCount();
+    window.addEventListener('ludosom_direct_message', onMessage);
+    return () => window.removeEventListener('ludosom_direct_message', onMessage);
+  }, [isGuest]);
+
+  const openMessageInbox = async () => {
+    setIsSettingsDropdownOpen(false);
+    setShowMessageInbox(true);
+    try {
+      const response = await fetch(apiUrl('/api/users/messages/pending?consume=true'), { headers: await authenticatedHeaders() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Messages could not be opened.');
+      setInboxMessages(data.messages || []);
+      setUnreadMessageCount(0);
+    } catch (error) {
+      setInboxMessages([]);
+      alert(error instanceof Error ? error.message : 'Messages could not be opened.');
+    }
+  };
 
   const sendPlayerMessage = async (playerId: string) => {
     const text = playerMessage.trim();
@@ -248,6 +287,7 @@ export default function Dashboard({
       if (showHelp) setShowHelp(false);
       else if (showAboutUs) setShowAboutUs(false);
       else if (isEditingProfile) setIsEditingProfile(false);
+      else if (showMessageInbox) { setShowMessageInbox(false); setInboxMessages([]); }
       else if (showOnlinePlayers) setShowOnlinePlayers(false);
       else if (isSettingsDropdownOpen) setIsSettingsDropdownOpen(false);
       else if (isStakeDropdownOpen) setIsStakeDropdownOpen(false);
@@ -256,7 +296,7 @@ export default function Dashboard({
     };
     window.addEventListener(NATIVE_BACK_EVENT, handleNativeBack);
     return () => window.removeEventListener(NATIVE_BACK_EVENT, handleNativeBack);
-  }, [isEditingProfile, isSettingsDropdownOpen, isStakeDropdownOpen, showAboutUs, showHelp, showOnlinePlayers]);
+  }, [isEditingProfile, isSettingsDropdownOpen, isStakeDropdownOpen, showAboutUs, showHelp, showMessageInbox, showOnlinePlayers]);
   const [isFetchingPlayers, setIsFetchingPlayers] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<Record<string, 'idle' | 'sending' | 'sent'>>({});
   const recentlyLeftRef = useRef<string[]>([]);
@@ -925,7 +965,10 @@ export default function Dashboard({
               className="flex items-center gap-2 cursor-pointer"
               onClick={() => setIsSettingsDropdownOpen(prev => !prev)}
             >
-              <AvatarDisplay avatar={user.avatar} username={user.username} className="h-9 w-9 rounded-full object-cover bg-black/20 flex items-center justify-center overflow-hidden" textClassName="text-2xl" />
+              <div className="relative">
+                <AvatarDisplay avatar={user.avatar} username={user.username} className="h-9 w-9 rounded-full object-cover bg-black/20 flex items-center justify-center overflow-hidden" textClassName="text-2xl" />
+                {!isGuest && unreadMessageCount > 0 && <button type="button" onClick={event => { event.stopPropagation(); void openMessageInbox(); }} aria-label={language === 'so' ? 'Fur fariimaha cusub' : 'Open new messages'} className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[#120738] bg-emerald-400 px-1 text-[8px] font-black text-[#04140d] shadow-lg shadow-emerald-500/30 animate-pulse">{unreadMessageCount > 9 ? '9+' : unreadMessageCount}</button>}
+              </div>
               <MoreVertical className="w-4 h-4 text-slate-400" />
             </div>
 
@@ -1008,6 +1051,10 @@ export default function Dashboard({
                 </div>
               </div>
             )}
+            {showMessageInbox && <div className="absolute right-0 top-full z-50 mt-2 w-[min(88vw,330px)] overflow-hidden rounded-2xl border border-emerald-400/20 bg-[#07130f]/[.98] shadow-2xl shadow-black/60 backdrop-blur-xl">
+              <div className="flex items-center justify-between border-b border-white/10 px-3.5 py-3"><div><h3 className="flex items-center gap-2 text-xs font-black text-white"><MessageCircle className="h-4 w-4 text-emerald-300" />{language === 'so' ? 'Fariimaha Cusub' : 'New Messages'}</h3><p className="mt-0.5 text-[8px] font-semibold text-slate-400">{language === 'so' ? 'Marka card-kan la xiro fariimuhu way tirmayaan.' : 'Messages disappear after this card is closed.'}</p></div><button type="button" onClick={() => { setShowMessageInbox(false); setInboxMessages([]); }} className="rounded-full bg-white/5 p-1.5 text-slate-300"><X className="h-3.5 w-3.5" /></button></div>
+              <div className="max-h-[55vh] space-y-1.5 overflow-y-auto p-2 overscroll-contain">{inboxMessages.length ? inboxMessages.map(message => <div key={message.id} className="flex gap-2.5 rounded-xl border border-white/[.07] bg-white/[.045] p-2.5"><AvatarDisplay avatar={message.senderAvatar} username={message.senderName} className="h-9 w-9 shrink-0 rounded-lg" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><b className="truncate text-[10px] text-white">{message.senderName}</b><span className="flex shrink-0 items-center gap-1 text-[7px] text-slate-500"><Clock3 className="h-2.5 w-2.5" />{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div><p className="mt-1 break-words text-[10px] leading-4 text-slate-200">{message.text}</p></div></div>) : <div className="py-8 text-center text-[10px] font-bold text-slate-500">{language === 'so' ? 'Fariin cusub ma jirto.' : 'No new messages.'}</div>}</div>
+            </div>}
           </div>
         </div>
       </header>
@@ -1103,7 +1150,6 @@ export default function Dashboard({
                 ) : availableHomePlayers.map(player => {
                   const status = inviteStatus[player.id] || 'idle';
                   const expanded = expandedPlayerId === player.id && player.allowProfilePreview !== false;
-                  const coverClass = player.profileCover === 'ocean' ? 'from-cyan-600 to-blue-800' : player.profileCover === 'sunset' ? 'from-orange-500 to-fuchsia-800' : player.profileCover === 'emerald' ? 'from-emerald-500 to-teal-900' : 'from-purple-700 to-indigo-800';
                   return (
                     <div key={player.id} className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.035]">
                       <div className="flex items-center gap-2 px-2 py-1.5">
@@ -1123,13 +1169,13 @@ export default function Dashboard({
                         {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent ✓' : 'Challenge'}
                       </button>
                       </div>
-                      {expanded && <div className="border-t border-white/10 bg-[#080d18]">
-                        <div className={`relative h-16 bg-gradient-to-r ${coverClass}`}><div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_10%,rgba(255,255,255,.28),transparent_35%)]" /><AvatarDisplay avatar={player.avatar} username={player.username} className="absolute -bottom-5 left-3 h-12 w-12 rounded-xl border-2 border-[#080d18] bg-slate-900 shadow-lg" /></div>
+                      <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}><div className="overflow-hidden"><div className="border-t border-white/10 bg-[#080d18]">
+                        <div className="relative h-16 overflow-visible bg-slate-900"><AvatarDisplay avatar={player.avatar} username={player.username} className="absolute -inset-3 h-[88px] w-[calc(100%+24px)] scale-110 object-cover opacity-55 blur-lg" textClassName="text-6xl" /><div className="absolute inset-0 bg-gradient-to-r from-[#10082b]/70 via-black/25 to-[#021a14]/60" /><AvatarDisplay avatar={player.avatar} username={player.username} className="absolute -bottom-5 left-3 h-12 w-12 rounded-xl border-2 border-[#080d18] bg-slate-900 shadow-lg" />{player.vip && <span className="absolute bottom-1 right-2 rounded-full border border-yellow-300/40 bg-yellow-400/20 px-2 py-0.5 text-[8px] font-black uppercase text-yellow-200 shadow">👑 {player.vip.tier} VIP</span>}</div>
                         <div className="px-3 pb-3 pt-7">
                           <div className="flex items-start justify-between gap-2"><div><div className="text-sm font-black text-white">{player.username}</div><div className="mt-1 flex items-center gap-1 text-[8px] font-bold text-slate-400"><CalendarDays className="h-3 w-3" />{player.createdAt ? `${language === 'so' ? 'Ku biiray' : 'Joined'} ${new Date(player.createdAt).toLocaleDateString(language === 'so' ? 'so-SO' : 'en-US', { month: 'short', year: 'numeric' })}` : (language === 'so' ? 'Xubin LudoSom ah' : 'LudoSom player')}</div></div><div className="flex gap-1.5"><span className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-center text-[8px] font-bold text-emerald-300"><b className="block text-xs">{player.winCount || 0}</b>{language === 'so' ? 'Guul' : 'Wins'}</span><span className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-center text-[8px] font-bold text-rose-300"><b className="block text-xs">{player.lossCount || 0}</b>{language === 'so' ? 'Guuldarro' : 'Defeats'}</span></div></div>
                           {player.allowDirectMessages !== false ? <div className="mt-3 flex gap-1.5"><input value={playerMessage} maxLength={160} onChange={event => setPlayerMessage(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void sendPlayerMessage(player.id); }} placeholder={language === 'so' ? 'Fariin gaaban u qor…' : 'Write a short message…'} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-[10px] text-white outline-none focus:border-blue-400" /><button type="button" disabled={!playerMessage.trim() || messageState === 'sending'} onClick={() => void sendPlayerMessage(player.id)} className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-[9px] font-black text-white disabled:opacity-40"><MessageCircle className="h-3 w-3" />{messageState === 'sent' ? '✓' : language === 'so' ? 'Dir' : 'Send'}</button></div> : <p className="mt-3 rounded-lg bg-white/[.04] px-2.5 py-2 text-[9px] font-semibold text-slate-500">{language === 'so' ? 'Ciyaaryahankani fariimaha wuu xiray.' : 'This player has turned messages off.'}</p>}
                         </div>
-                      </div>}
+                      </div></div></div>
                     </div>
                   );
                 })}

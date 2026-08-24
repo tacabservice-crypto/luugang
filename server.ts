@@ -683,6 +683,16 @@ interface SpectatorBet {
   payout?: number;
 }
 
+interface DirectMessage {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  senderName: string;
+  senderAvatar: string;
+  text: string;
+  createdAt: number;
+}
+
 interface DBStore {
   users: Record<string, UserProfile>;
   transactions: WalletTransaction[];
@@ -700,6 +710,7 @@ interface DBStore {
   adSettings: PlatformAdSettings;
   adCampaigns: PlatformAdSettings[];
   spectatorBets: SpectatorBet[];
+  directMessages: DirectMessage[];
 }
 
 const DEFAULT_AD_SETTINGS: PlatformAdSettings = { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' };
@@ -762,6 +773,7 @@ let store: DBStore = {
   adSettings: { ...DEFAULT_AD_SETTINGS },
   adCampaigns: [],
   spectatorBets: [],
+  directMessages: [],
 };
 
 // One live listener per collection replaces thousands of identical reads from
@@ -955,6 +967,7 @@ function loadStore() {
       store.users = parsed.users || {};
       store.transactions = parsed.transactions || [];
       store.spectatorBets = parsed.spectatorBets || [];
+      store.directMessages = parsed.directMessages || [];
       store.rooms = parsed.rooms || {};
       // Matchmaking queues are transient live state and must always start fresh
       store.matchmakingQueues = {
@@ -1022,6 +1035,7 @@ async function loadStoreFromFirestore(): Promise<boolean> {
         store.users = parsed.users || {};
         store.transactions = parsed.transactions || [];
         store.spectatorBets = parsed.spectatorBets || [];
+        store.directMessages = parsed.directMessages || [];
         store.rooms = parsed.rooms || {};
         // Matchmaking queues are transient live state and must always start fresh
         store.matchmakingQueues = {
@@ -3827,6 +3841,7 @@ app.get('/api/users/online', async (req, res) => {
         profileCover: u.profileCover || 'royal',
         allowProfilePreview: u.allowProfilePreview !== false,
         allowDirectMessages: u.allowDirectMessages !== false,
+        vip: u.vip && u.vip.expires > Date.now() ? { tier: u.vip.tier, expires: u.vip.expires } : undefined,
         balance: u.balance,
         isSimulated: false,
         status,
@@ -3945,7 +3960,7 @@ app.post('/api/users/:userId/update', async (req, res) => {
 });
 
 const directMessageCooldowns = new Map<string, number>();
-app.post('/api/users/:userId/message', verifyFirebaseToken, (req: any, res) => {
+app.post('/api/users/:userId/message', verifyFirebaseToken, async (req: any, res) => {
   const receiver = store.users[req.params.userId];
   const sender = Object.values(store.users).find(candidate => candidate.firebaseUid === req.user.uid);
   const text = String(req.body?.text || '').trim().replace(/\s+/g, ' ').slice(0, 160);
@@ -3957,8 +3972,29 @@ app.post('/api/users/:userId/message', verifyFirebaseToken, (req: any, res) => {
   const now = Date.now();
   if (now - (directMessageCooldowns.get(cooldownKey) || 0) < 3000) return res.status(429).json({ error: 'Please wait before sending another message.' });
   directMessageCooldowns.set(cooldownKey, now);
-  sendEventToUser(receiver.id, 'direct_message', { senderId: sender.id, senderName: sender.username, senderAvatar: sender.avatar, text, timestamp: Date.now() });
+  const message: DirectMessage = { id: `dm_${now}_${crypto.randomBytes(4).toString('hex')}`, senderId: sender.id, receiverId: receiver.id, senderName: sender.username, senderAvatar: sender.avatar, text, createdAt: now };
+  store.directMessages.push(message);
+  const receiverMessages = store.directMessages.filter(candidate => candidate.receiverId === receiver.id);
+  if (receiverMessages.length > 30) {
+    const removeIds = new Set(receiverMessages.slice(0, receiverMessages.length - 30).map(candidate => candidate.id));
+    store.directMessages = store.directMessages.filter(candidate => !removeIds.has(candidate.id));
+  }
+  await saveStoreAndWait();
+  sendEventToUser(receiver.id, 'direct_message', message);
   res.json({ success: true });
+});
+
+app.get('/api/users/messages/pending', verifyFirebaseToken, async (req: any, res) => {
+  const receiver = Object.values(store.users).find(candidate => candidate.firebaseUid === req.user.uid);
+  if (!receiver) return res.status(404).json({ error: 'Player not found.' });
+  const messages = store.directMessages.filter(candidate => candidate.receiverId === receiver.id).sort((a, b) => b.createdAt - a.createdAt);
+  const consume = String(req.query.consume || '') === 'true';
+  if (consume && messages.length) {
+    const ids = new Set(messages.map(message => message.id));
+    store.directMessages = store.directMessages.filter(message => !ids.has(message.id));
+    await saveStoreAndWait();
+  }
+  res.json(consume ? { messages } : { count: messages.length });
 });
 
 // Update online/offline status preference

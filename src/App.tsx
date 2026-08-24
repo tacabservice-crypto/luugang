@@ -875,6 +875,7 @@ export default function App() {
       try {
         const data = JSON.parse(e.data) as { senderName?: string; text?: string };
         setErrorToast(`💬 ${data.senderName || 'Player'}: ${data.text || ''}`);
+        window.dispatchEvent(new CustomEvent('ludosom_direct_message', { detail: data }));
       } catch { /* Ignore malformed realtime messages. */ }
     });
 
@@ -1586,7 +1587,9 @@ export default function App() {
     return <div id="app-root"><VoiceChatProvider><Dashboard user={guestProfile} isGuest onRequireAuth={requireAuth} onOpenWallet={() => requireAuth('Login samee si aad Wallet-ka u isticmaasho.')} onLogout={() => requireAuth()} onCreatePrivateRoom={() => requireAuth('Login samee si aad qol ciyaareed u abuurto.')} onJoinPrivateRoom={() => requireAuth('Login samee si aad qol ciyaareed ugu biirto.')} onStartMatchmaking={() => requireAuth('Login samee si aad ciyaartoy u raadiso.')} onLeaveMatchmaking={() => undefined} matchmakingState={{ isQueued: false, betAmount: 0, capacity: 2, gameMode: 'solo' }} rejoinableRoom={null} onRejoin={() => requireAuth()} onDismissRejoin={() => undefined} onProfileUpdate={async () => requireAuth('Login samee si aad profile-kaaga u maamusho.')} /></VoiceChatProvider>{!isOnline && <div className="fixed inset-x-3 top-16 z-[120] mx-auto max-w-md rounded-xl border border-amber-400/40 bg-amber-950/95 p-3 text-center text-xs font-black text-amber-200">Internetku wuu go'an yahay; live games-ku ma cusboonaan karaan.</div>}{renderAuthSheet()}<InstallPwaPrompt /></div>;
   }
 
-  const renderNoticeSlot = () => (
+  const renderNoticeSlot = () => {
+    const isPlayerMessage = displayedErrorToast?.startsWith('💬');
+    return (
     <div
       className={`relative z-20 grid shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out ${
         errorToast ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
@@ -1595,16 +1598,16 @@ export default function App() {
     >
       <div className="overflow-hidden">
         <div
-          className={`mx-auto flex w-full max-w-md items-center gap-3 border-b border-red-400/25 bg-gradient-to-r from-red-950/95 via-slate-950/95 to-red-950/95 px-4 py-2.5 shadow-lg backdrop-blur-xl transition-transform duration-300 ease-out ${
+          className={`mx-auto flex w-full max-w-md items-center gap-3 border-b px-4 py-2.5 shadow-lg backdrop-blur-xl transition-transform duration-300 ease-out ${isPlayerMessage ? 'border-emerald-300/25 bg-gradient-to-r from-emerald-950/95 via-slate-950/95 to-emerald-950/95' : 'border-red-400/25 bg-gradient-to-r from-red-950/95 via-slate-950/95 to-red-950/95'} ${
             errorToast ? 'translate-y-0' : '-translate-y-full'
           }`}
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-400/30 bg-red-500/15 text-sm">!</span>
-          <p className="min-w-0 flex-1 text-xs font-bold leading-relaxed text-red-100">{displayedErrorToast}</p>
+          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm ${isPlayerMessage ? 'border-emerald-300/30 bg-emerald-400/15 text-emerald-200' : 'border-red-400/30 bg-red-500/15'}`}>{isPlayerMessage ? '✉' : '!'}</span>
+          <p className={`min-w-0 flex-1 truncate text-xs font-bold leading-relaxed ${isPlayerMessage ? 'text-emerald-50' : 'text-red-100'}`}>{displayedErrorToast}</p>
           <button
             type="button"
             onClick={() => setErrorToast(null)}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black text-red-300 transition hover:bg-white/10 hover:text-white"
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black transition hover:bg-white/10 hover:text-white ${isPlayerMessage ? 'text-emerald-300' : 'text-red-300'}`}
             aria-label="Close message"
           >
             ✕
@@ -1612,7 +1615,8 @@ export default function App() {
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   // This function renders overlays that should appear above the main content.
   const renderOverlays = () => (
