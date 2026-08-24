@@ -4784,11 +4784,19 @@ app.post("/api/rooms/:roomId/stop-spectating", (req, res) => {
   broadcastToRoom(roomId, "game_update", room);
   res.json({ success: true, message: "Stopped spectating." });
 });
+var parseGameStake = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0.01 || amount > 100) return null;
+  return Number(amount.toFixed(2));
+};
 app.post("/api/rooms/create", (req, res) => {
   const { userId, betAmount, capacity, gameMode } = req.body;
   const user = store.users[userId];
   if (!user) return res.status(404).json({ error: "User not found" });
-  const bet = parseFloat(betAmount);
+  const bet = parseGameStake(betAmount);
+  if (bet === null) return res.status(400).json({ error: "Game stake must be between $0.01 and $100 with no more than 2 decimal places." });
   if (user.balance < bet) {
     return res.status(400).json({ error: "Insufficient wallet balance for this bet amount." });
   }
@@ -5083,7 +5091,8 @@ app.post("/api/rooms/matchmaking/enter-queue", async (req, res) => {
     const user = store.users[userId];
     if (!user) return res.status(404).json({ error: "User not found" });
     cleanupMatchmakingQueues();
-    const bet = parseFloat(betAmount);
+    const bet = parseGameStake(betAmount);
+    if (bet === null) return res.status(400).json({ error: "Game stake must be between $0.01 and $100 with no more than 2 decimal places." });
     if (user.balance < bet) {
       return res.status(400).json({ error: "Insufficient balance to match stake." });
     }
@@ -5179,7 +5188,8 @@ app.post("/api/rooms/matchmaking/join", (req, res) => {
   const oppUser = store.users[opponentId];
   if (!oppUser) return res.status(404).json({ error: "Opponent not found" });
   cleanupMatchmakingQueues();
-  const bet = parseFloat(betAmount);
+  const bet = parseGameStake(betAmount);
+  if (bet === null) return res.status(400).json({ error: "Game stake must be between $0.01 and $100 with no more than 2 decimal places." });
   if (user.balance < bet) {
     return res.status(400).json({ error: "Insufficient balance to match stake." });
   }
@@ -5209,7 +5219,8 @@ app.post("/api/rooms/create-bot-room", (req, res) => {
   const { userId, betAmount, capacity, gameMode } = req.body;
   const user = store.users[userId];
   if (!user) return res.status(404).json({ error: "User not found" });
-  const bet = parseFloat(betAmount) || 0;
+  const bet = parseGameStake(betAmount);
+  if (bet === null) return res.status(400).json({ error: "Game stake must be between $0.01 and $100 with no more than 2 decimal places." });
   if (user.balance < bet) {
     return res.status(400).json({ error: "Insufficient wallet balance for this stake." });
   }
@@ -5368,7 +5379,8 @@ app.post("/api/rooms/challenge/invite", async (req, res) => {
   if (!receiverIsFreshlyHome) {
     return res.status(409).json({ error: "Ciyaaryahankan hadda Home-ka online kama aha." });
   }
-  const bet = parseFloat(betAmount) || 0;
+  const bet = parseGameStake(betAmount);
+  if (bet === null) return res.status(400).json({ error: "Game stake must be between $0.01 and $100 with no more than 2 decimal places." });
   if (sender.balance < bet) {
     return res.status(400).json({ error: `Insufficient wallet balance for $${bet} bet.` });
   }

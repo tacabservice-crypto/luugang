@@ -85,6 +85,8 @@ export default function Dashboard({
   const navigate = useNavigate();
   const { t, language } = useLanguage();
   const [selectedStake, setSelectedStake] = useState<number>(0.30); // Default to $0.30 Micro stake
+  const [customStakeInput, setCustomStakeInput] = useState('');
+  const [customStakeError, setCustomStakeError] = useState('');
   const [isStakeDropdownOpen, setIsStakeDropdownOpen] = useState<boolean>(false);
   const [isSettingsDropdownOpen, setIsSettingsDropdownOpen] = useState<boolean>(false);
   const [showAboutUs, setShowAboutUs] = useState<boolean>(false);
@@ -154,7 +156,28 @@ export default function Dashboard({
     }
   ];
 
-  const selectedTier = STAKE_TIERS.find(t => t.amount === selectedStake) || STAKE_TIERS[1];
+  const selectedTier = STAKE_TIERS.find(t => t.amount === selectedStake) || {
+    amount: selectedStake,
+    label: language === 'so' ? `Lacag Gaar ah ($${selectedStake.toFixed(2)})` : `Custom Stake ($${selectedStake.toFixed(2)})`,
+    desc: language === 'so' ? 'Lacagta aad adigu dooratay' : 'Your custom game amount',
+  };
+
+  const applyCustomStake = () => {
+    const normalized = customStakeInput.trim();
+    if (!/^\d+(?:\.\d{0,2})?$/.test(normalized)) {
+      setCustomStakeError(language === 'so' ? 'Geli lacag sax ah oo leh ugu badnaan 2 decimal.' : 'Enter a valid amount with no more than 2 decimal places.');
+      return;
+    }
+    const amount = Number(normalized);
+    if (amount < 0.01 || amount > 100) {
+      setCustomStakeError(language === 'so' ? 'Lacagtu waa inay u dhexeysaa $0.01 iyo $100.' : 'The amount must be between $0.01 and $100.');
+      return;
+    }
+    setSelectedStake(Number(amount.toFixed(2)));
+    setCustomStakeInput(amount.toFixed(2));
+    setCustomStakeError('');
+    setIsStakeDropdownOpen(false);
+  };
 
   const [joinCode, setJoinCode] = useState('');
   const [editName, setEditName] = useState(user.username);
@@ -1102,7 +1125,11 @@ export default function Dashboard({
 
           <div className="p-4 space-y-4">
             {/* COLLAPSIBLE / DROPDOWN SELECTOR FOR STAKE */}
-            <div className="relative" ref={dropdownRef}>
+            <div className="relative rounded-2xl border border-yellow-300/30 bg-gradient-to-r from-yellow-400/[0.08] via-purple-500/[0.08] to-blue-500/[0.08] p-2.5 shadow-[0_0_24px_rgba(250,204,21,0.08)]" ref={dropdownRef}>
+              <div className="mb-2 flex items-center justify-between px-1">
+                <div><span className="block text-[9px] font-black uppercase tracking-[0.2em] text-yellow-300">{language === 'so' ? 'Dooro Lacagta Ciyaarta' : 'Choose Game Stake'}</span><span className="mt-0.5 block text-[9px] font-semibold text-slate-400">{language === 'so' ? 'Lacagtan ayaa lagu abuurayaa ama lagu raadinayaa ciyaarta' : 'This amount is used to create or search for your match'}</span></div>
+                <span className="rounded-xl border border-yellow-300/30 bg-yellow-400/10 px-2.5 py-1 font-mono text-sm font-black text-yellow-200">${selectedStake.toFixed(2)}</span>
+              </div>
               {/* Dropdown Trigger Button */}
               <button
                 type="button"
@@ -1141,6 +1168,7 @@ export default function Dashboard({
                         type="button"
                         onClick={() => {
                           setSelectedStake(tier.amount);
+                          setCustomStakeError('');
                           setIsStakeDropdownOpen(false);
                         }}
                         className={`w-full p-2 px-3 text-left flex items-center justify-between transition-all cursor-pointer ${
@@ -1172,6 +1200,14 @@ export default function Dashboard({
                       </button>
                     );
                   })}
+                  <div className="space-y-2 bg-gradient-to-r from-purple-950/90 to-blue-950/90 p-3">
+                    <div className="flex items-center justify-between"><div><p className="text-xs font-black text-white">{language === 'so' ? 'Lacag Gaar ah' : 'Custom Amount'}</p><p className="text-[9px] font-semibold text-slate-400">$0.01 – $100 · {language === 'so' ? 'ugu badnaan 2 decimal' : 'maximum 2 decimals'}</p></div><span className="rounded-md bg-yellow-400/10 px-2 py-1 text-[9px] font-black text-yellow-300">CUSTOM</span></div>
+                    <div className="flex gap-2">
+                      <label className="flex min-w-0 flex-1 items-center rounded-xl border border-purple-400/30 bg-black/35 px-3 focus-within:border-yellow-300"><span className="mr-1 font-mono text-sm font-black text-yellow-300">$</span><input type="text" inputMode="decimal" value={customStakeInput} onChange={event => { setCustomStakeInput(event.target.value.replace(/[^\d.]/g, '')); setCustomStakeError(''); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); applyCustomStake(); } }} placeholder="0.01" className="min-w-0 flex-1 bg-transparent py-2.5 font-mono text-sm font-black text-white outline-none" /></label>
+                      <button type="button" onClick={applyCustomStake} className="rounded-xl bg-yellow-400 px-4 text-xs font-black text-slate-950 transition active:scale-95">{language === 'so' ? 'Xaqiiji' : 'Apply'}</button>
+                    </div>
+                    {customStakeError && <p className="text-[10px] font-bold text-red-300">{customStakeError}</p>}
+                  </div>
                 </div>
               )}
             </div>
