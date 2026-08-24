@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff, ShieldCheck, Crown, Plus } from 'lucide-react';
+import { Lock, CreditCard, UserCheck, Trash2, Edit, Power, PowerOff, ShieldCheck, Crown, Plus, CircleDollarSign, Save } from 'lucide-react';
 import ChangePasswordForm from '../ChangePasswordForm';
 import { isFullAdmin } from '../../utils/admin';
 import { userErrorMessage } from '../../utils/userError';
@@ -9,6 +9,46 @@ const localDateTime = (value?: number) => {
   if (!value) return '';
   const date = new Date(value);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+
+const REVENUE_FIELDS = [
+  { key: 'gameRakeRate', label: 'Game Rake', note: 'Solo, team and forfeit winner pools', kind: 'rate', live: true },
+  { key: 'spectatorBetCommissionRate', label: 'Live Bet Commission', note: 'Commission retained from settled spectator pools', kind: 'rate', live: true },
+  { key: 'botWinCharge', label: 'Bot Win Charge', note: 'Charged when a human player loses to a bot', kind: 'amount', live: true },
+  { key: 'botPlayerWinReward', label: 'Bot Player Reward', note: 'Reward paid when a human player beats a bot', kind: 'amount', live: true },
+  { key: 'noPlayWithdrawalFeeRate', label: 'No-Play Withdrawal Fee', note: 'Applied before a paid game has been completed', kind: 'rate', live: true },
+  { key: 'minimumWithdrawalFee', label: 'Minimum Withdrawal Fee', note: 'Minimum charge for a no-play withdrawal', kind: 'amount', live: true },
+  { key: 'normalWithdrawalFeeRate', label: 'Standard Withdrawal Fee', note: 'Currently inactive when set to 0.00%', kind: 'rate', live: false },
+  { key: 'tournamentCommissionRate', label: 'Tournament Margin', note: 'Reserved platform margin for tournament planning', kind: 'rate', live: true },
+  { key: 'manualForfeitPenaltyRate', label: 'Manual Exit Penalty', note: 'Future additional penalty; 0.00% keeps it disabled', kind: 'rate', live: false },
+  { key: 'inactivityPenaltyRate', label: 'Inactivity Penalty', note: 'Future inactivity charge; 0.00% keeps it disabled', kind: 'rate', live: false },
+  { key: 'depositFeeRate', label: 'Deposit Fee', note: 'Future deposit commission; 0.00% keeps it disabled', kind: 'rate', live: false },
+  { key: 'privateMatchFeeRate', label: 'Private Match Fee', note: 'Future extra private-lobby fee; 0.00% keeps it disabled', kind: 'rate', live: false },
+] as const;
+
+const RevenueControl = ({ settings, audit, onChange, onSave }: any) => {
+  if (!settings) return <p className="text-sm text-gray-500">Loading secure revenue controls...</p>;
+  return (
+    <div className="space-y-6">
+      <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-900 p-5 text-white shadow-xl">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3"><span className="rounded-xl bg-emerald-400/15 p-3 text-emerald-300"><CircleDollarSign /></span><div><h3 className="text-xl font-black">Platform Revenue Control</h3><p className="text-xs text-emerald-100/65">Super Admin only · changes affect new settlements immediately</p></div></div>
+          <button onClick={onSave} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-white shadow-lg hover:bg-emerald-400"><Save size={17} /> Save & Activate</button>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {REVENUE_FIELDS.map(field => {
+          const shownValue = field.kind === 'rate' ? Number(settings[field.key] || 0) * 100 : Number(settings[field.key] || 0);
+          const enabled = shownValue > 0;
+          return <label key={field.key} className="rounded-2xl border border-gray-200 bg-gray-50 p-4 transition focus-within:border-emerald-400 focus-within:bg-white">
+            <span className="flex items-start justify-between gap-2"><span><span className="block text-sm font-black text-gray-900">{field.label}</span><span className="mt-1 block text-[11px] leading-4 text-gray-500">{field.note}</span></span><span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-500'}`}>{enabled ? 'Active' : '0.00'}</span></span>
+            <span className="mt-4 flex items-center overflow-hidden rounded-xl border border-gray-300 bg-white focus-within:ring-2 focus-within:ring-emerald-200"><span className="px-3 font-black text-gray-400">{field.kind === 'rate' ? '%' : '$'}</span><input type="number" min="0" max={field.kind === 'rate' ? '100' : '100'} step={field.kind === 'rate' ? '0.01' : '0.01'} value={shownValue} onChange={event => onChange(field.key, field.kind === 'rate' ? Number(event.target.value) / 100 : Number(event.target.value))} className="min-w-0 flex-1 border-0 px-1 py-3 text-lg font-black text-gray-900 outline-none" /></span>
+          </label>;
+        })}
+      </div>
+      {audit?.length > 0 && <div className="rounded-2xl border border-gray-200 bg-white p-4"><h4 className="font-black text-gray-900">Recent protected changes</h4><div className="mt-3 divide-y divide-gray-100">{audit.slice(0, 5).map(item => <div key={item.id} className="flex flex-wrap justify-between gap-2 py-3 text-xs"><span className="font-bold text-gray-700">{item.adminUsername}</span><span className="text-gray-500">{new Date(item.changedAt).toLocaleString()}</span></div>)}</div></div>}
+    </div>
+  );
 };
 
 const Settings = ({ 
@@ -34,6 +74,9 @@ const Settings = ({
   const [otpEnabled, setOtpEnabled] = useState(adminSettings?.otpEnabled !== false);
   const [phoneAuthEnabled, setPhoneAuthEnabled] = useState(adminSettings?.phoneAuthEnabled !== false);
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [revenueSettings, setRevenueSettings] = useState<any>(null);
+  const [revenueAudit, setRevenueAudit] = useState<any[]>([]);
+  const fullAdmin = isFullAdmin(adminUser);
 
   useEffect(() => {
     setEditablePaymentSettings(paymentSettings);
@@ -45,6 +88,13 @@ const Settings = ({
   }, [adminSettings?.adCampaigns]);
   useEffect(() => setOtpEnabled(adminSettings?.otpEnabled !== false), [adminSettings?.otpEnabled]);
   useEffect(() => setPhoneAuthEnabled(adminSettings?.phoneAuthEnabled !== false), [adminSettings?.phoneAuthEnabled]);
+  useEffect(() => {
+    if (!fullAdmin || !adminUser?.id) return;
+    fetch(`/api/admin/revenue-settings?userId=${adminUser.id}`)
+      .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error); return data; })
+      .then(data => { setRevenueSettings(data.settings); setRevenueAudit(data.audit || []); })
+      .catch(error => setNotification({ type: 'error', message: userErrorMessage(error, 'Revenue settings could not be loaded.') }));
+  }, [fullAdmin, adminUser?.id]);
 
   const updateVipTier = (key, field, value) => setEditableVipTiers(current => ({ ...current, [key]: { ...current[key], [field]: value } }));
   const updateAdCampaign = (id, field, value) => setEditableAdSettings(current => current.map(campaign => campaign.id === id ? { ...campaign, [field]: value } : campaign));
@@ -94,6 +144,9 @@ const Settings = ({
           <button onClick={() => setSettingsView('vip')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'vip' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
             VIP Plans
           </button>
+          {fullAdmin && <button onClick={() => setSettingsView('revenue')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'revenue' ? 'border-emerald-500 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+            Revenue Control
+          </button>}
           <button onClick={() => setSettingsView('ads')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'ads' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Ads & Notices</button>
           <button onClick={() => setSettingsView('security')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'security' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>Login Security</button>
           <button onClick={() => setSettingsView('admin')} className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${settingsView === 'admin' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
@@ -109,6 +162,22 @@ const Settings = ({
         )}
 
       <div className="mt-6">
+        {settingsView === 'revenue' && fullAdmin && (
+          <RevenueControl
+            settings={revenueSettings}
+            audit={revenueAudit}
+            onChange={(key, value) => setRevenueSettings(current => ({ ...current, [key]: value }))}
+            onSave={async () => {
+              try {
+                const response = await fetch(`/api/admin/revenue-settings?userId=${adminUser.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(revenueSettings) });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Revenue settings could not be saved.');
+                setRevenueSettings(data.settings); setRevenueAudit(data.audit || []);
+                showNotification('success', 'Revenue settings saved and activated.');
+              } catch (error: any) { showNotification('error', userErrorMessage(error, 'Revenue settings could not be saved.')); }
+            }}
+          />
+        )}
         {settingsView === 'security' && (
           <div className="max-w-3xl space-y-4">
             <div><h3 className="text-xl font-bold">Email OTP Verification</h3><p className="mt-1 text-sm text-gray-500">Control whether users must receive and enter an email code during signup, legacy login, and Google onboarding.</p></div>

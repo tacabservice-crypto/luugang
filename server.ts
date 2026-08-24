@@ -137,7 +137,46 @@ const VIP_TIERS: Record<string, VipTier> = {
   },
 };
 
-const RAKE_PERCENTAGE = 0.10; // 10% rake
+const RAKE_PERCENTAGE = 0.10; // Legacy/default 10% rake
+
+interface RevenueSettings {
+  gameRakeRate: number;
+  spectatorBetCommissionRate: number;
+  botWinCharge: number;
+  botPlayerWinReward: number;
+  noPlayWithdrawalFeeRate: number;
+  minimumWithdrawalFee: number;
+  normalWithdrawalFeeRate: number;
+  tournamentCommissionRate: number;
+  manualForfeitPenaltyRate: number;
+  inactivityPenaltyRate: number;
+  depositFeeRate: number;
+  privateMatchFeeRate: number;
+}
+
+interface RevenueSettingsAudit {
+  id: string;
+  adminId: string;
+  adminUsername: string;
+  changedAt: number;
+  before: RevenueSettings;
+  after: RevenueSettings;
+}
+
+const DEFAULT_REVENUE_SETTINGS: RevenueSettings = {
+  gameRakeRate: RAKE_PERCENTAGE,
+  spectatorBetCommissionRate: 0.10,
+  botWinCharge: 0.02,
+  botPlayerWinReward: 0.01,
+  noPlayWithdrawalFeeRate: 0.10,
+  minimumWithdrawalFee: 0.10,
+  normalWithdrawalFeeRate: 0,
+  tournamentCommissionRate: 0.10,
+  manualForfeitPenaltyRate: 0,
+  inactivityPenaltyRate: 0,
+  depositFeeRate: 0,
+  privateMatchFeeRate: 0,
+};
 
 const app = express();
 app.set('trust proxy', 1);
@@ -711,6 +750,8 @@ interface DBStore {
   adCampaigns: PlatformAdSettings[];
   spectatorBets: SpectatorBet[];
   directMessages: DirectMessage[];
+  revenueSettings: RevenueSettings;
+  revenueSettingsAudit: RevenueSettingsAudit[];
 }
 
 const DEFAULT_AD_SETTINGS: PlatformAdSettings = { enabled: false, format: 'banner', placement: 'all', companyName: '', title: '', message: '', imageUrl: '', linkUrl: '', durationSeconds: 3, intervalSeconds: 60, adsenseClient: '', adsenseSlot: '' };
@@ -774,6 +815,8 @@ let store: DBStore = {
   adCampaigns: [],
   spectatorBets: [],
   directMessages: [],
+  revenueSettings: { ...DEFAULT_REVENUE_SETTINGS },
+  revenueSettingsAudit: [],
 };
 
 // One live listener per collection replaces thousands of identical reads from
@@ -968,6 +1011,8 @@ function loadStore() {
       store.transactions = parsed.transactions || [];
       store.spectatorBets = parsed.spectatorBets || [];
       store.directMessages = parsed.directMessages || [];
+      store.revenueSettings = { ...DEFAULT_REVENUE_SETTINGS, ...(parsed.revenueSettings || {}) };
+      store.revenueSettingsAudit = Array.isArray(parsed.revenueSettingsAudit) ? parsed.revenueSettingsAudit.slice(0, 100) : [];
       store.rooms = parsed.rooms || {};
       // Matchmaking queues are transient live state and must always start fresh
       store.matchmakingQueues = {
@@ -1036,6 +1081,8 @@ async function loadStoreFromFirestore(): Promise<boolean> {
         store.transactions = parsed.transactions || [];
         store.spectatorBets = parsed.spectatorBets || [];
         store.directMessages = parsed.directMessages || [];
+        store.revenueSettings = { ...DEFAULT_REVENUE_SETTINGS, ...(parsed.revenueSettings || {}) };
+        store.revenueSettingsAudit = Array.isArray(parsed.revenueSettingsAudit) ? parsed.revenueSettingsAudit.slice(0, 100) : [];
         store.rooms = parsed.rooms || {};
         // Matchmaking queues are transient live state and must always start fresh
         store.matchmakingQueues = {
@@ -1983,7 +2030,7 @@ async function settleSpectatorBets(room: GameRoom) {
       const targetWon = winnerIds.some(winnerId => marketMemberIds.includes(winnerId));
       const winningPrediction: 'W' | 'L' = targetWon ? 'W' : 'L';
       const winnerPool = Number(marketBets.filter(bet => bet.prediction === winningPrediction).reduce((sum, bet) => sum + bet.stake, 0).toFixed(2));
-      const distributablePool = Number((totalPool * 0.90).toFixed(2));
+      const distributablePool = Number((totalPool * (1 - store.revenueSettings.spectatorBetCommissionRate)).toFixed(2));
       const shouldRefund = room.status === 'cancelled' || winnerIds.length === 0 || winnerPool === 0 || distributablePool <= winnerPool;
       const winningBets = marketBets.filter(bet => bet.prediction === winningPrediction);
       let distributed = 0;
@@ -2018,7 +2065,7 @@ async function settleSpectatorBets(room: GameRoom) {
       }
       if (!shouldRefund) {
         const commission = Number((totalPool - distributablePool).toFixed(2));
-        recordHouseRevenue('betting_margin', commission, `${room.id}:${targetPlayerId}`, `10% spectator pool commission for match ${room.id}.`);
+        recordHouseRevenue('betting_margin', commission, `${room.id}:${targetPlayerId}`, `${(store.revenueSettings.spectatorBetCommissionRate * 100).toFixed(2)}% spectator pool commission for match ${room.id}.`);
       }
     }
     await saveStoreAndWait();
@@ -2056,12 +2103,13 @@ function recordHouseRevenue(category: RevenueCategory, amount: number, reference
 
 function effectiveRakeForUsers(userIds: string[]): number {
   const realUsers = userIds.map(id => store.users[id]).filter(Boolean);
-  if (!realUsers.length) return RAKE_PERCENTAGE;
+  const configuredRake = store.revenueSettings.gameRakeRate;
+  if (!realUsers.length) return configuredRake;
   const totalDiscount = realUsers.reduce((sum, user) => {
     if (!user.vip || user.vip.expires <= Date.now()) return sum;
     return sum + Number(store.vipTiers[user.vip.tier]?.rakeDiscount || 0);
   }, 0);
-  return Math.max(0, RAKE_PERCENTAGE - (totalDiscount / realUsers.length));
+  return Math.max(0, configuredRake - (totalDiscount / realUsers.length));
 }
 
 function getWithdrawableBalance(userId: string, excludeRequestId?: string): number {
@@ -2088,10 +2136,12 @@ function hasCompletedPaidGame(userId: string): boolean {
 
 function getWithdrawalQuote(userId: string, amount: number) {
   const playedPaidGame = hasCompletedPaidGame(userId);
-  const feeRate = playedPaidGame ? NORMAL_WITHDRAWAL_FEE_RATE : NO_PLAY_WITHDRAWAL_FEE_RATE;
-  const fee = playedPaidGame
+  const feeRate = playedPaidGame ? store.revenueSettings.normalWithdrawalFeeRate : store.revenueSettings.noPlayWithdrawalFeeRate;
+  const fee = feeRate <= 0
     ? 0
-    : Math.min(amount, Math.max(MINIMUM_WITHDRAWAL_FEE, Number((amount * feeRate).toFixed(2))));
+    : Math.min(amount, playedPaidGame
+      ? Number((amount * feeRate).toFixed(2))
+      : Math.max(store.revenueSettings.minimumWithdrawalFee, Number((amount * feeRate).toFixed(2))));
   return { feeRate, fee, netAmount: Number((amount - fee).toFixed(2)), playedPaidGame };
 }
 
@@ -2150,13 +2200,14 @@ function settleBotEconomy(room: GameRoom, winnerIds: string[]) {
     if (!profile) return;
 
     if (winnerIds.includes(player.userId)) {
-      profile.balance = Number((profile.balance + 0.01).toFixed(2));
+      const reward = store.revenueSettings.botPlayerWinReward;
+      profile.balance = Number((profile.balance + reward).toFixed(2));
       profile.winCount = (profile.winCount || 0) + 1;
-      room.gameState.winnerPayouts![player.userId] = 0.01;
-      if (room.gameState.winnerId === player.userId) room.gameState.winnerPayout = 0.01;
-      addTransaction(player.userId, 'win_payout', 0.01, room.id, `${marker}: player win reward.`);
+      room.gameState.winnerPayouts![player.userId] = reward;
+      if (room.gameState.winnerId === player.userId) room.gameState.winnerPayout = reward;
+      addTransaction(player.userId, 'win_payout', reward, room.id, `${marker}: player win reward.`);
     } else {
-      const deduction = Math.min(0.02, Number(profile.balance || 0));
+      const deduction = Math.min(store.revenueSettings.botWinCharge, Number(profile.balance || 0));
       profile.balance = Number(Math.max(0, profile.balance - deduction).toFixed(2));
       profile.lossCount = (profile.lossCount || 0) + 1;
       addTransaction(player.userId, 'app_commission', deduction, room.id, `${marker}: bot win charge.`);
@@ -2523,8 +2574,8 @@ function moveTokenLogic(room: GameRoom, tokenId: string, diceValue: number) {
       gs.winnerIds = botWinnerIds;
       settleBotEconomy(room, botWinnerIds);
       addLog(room, botWinnerIds.some(id => !isBotPlayer(id))
-        ? '🏆 Bot game won: each winning player receives $0.01.'
-        : '🤖 Bot won: each human player is charged $0.02.');
+        ? `🏆 Bot game won: each winning player receives $${store.revenueSettings.botPlayerWinReward.toFixed(2)}.`
+        : `🤖 Bot won: each human player is charged $${store.revenueSettings.botWinCharge.toFixed(2)}.`);
       return;
     }
 
@@ -4653,7 +4704,7 @@ function checkAndStartTournaments() {
       // Repair only legacy auto-seeded tournaments whose advertised prize was
       // greater than all possible entry fees. Custom admin tournaments are
       // validated when they are created or edited.
-      const maximumSustainablePrize = Number((t.entryFee * t.maxPlayers * 0.9).toFixed(2));
+      const maximumSustainablePrize = Number((t.entryFee * t.maxPlayers * (1 - store.revenueSettings.tournamentCommissionRate)).toFixed(2));
       if (/^tourney_(weekly|weekend|daily)_/.test(t.id) && t.prizePool > maximumSustainablePrize) {
         t.prizePool = maximumSustainablePrize;
       }
@@ -4910,12 +4961,12 @@ app.get('/api/rooms/:roomId/spectator-bet', (req, res) => {
       winPool,
       lossPool,
       totalPool,
-      winOdds: winPool > 0 ? Number((totalPool * 0.90 / winPool).toFixed(2)) : null,
-      lossOdds: lossPool > 0 ? Number((totalPool * 0.90 / lossPool).toFixed(2)) : null,
+      winOdds: winPool > 0 ? Number((totalPool * (1 - store.revenueSettings.spectatorBetCommissionRate) / winPool).toFixed(2)) : null,
+      lossOdds: lossPool > 0 ? Number((totalPool * (1 - store.revenueSettings.spectatorBetCommissionRate) / lossPool).toFixed(2)) : null,
       progress,
     };
   });
-  res.json({ bet, markets, commissionRate: 0.10, minStake: 0.10, maxStake: 10 });
+  res.json({ bet, markets, commissionRate: store.revenueSettings.spectatorBetCommissionRate, minStake: 0.10, maxStake: 10 });
 });
 
 app.post('/api/rooms/:roomId/spectator-bet', async (req, res) => {
@@ -4957,7 +5008,7 @@ app.post('/api/rooms/:roomId/spectator-bet', async (req, res) => {
     return res.status(409).json({ error: remaining >= 0.10 ? `Risk limit: dhinacan waxaad hadda ku dari kartaa ugu badnaan $${remaining.toFixed(2)}.` : 'Dhinacan bet badan ayaa saaran; sug bet ka soo horjeeda.' });
   }
   const totalPoolAfter = Number((winPool + lossPool + stake).toFixed(2));
-  const estimatedOdds = Number((totalPoolAfter * 0.90 / selectedPoolAfter).toFixed(2));
+  const estimatedOdds = Number((totalPoolAfter * (1 - store.revenueSettings.spectatorBetCommissionRate) / selectedPoolAfter).toFixed(2));
   const estimatedPayout = estimatedOdds > 1 ? Number((stake * estimatedOdds).toFixed(2)) : stake;
   const bet: SpectatorBet = {
     id: `sbet_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
@@ -5334,7 +5385,7 @@ function startMatchedRoom(matchedUsers: Array<{ id: string; username: string; av
 
   resetPlayerInactivity(players[0]);
 
-  // Bot games use a fixed +$0.01 / -$0.02 result and never lock the selected stake.
+  // Bot games use the Super Admin-configured reward/charge and never lock the selected stake.
   const usesBotEconomy = players.some(player => isBotPlayer(player.userId));
   let totalEscrow = 0;
   players.forEach(p => {
@@ -7264,9 +7315,9 @@ app.post('/api/admin/tournaments/create', hasPermission('tournaments'), async (r
   if (!Number.isFinite(parsedEntryFee) || parsedEntryFee <= 0 || !Number.isFinite(parsedPrizePool) || parsedPrizePool <= 0 || !Number.isInteger(parsedMaxPlayers) || parsedMaxPlayers < 2) {
     return res.status(400).json({ error: 'Entry fee, prize pool and player capacity must be valid positive values.' });
   }
-  const sustainablePrizeLimit = Number((parsedEntryFee * parsedMaxPlayers * 0.9).toFixed(2));
+  const sustainablePrizeLimit = Number((parsedEntryFee * parsedMaxPlayers * (1 - store.revenueSettings.tournamentCommissionRate)).toFixed(2));
   if (parsedPrizePool > sustainablePrizeLimit) {
-    return res.status(400).json({ error: `Prize pool cannot exceed $${sustainablePrizeLimit.toFixed(2)} (90% of maximum entry fees).` });
+    return res.status(400).json({ error: `Prize pool cannot exceed $${sustainablePrizeLimit.toFixed(2)} after the configured tournament margin.` });
   }
 
   const id = `tourney_${Date.now()}`;
@@ -7422,9 +7473,9 @@ app.post('/api/admin/tournaments/:id/edit', hasPermission('tournaments'), async 
   if (!Number.isFinite(nextEntryFee) || nextEntryFee <= 0 || !Number.isFinite(nextPrizePool) || nextPrizePool <= 0 || !Number.isInteger(nextMaxPlayers) || nextMaxPlayers < Math.max(2, tournament.players.length)) {
     return res.status(400).json({ error: 'Tournament financial settings or player capacity are invalid.' });
   }
-  const sustainablePrizeLimit = Number((nextEntryFee * nextMaxPlayers * 0.9).toFixed(2));
+  const sustainablePrizeLimit = Number((nextEntryFee * nextMaxPlayers * (1 - store.revenueSettings.tournamentCommissionRate)).toFixed(2));
   if (nextPrizePool > sustainablePrizeLimit) {
-    return res.status(400).json({ error: `Prize pool cannot exceed $${sustainablePrizeLimit.toFixed(2)} (90% of maximum entry fees).` });
+    return res.status(400).json({ error: `Prize pool cannot exceed $${sustainablePrizeLimit.toFixed(2)} after the configured tournament margin.` });
   }
   if (name) tournament.name = String(name).trim();
   tournament.entryFee = nextEntryFee;
@@ -7440,6 +7491,47 @@ app.post('/api/admin/tournaments/:id/edit', hasPermission('tournaments'), async 
 
 app.get('/api/admin/vip-tiers', hasPermission('settings'), (_req, res) => res.json(store.vipTiers));
 app.post('/api/admin/vip-tiers', hasPermission('settings'), saveVipTiersFromAdmin);
+
+app.get('/api/admin/revenue-settings', hasPermission('all'), (_req, res) => {
+  res.json({ settings: store.revenueSettings, audit: store.revenueSettingsAudit.slice(0, 20) });
+});
+
+app.post('/api/admin/revenue-settings', hasPermission('all'), async (req, res) => {
+  const rateKeys: Array<keyof RevenueSettings> = [
+    'gameRakeRate', 'spectatorBetCommissionRate', 'noPlayWithdrawalFeeRate',
+    'normalWithdrawalFeeRate', 'tournamentCommissionRate', 'manualForfeitPenaltyRate',
+    'inactivityPenaltyRate', 'depositFeeRate', 'privateMatchFeeRate'
+  ];
+  const amountKeys: Array<keyof RevenueSettings> = ['botWinCharge', 'botPlayerWinReward', 'minimumWithdrawalFee'];
+  const next = { ...store.revenueSettings };
+  for (const key of rateKeys) {
+    const value = Number(req.body?.[key]);
+    if (!Number.isFinite(value) || value < 0 || value > 1) return res.status(400).json({ error: `${key} must be between 0% and 100%.` });
+    (next as any)[key] = Number(value.toFixed(4));
+  }
+  for (const key of amountKeys) {
+    const value = Number(req.body?.[key]);
+    if (!Number.isFinite(value) || value < 0 || value > 100) return res.status(400).json({ error: `${key} must be between $0.00 and $100.00.` });
+    (next as any)[key] = Number(value.toFixed(2));
+  }
+  if (next.botPlayerWinReward > next.botWinCharge && next.botWinCharge > 0) {
+    return res.status(400).json({ error: 'Bot player reward cannot exceed the bot win charge while that charge is enabled.' });
+  }
+
+  const admin = (req as any).adminUser as AdminUser;
+  const audit: RevenueSettingsAudit = {
+    id: `revenue_audit_${Date.now()}`,
+    adminId: admin.id,
+    adminUsername: admin.username,
+    changedAt: Date.now(),
+    before: { ...store.revenueSettings },
+    after: { ...next },
+  };
+  store.revenueSettings = next;
+  store.revenueSettingsAudit = [audit, ...store.revenueSettingsAudit].slice(0, 100);
+  await saveStoreAndWait();
+  res.json({ success: true, settings: next, audit: store.revenueSettingsAudit.slice(0, 20) });
+});
 
 app.get('/api/admin/settings', hasPermission('settings'), async (req, res) => {
     if (!db) return res.status(500).json({ error: 'Database not initialized' });
