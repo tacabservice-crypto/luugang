@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="so">
+<head>
+<meta charset="utf-8">
+<title>LudoSom — Buugga Nidaamka Lacagta iyo Dakhliga</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm; }
+  * { box-sizing: border-box; }
+  body { margin:0; color:#241b38; font-family: Aptos, Calibri, Arial, sans-serif; font-size:10.5pt; line-height:1.48; background:#fff; }
+  .cover { min-height:245mm; padding:28mm 20mm; color:white; background:linear-gradient(145deg,#120629 0%,#3b1378 48%,#132d68 100%); position:relative; page-break-after:always; }
+  .cover:after { content:""; position:absolute; inset:12mm; border:1px solid rgba(255,215,90,.45); border-radius:18px; }
+  .brand { color:#ffd85a; font-size:13pt; font-weight:800; letter-spacing:3px; }
+  .cover h1 { margin:38mm 0 6mm; max-width:145mm; font-size:34pt; line-height:1.04; }
+  .cover h2 { color:#d8c7ff; max-width:135mm; font-size:16pt; font-weight:500; }
+  .cover .meta { position:absolute; bottom:30mm; left:20mm; color:#d8c7ff; }
+  h1 { color:#32106c; font-size:24pt; margin:0 0 8mm; }
+  h2 { color:#32106c; font-size:17pt; border-bottom:2px solid #e4d7ff; padding-bottom:2mm; margin:10mm 0 4mm; page-break-after:avoid; }
+  h3 { color:#6540a5; font-size:12.5pt; margin:6mm 0 2mm; page-break-after:avoid; }
+  p { margin:0 0 3mm; }
+  ul,ol { margin:2mm 0 4mm 7mm; padding-left:5mm; }
+  li { margin-bottom:1.4mm; }
+  table { width:100%; border-collapse:collapse; margin:3mm 0 6mm; font-size:9.1pt; page-break-inside:avoid; }
+  th { background:#3b176d; color:white; text-align:left; padding:2.3mm; }
+  td { border:1px solid #ded5ea; padding:2.2mm; vertical-align:top; }
+  tr:nth-child(even) td { background:#f8f5fc; }
+  .chapter { page-break-before:always; }
+  .callout { border-left:5px solid #7c3aed; background:#f5f0ff; padding:4mm; border-radius:0 8px 8px 0; margin:4mm 0; }
+  .warning { border-left-color:#d97706; background:#fff7e6; }
+  .danger { border-left-color:#dc2626; background:#fff0f0; }
+  .good { border-left-color:#059669; background:#eafbf4; }
+  .formula { background:#171027; color:#f7eaff; padding:3.5mm; border-radius:8px; font-family:Consolas,monospace; margin:3mm 0; }
+  .tag { display:inline-block; background:#e8ddff; color:#4c1d95; border-radius:10px; padding:.4mm 2mm; font-size:8pt; font-weight:700; }
+  .small { color:#6d6578; font-size:8.8pt; }
+  .toc td { border:0; border-bottom:1px dotted #bbb; padding:1.7mm 0; background:white!important; }
+  .num { font-family:Consolas,monospace; font-weight:700; white-space:nowrap; }
+  .footer-note { margin-top:10mm; padding-top:3mm; border-top:1px solid #ddd; color:#756c80; font-size:8pt; }
+</style>
+</head>
+<body>
+<section class="cover">
+  <div class="brand">LUDO$OM · FAA’IIDO QAR$OON</div>
+  <h1>Buugga Nidaamka Lacagta iyo Dakhliga</h1>
+  <h2>Sharaxaad ganacsi, xisaabeed iyo farsamo oo ku saabsan Player, Agent, Admin, Games, VIP, Tournaments, Betting, Refunds iyo Penalties.</h2>
+  <div class="meta"><b>Nooca 1.0</b><br>La diyaariyey: 24 Agoosto 2026<br>Ku salaysan code-ka production-ka ee hadda jira</div>
+</section>
+
+<h1>Hordhac iyo Ujeeddo</h1>
+<p>Dukumentigan wuxuu sharxayaa dhammaan meelaha lacagtu ka soo gasho, meelaha ay ku baxdo, cidda leh, sida loo xisaabiyo, sida loo diiwaangeliyo, iyo xaaladaha lacag celinta ama ganaaxa ee LudoSom. Tirooyinka ku qoran waa kuwa code-ka hadda ku jira; admin-ku wuxuu beddeli karaa qaar ka mid ah qorshayaasha sida VIP, tournaments, agents iyo payment providers.</p>
+<div class="callout"><b>Qaanuunka ugu muhiimsan:</b> lacagta stake-ka ah marka ciyaartu bilaabato waxaa laga saaraa wallet-ka ciyaaryahan kasta oo lagu xiraa <i>escrow</i>. Marka server-ku xaqiijiyo natiijada, escrow-ga waxaa loo kala diraa winner payout iyo app revenue.</div>
+<div class="callout warning"><b>Gross iyo Net:</b> qoraal sida “Bet $0.30 · Win $0.60” wuxuu muujinayaa pot-ka kahor app rake. Lacagta winner-ka dhab ahaan loo credit-gareeyo user caadi ah waa $0.54.</div>
+
+<h2>Tusmada Buugga</h2>
+<table class="toc">
+<tr><td>1. Khariidadda lacagta iyo erayada muhiimka ah</td><td>Player → Escrow/Agent/Admin → Settlement</td></tr>
+<tr><td>2. Wallet, signup bonus, deposit iyo withdrawal</td><td>Gelinta iyo bixinta lacagta</td></tr>
+<tr><td>3. Ciyaaraha dadka iyo rake</td><td>Solo, 3/4-player iyo 2v2</td></tr>
+<tr><td>4. VIP</td><td>Qiime, muddo iyo rake discount</td></tr>
+<tr><td>5. Bot economy</td><td>+$0.01 / −$0.02</td></tr>
+<tr><td>6. Forfeit, inactivity, exit iyo refund</td><td>Ka bixista iyo ciyaar-joojinta</td></tr>
+<tr><td>7. Spectator betting</td><td>Dynamic pool, odds iyo 10%</td></tr>
+<tr><td>8. Tournaments</td><td>Entry, prize, margin, check-in iyo cancellation</td></tr>
+<tr><td>9. Agent</td><td>Float, commission, player deposit/withdrawal</td></tr>
+<tr><td>10. Admin iyo cashier</td><td>Revenue dashboard, approvals iyo payroll</td></tr>
+<tr><td>11. Transaction ledger iyo kaydinta xogta</td><td>Audit trail</td></tr>
+<tr><td>12. Shaxda dakhliga app-ka</td><td>9 revenue categories</td></tr>
+<tr><td>13. Meelaha aan dakhli toos ah lahayn</td><td>Ads, practice, voice iyo daawasho</td></tr>
+<tr><td>14. Risk iyo talooyin sixid</td><td>Qodobbada la ogaaday</td></tr>
+</table>
+
+<section class="chapter">
+<h1>1. Khariidadda Lacagta</h1>
+<h2>1.1 Erayada muhiimka ah</h2>
+<table>
+<tr><th>Eray</th><th>Macnaha</th><th>Yaa leh?</th></tr>
+<tr><td>Wallet balance</td><td>Lacagta hadda ku jirta akoonka user-ka.</td><td>Player</td></tr>
+<tr><td>Stake / Bet Amount</td><td>Lacagta qof kasta ku galayo ciyaarta.</td><td>Player ilaa la lock-gareeyo</td></tr>
+<tr><td>Escrow</td><td>Wadarta stakes-ka laga jaray ciyaartoyda, sugaysa natiijada server-ka.</td><td>Ku-meelgaar; cidna weli ma qaadan</td></tr>
+<tr><td>Gross pot</td><td>Stake × tirada ciyaartoyda lacagta bixisay.</td><td>Escrow</td></tr>
+<tr><td>Rake</td><td>Boqolkiiba app-ku ka qaato gross pot-ka.</td><td>App/Admin</td></tr>
+<tr><td>Net payout</td><td>Gross pot − rake; lacagta winners-ka loo credit-gareeyo.</td><td>Winner(s)</td></tr>
+<tr><td>Net profit</td><td>Net payout − stake-gii winner-ka laga jaray.</td><td>Winner</td></tr>
+<tr><td>Float</td><td>Lacag shaqo oo agent-ku ku maamulo player deposits/withdrawals.</td><td>Agent ledger</td></tr>
+<tr><td>House revenue</td><td>Rake, fees, VIP iyo margins si rasmi ah loogu qoray app commission.</td><td>App/Admin</td></tr>
+</table>
+
+<h2>1.2 Socodka guud</h2>
+<div class="formula">Deposit → Player Wallet → Stake Locked in Escrow → Server Result → Winner Payout + App Revenue</div>
+<p>Deposit iyo withdrawal lacag faa’iido ma aha iyaga qudhoodu; waa dhaqdhaqaaq wallet. App-ku dakhli wuxuu helaa marka rake, fee, VIP price, tournament margin ama betting margin la diiwaangeliyo.</p>
+</section>
+
+<section class="chapter">
+<h1>2. Wallet, Bonus, Deposit iyo Withdrawal</h1>
+<h2>2.1 Signup bonus</h2>
+<ul>
+<li>User cusub wuxuu helaa <b>$1.00 welcome bonus</b>.</li>
+<li>Bonus-ku wallet-ka wuu ka muuqdaa oo ciyaar ayaa lagu geli karaa.</li>
+<li>Bonus-ku withdrawal ahaan ma furmo ilaa user-ku sameeyo ugu yaraan <b>$5.00 approved deposits</b>.</li>
+<li>Admin stats-ku welcome bonuses-ka wuxuu u tiriyaa kharash, wuxuuna ka jaraa net platform earnings.</li>
+</ul>
+
+<h2>2.2 Deposit</h2>
+<table>
+<tr><th>Waddo</th><th>Waxa dhacaya marka la ansixiyo</th><th>Dakhli app?</th></tr>
+<tr><td>Admin/Cashier manual</td><td>Player balance + amount; request approved; transaction “deposit”.</td><td>Maya</td></tr>
+<tr><td>Agent manual</td><td>Player balance + amount; agent float − amount.</td><td>Maya; waa float movement</td></tr>
+<tr><td>Payment API</td><td>Haddii provider enabled/API key leeyahay, wallet + amount.</td><td>Code-ku deposit fee ma qaado</td></tr>
+<tr><td>Simulated endpoint</td><td>Wallet + amount oo transaction la qoro.</td><td>Maya; production control ahaan waa in la adkeeyo</td></tr>
+</table>
+<p>Promo-code ku xiran user wuxuu ku xiran yahay agent-kiisa; agent kale looma diri karo. User aan agent lahayn wuxuu maraa admin/cashier magaalada la doortay.</p>
+
+<h2>2.3 Withdrawal</h2>
+<ul>
+<li>Minimum withdrawal: <b>$2.00</b>.</li>
+<li>User balance-ku waa inuu daboolaa amount-ka.</li>
+<li>Withdrawable balance-ku wuxuu ku salaysan yahay approved real deposits + win payouts + bonus la furay − completed/pending withdrawals.</li>
+<li>Refunds-ka iyo welcome bonus-ka aan furmin si toos ah uguma biiraan withdrawable formula.</li>
+<li>Haddii user-ku ciyaaray paid game: normal withdrawal fee = <b>0%</b>.</li>
+<li>Haddii uusan paid game dhammayn: fee = <b>10%</b>, ugu yaraan <b>$0.10</b>.</li>
+</ul>
+<h3>Tusaale: withdrawal kahor paid game</h3>
+<div class="formula">Request $10.00 → Fee $1.00 → User wallet −$10.00 → Net cash paid $9.00 → App revenue $1.00</div>
+<h3>Tusaale: withdrawal kadib paid game</h3>
+<div class="formula">Request $10.00 → Fee $0.00 → User wallet −$10.00 → Net cash paid $10.00</div>
+<p>Agent withdrawal-ka wuxuu player-ka ka jaraa full request amount; agent float-ku wuxuu ku kordhaa net amount-ka uu dhab ahaan bixiyey, fee-guna app revenue ayuu noqdaa.</p>
+
+<h2>2.4 Pending iyo rejected requests</h2>
+<p>Manual request marka la sameeyo lacagta wali lama dhaqaajiyo. Approved kaliya ayaa wallet/float beddela. Rejected request balance ma beddelo. Pending withdrawal-ku wuxuu yareeyaa “withdrawable balance” si duplicate withdrawal looga hortago.</p>
+</section>
+
+<section class="chapter">
+<h1>3. Paid Games iyo Rake</h1>
+<h2>3.1 Stakes-ka la heli karo</h2>
+<p>Preset stakes: <span class="num">$0.30, $0.50, $0.75, $1, $2, $5, $10, $25, $50, $100</span>. Custom stake: minimum <b>$0.01</b>, maximum <b>$100</b>, ugu badnaan laba decimal.</p>
+<div class="formula">Gross Pot = Stake × Real Players<br>Standard Rake = Gross Pot × 10%<br>Winner Payout = Gross Pot − Rake</div>
+
+<h2>3.2 Laba qof Solo — user caadi ah</h2>
+<table>
+<tr><th>Stake qofkiiba</th><th>Gross pot</th><th>App 10%</th><th>Winner payout</th><th>Winner net profit</th><th>Loser loss</th></tr>
+<tr><td>$0.30</td><td>$0.60</td><td>$0.06</td><td>$0.54</td><td>$0.24</td><td>$0.30</td></tr>
+<tr><td>$0.50</td><td>$1.00</td><td>$0.10</td><td>$0.90</td><td>$0.40</td><td>$0.50</td></tr>
+<tr><td>$0.75</td><td>$1.50</td><td>$0.15</td><td>$1.35</td><td>$0.60</td><td>$0.75</td></tr>
+<tr><td>$1.00</td><td>$2.00</td><td>$0.20</td><td>$1.80</td><td>$0.80</td><td>$1.00</td></tr>
+<tr><td>$2.00</td><td>$4.00</td><td>$0.40</td><td>$3.60</td><td>$1.60</td><td>$2.00</td></tr>
+<tr><td>$5.00</td><td>$10.00</td><td>$1.00</td><td>$9.00</td><td>$4.00</td><td>$5.00</td></tr>
+<tr><td>$10.00</td><td>$20.00</td><td>$2.00</td><td>$18.00</td><td>$8.00</td><td>$10.00</td></tr>
+<tr><td>$25.00</td><td>$50.00</td><td>$5.00</td><td>$45.00</td><td>$20.00</td><td>$25.00</td></tr>
+<tr><td>$50.00</td><td>$100.00</td><td>$10.00</td><td>$90.00</td><td>$40.00</td><td>$50.00</td></tr>
+<tr><td>$100.00</td><td>$200.00</td><td>$20.00</td><td>$180.00</td><td>$80.00</td><td>$100.00</td></tr>
+</table>
+
+<h2>3.3 Saddex iyo afar qof Solo</h2>
+<table>
+<tr><th>Qaab</th><th>Stake</th><th>Pot</th><th>App</th><th>Hal winner payout</th><th>Winner profit</th></tr>
+<tr><td>3-player Solo</td><td>$0.30 qofkiiba</td><td>$0.90</td><td>$0.09</td><td>$0.81</td><td>$0.51</td></tr>
+<tr><td>4-player Solo</td><td>$0.30 qofkiiba</td><td>$1.20</td><td>$0.12</td><td>$1.08</td><td>$0.78</td></tr>
+</table>
+
+<h2>3.4 Partnership 2v2</h2>
+<p>Afarta qof stake isku mid ah ayay bixiyaan. Pot-ka net-ka ah waxaa si siman loogu qaybiyaa labada winner. Haddii cent aan si siman u qaybsamin, winner-ka ugu dambeeya ayaa helaya remainder-ka si total-ku u saxnaado.</p>
+<div class="formula">$0.30 × 4 = $1.20 pot<br>App = $0.12<br>Team payout = $1.08<br>Winner kasta = $0.54 (net profit $0.24)<br>Loser kasta = −$0.30</div>
+
+<div class="callout warning"><b>Rounding:</b> lacagta waxaa lagu qorayaa laba decimal. Custom stake $0.01, 2-player pot $0.02 wuxuu leeyahay theoretical rake $0.002 oo u wareega $0.00; payout-ku wuxuu noqon karaa $0.02. Sidaas darteed app-ku ciyaartaas rake dhab ah kama helo.</div>
+</section>
+
+<section class="chapter">
+<h1>4. VIP Economy</h1>
+<h2>4.1 Qorshayaasha default-ka</h2>
+<table>
+<tr><th>Plan</th><th>Qiime</th><th>Muddo</th><th>Rake discount</th><th>Effective rake</th></tr>
+<tr><td>Silver</td><td>$4</td><td>1 bil</td><td>1 percentage point</td><td>9%</td></tr>
+<tr><td>Gold</td><td>$10</td><td>1 bil</td><td>2 points</td><td>8%</td></tr>
+<tr><td>Platinum</td><td>$25</td><td>3 bilood</td><td>4 points</td><td>6%</td></tr>
+<tr><td>Diamond</td><td>$45</td><td>6 bilood</td><td>5 points</td><td>5%</td></tr>
+</table>
+<ul>
+<li>VIP price isla markiiba wallet-ka ayaa laga jaraa, dhammaantiisna app revenue ayuu noqdaa.</li>
+<li>Renewal isla tier ah wuxuu muddada cusub ka sii raaciyaa expiry-ga hadda jira.</li>
+<li>Tier kale ama expired plan wuxuu ka bilaabmaa waqtiga iibka.</li>
+<li>Admin-ku qiimaha, muddada, discount-ka iyo features-ka wuu beddeli karaa; discount kama badnaan karo base rake 10%.</li>
+</ul>
+
+<h2>4.2 $0.30 Solo payout marka winner VIP yahay</h2>
+<table>
+<tr><th>Winner</th><th>Rate</th><th>App (rounded)</th><th>Payout</th><th>Net profit</th></tr>
+<tr><td>Normal</td><td>10%</td><td>$0.06</td><td>$0.54</td><td>$0.24</td></tr>
+<tr><td>Silver</td><td>9%</td><td>qiyaastii $0.05</td><td>$0.55</td><td>$0.25</td></tr>
+<tr><td>Gold</td><td>8%</td><td>qiyaastii $0.05</td><td>$0.55</td><td>$0.25</td></tr>
+<tr><td>Platinum</td><td>6%</td><td>$0.04</td><td>$0.56</td><td>$0.26</td></tr>
+<tr><td>Diamond</td><td>5%</td><td>$0.03</td><td>$0.57</td><td>$0.27</td></tr>
+</table>
+<p>Team game-ka effective rake waxaa laga qaataa celceliska discounts-ka winners-ka dhabta ah. Losers-ka VIP status-kooda rate-ka ma beddelo.</p>
+</section>
+
+<section class="chapter">
+<h1>5. Bot Economy</h1>
+<p>Bot game-ku gebi ahaanba wuu ka duwan yahay paid human match:</p>
+<ul>
+<li>Stake-ka la doortay <b>lama lock-gareeyo</b>.</li>
+<li>Haddii human-ku badiyo: wallet + <b>$0.01</b>.</li>
+<li>Haddii bot-ku badiyo: human wallet − <b>$0.02</b>, laakiin lagama jari karo wax ka badan balance-ka jira.</li>
+<li>Bot charge-ka app revenue category-ga <b>bot_result</b> ayuu galaa.</li>
+<li>Team bot game: human winner kasta +$0.01; human loser kasta ilaa −$0.02.</li>
+</ul>
+<div class="callout"><b>Tusaale:</b> user balance $1.00, stake selector $50 ayuu saaran yahay, bot ayuu la ciyaaray. User hadduu badiyo wuxuu noqdaa $1.01; bot hadduu badiyo wuxuu noqdaa $0.98. $50 lama lock-gareeyo.</div>
+</section>
+
+<section class="chapter">
+<h1>6. Exit, Forfeit, Inactivity, Cancellation iyo Refund</h1>
+<table>
+<tr><th>Xaalad</th><th>Player money</th><th>Winner/App</th></tr>
+<tr><td>Ka bax waiting room kahor start</td><td>Stake wali lama lock-gareyn; wax ganaax ah ma jiro.</td><td>Qolku wuu sii jiraa ama wuu xirmaa.</td></tr>
+<tr><td>Pending join request cancel</td><td>Wax lacag ah lama jarin.</td><td>Wax dakhli ah ma jiro.</td></tr>
+<tr><td>2-player paid game: qof baxa</td><td>Leaver stake wuu luminayaa, loss count +1.</td><td>Opponent wuxuu helaa pot − effective rake; app forfeit rake.</td></tr>
+<tr><td>2-player inactivity</td><td>Inactive player stake wuu luminayaa, loss +1.</td><td>Active opponent payout; app forfeit rake.</td></tr>
+<tr><td>3/4 Solo: hal qof baxa</td><td>Stake lama celiyo; player left/loss ayaa noqda.</td><td>Ciyaartu way sii socotaa; eventual winner pot oo dhan less rake.</td></tr>
+<tr><td>2v2: hal qof baxa/inactive</td><td>Kooxdiisa oo dhan way guuldarraysataa; forfeiter iyo partner loss records.</td><td>Labada opponent waxay qaybsadaan net pot; app forfeit rake.</td></tr>
+<tr><td>Admin cancels paid room</td><td>Real player kasta full stake ayaa loo refund-gareeyaa.</td><td>Game rake ma jiro.</td></tr>
+<tr><td>Tournament match forfeit</td><td>Game-room stake = $0; entry fee tartanka ayaa hore loo bixiyey.</td><td>Opponent round-ka ayuu gudbaa; prize final-ka ayaa bixiya.</td></tr>
+</table>
+<div class="callout danger"><b>Xaalad edge ah:</b> haddii dhammaan active players ay baxaan/inactive noqdaan, code-ku escrow-ga zero ayuu ka dhigayaa iyadoo aan refund ama house-revenue transaction cad la qorin. Tani waa meel audit iyo policy u baahan.</div>
+</section>
+
+<section class="chapter">
+<h1>7. Spectator Betting</h1>
+<h2>7.1 Shuruudaha</h2>
+<ul>
+<li>Keliya spectator aan ciyaarta ku jirin ayaa bet dhigi kara.</li>
+<li>Hal bet qofkiiba ciyaar kasta.</li>
+<li>Stake minimum <b>$0.10</b>, maximum <b>$10.00</b>.</li>
+<li>Doorasho: W (target/team wins) ama L (target/team loses).</li>
+<li>Market-ku wuu xirmaa marka token kasta gaaro position 51 ama ka badan.</li>
+<li>Risk limit: selected side pool kama badnaan karo ugu badnaan 5× opposing pool, iyadoo minimum balancing base = $1.</li>
+</ul>
+
+<h2>7.2 Dynamic pool iyo odds</h2>
+<div class="formula">Total Pool = W stakes + L stakes<br>Distributable = Total Pool × 90%<br>App Betting Margin = Total Pool × 10%<br>Final Odds = Distributable Pool ÷ Winning-side Pool</div>
+<h3>Tusaale</h3>
+<p>W side = $4, L side = $6, total = $10. Haddii target-ku badiyo:</p>
+<ul><li>App = $1.</li><li>W bettors waxay saamigooda ugu qaybsadaan $9.</li><li>Final odds = 9 ÷ 4 = 2.25.</li><li>Qof $1 W dhigtay wuxuu helayaa $2.25; net profit $1.25.</li></ul>
+
+<h2>7.3 Goorta bet la refund-gareeyo</h2>
+<p>Full stake refund ayaa dhacaya haddii:</p>
+<ul>
+<li>Room status cancelled yahay.</li>
+<li>Server-ku winner sax ah waayo.</li>
+<li>Winning side aanu lahayn wax bets ah.</li>
+<li>90% distributable pool uusan ka weynayn winning-side principal pool; taas oo macnaheedu yahay winner faa’iido macquul ah ma helayo.</li>
+</ul>
+<p>Refund xaaladahan app-ku betting margin ma qaato.</p>
+</section>
+
+<section class="chapter">
+<h1>8. Tournaments</h1>
+<h2>8.1 Socodka lacagta</h2>
+<div class="formula">Collected Entry Fees − Refunds − Prize Pool = Tournament Margin</div>
+<ul>
+<li>Register: entry fee wallet-ka laga jaraa oo tournament escrow transaction ah noqda.</li>
+<li>Winner-ka final-ka: full configured prizePool ayaa wallet-ka loogu daraa.</li>
+<li>App revenue: net collected entries − prize.</li>
+<li>Custom tournament lama bilaabi karo haddii prize aanu entries-ku si buuxda u fund-gareyn karin.</li>
+</ul>
+
+<h2>8.2 Default tournaments</h2>
+<table>
+<tr><th>Tournament</th><th>Entry × Max</th><th>Max collected</th><th>Prize</th><th>Expected margin</th></tr>
+<tr><td>Weekly Champion</td><td>$5 × 16</td><td>$80</td><td>$72</td><td>$8</td></tr>
+<tr><td>Weekend High Stakes</td><td>$10 × 8</td><td>$80</td><td>$72</td><td>$8</td></tr>
+<tr><td>Daily Quick Sprint</td><td>$2 × 4</td><td>$8</td><td>$7.20</td><td>$0.80</td></tr>
+</table>
+
+<h2>8.3 Unregister iyo cancellation</h2>
+<ul>
+<li>Voluntary unregister inta registration open tahay: <b>90% refund</b>, <b>10% cancellation fee</b> app revenue.</li>
+<li>Marka tournament bilaabmo ama dhammaado unregister lama oggola.</li>
+<li>Haddii aan la fund-gareyn waqtiga start-ka: hal mar 12 saac ayaa dib loo dhigaa; markii labaad waa cancelled oo full entry refunds la bixiyaa.</li>
+<li>Check-in window: 5 daqiiqo.</li>
+<li>Haddii zero players check-in sameeyaan: tournament cancelled, dhammaan registered players full refund.</li>
+<li>Haddii hal player check-in sameeyo: walkover winner ayaa full prize hela.</li>
+<li>Haddii laba ama ka badan check-in sameeyaan: kaliya kuwa checked-in ayaa bracket-ka gala.</li>
+</ul>
+<div class="callout warning"><b>Policy hadda jira:</b> players-ka registration bixiyey laakiin check-in seegay si cad refund looma siinayo. Entry-gooda wuxuu ku sii jiraa net collected calculation. Tani waa no-show penalty aan UI/terms-ka si cad loogu magacaabin.</div>
+<h2>8.4 Admin tournament cancellation/removal</h2>
+<p>Admin cancel endpoint-ku registered player kasta entry fee-ga buuxa ayuu ugu celiyaa. Admin player-ka tartanka ka saaro sidoo kale entry fee buuxa ayuu refund-gareeyaa. Voluntary unregister-ga user-ka keliya ayaa leh 10% fee.</p>
+</section>
+
+<section class="chapter">
+<h1>9. Agent Economy</h1>
+<h2>9.1 Agent linkage</h2>
+<p>Promo code ayaa player-ka ku xira agent. Marka la xiro, deposit/withdraw request agent kale looma wareejin karo. Agent-ku wuxuu arkaa linked players iyo requests-kiisa oo keliya.</p>
+
+<h2>9.2 Float purchase iyo commission</h2>
+<p>Agent commission-ku ma aha fee laga jaro player transaction kasta. Waa <b>discount uu agent-ku ka helo marka admin-ku float u kordhiyo</b>.</p>
+<div class="formula">Agent Float Issued = Requested Float<br>Agent Commission Discount = Float × Commission Rate<br>Admin Cash Received = Float − Commission Discount</div>
+<h3>Tusaale: 5% agent commission</h3>
+<div class="formula">Float +$100 → Agent discount $5 → Admin cash $95 → Agent usable float $100</div>
+
+<h2>9.3 Player deposit via agent</h2>
+<div class="formula">Player wallet +$20 → Agent float −$20</div>
+<p>Agent float-ku waa inuu ku filnaadaa. Deposit-ka qudhiisu app revenue ma aha; waa liability/float transfer.</p>
+
+<h2>9.4 Player withdrawal via agent</h2>
+<div class="formula">Player wallet −Request Amount → Agent pays Net Amount → Agent float +Net Amount → Fee (haddii jiro) → App</div>
+<p>Paid-game user badanaa fee 0% ayuu leeyahay. No-play user fee 10% minimum $0.10.</p>
+
+<h2>9.5 Labada business model</h2>
+<table>
+<tr><th>Model</th><th>Dakhliga/kharashka</th><th>Control</th></tr>
+<tr><td>Independent</td><td>Float purchase commission/discount.</td><td>Commission rate admin dejiyo.</td></tr>
+<tr><td>Monthly</td><td>Monthly salary; targets iyo daily transaction limit.</td><td>Admin dejiyo salary, monthly target, daily limit iyo status.</td></tr>
+</table>
+<p>Monthly agent daily limit-ku wuxuu isku daraa PlayerDeposit iyo PlayerWithdrawal amounts-ka maalintaas.</p>
+</section>
+
+<section class="chapter">
+<h1>10. Admin iyo Cashier</h1>
+<h2>10.1 Admin mas’uuliyadaha lacagta</h2>
+<ul>
+<li>Approve/reject user deposits iyo withdrawals aan agent ku xirnayn.</li>
+<li>Approve/reject agent float requests.</li>
+<li>Deji agent commission, business model, salary, target iyo limit.</li>
+<li>Deji payment providers, VIP plans iyo tournaments.</li>
+<li>Cancel room oo full stakes refund samee.</li>
+<li>La soco house revenue, net earnings, deposits, withdrawals iyo liabilities.</li>
+</ul>
+
+<h2>10.2 Cashier assignment iyo payroll</h2>
+<ul>
+<li>Cashier waxaa lagu xiraa magaalo/location.</li>
+<li>Online window: 75 ilbiriqsi; request assignment lease: 5 daqiiqo.</li>
+<li>Cashier monthly salary, monthly target iyo target bonus admin ayaa dejinaya.</li>
+<li>Current earnings = salary + bonus haddii target la gaaray.</li>
+<li>Cashier payroll paid waxaa admin stats-ku ka jaraa net platform earnings.</li>
+</ul>
+
+<h2>10.3 Admin dashboard formulas</h2>
+<div class="formula">Recorded House Revenue = Sum of 9 revenue categories<br>Net Platform Earnings = House Revenue − Agent Commission Discounts − Welcome Bonus Cost − Cashier Payroll Paid</div>
+<div class="callout warning"><b>Fiiro:</b> monthly agent salary liability dashboard-ka waa la muujiyaa, laakiin formula netPlatformEarnings si toos ah ugama jaro ilaa nidaam payment/expense ahaan loo xaqiijiyo. Sidoo kale hosting, Firebase/TURN, payment-provider charges iyo taxes kuma jiraan formula-kan.</div>
+</section>
+
+<section class="chapter">
+<h1>11. Transaction Ledger iyo Kaydinta</h1>
+<h2>11.1 Wallet transaction types</h2>
+<table>
+<tr><th>Type</th><th>Ujeeddo</th></tr>
+<tr><td>deposit</td><td>Wallet lacag lagu daray: real deposit, agent deposit ama welcome bonus.</td></tr>
+<tr><td>withdrawal</td><td>Wallet lacag laga bixiyey.</td></tr>
+<tr><td>bet_escrow_locked</td><td>Stake laga jaray oo game/tournament/bet lagu xidhay.</td></tr>
+<tr><td>bet_escrow_refund</td><td>Nooc loogu talagalay escrow return; code-ka badankiisu “refund” ayuu adeegsadaa.</td></tr>
+<tr><td>win_payout</td><td>Game, bot, tournament ama spectator bet guul.</td></tr>
+<tr><td>app_commission</td><td>House revenue ama user debit sida VIP/bot.</td></tr>
+<tr><td>refund</td><td>Stake/entry/bet dib loogu celiyey.</td></tr>
+</table>
+<p>Transaction kasta wuxuu leeyahay ID, userId, amount, timestamp, description, optional match/reference ID, status iyo revenue category. Duplicate payout waxaa looga hortagaa iyadoo user + matchId + win_payout la hubiyo.</p>
+
+<h2>11.2 Meelaha xogtu ku kaydsan tahay</h2>
+<table>
+<tr><th>Xog</th><th>Kaydka primary</th><th>Waxa lagu hayo</th></tr>
+<tr><td>User wallet/profile</td><td>MySQL app_users; Firestore fallback/sync</td><td>Balance, VIP, linked agent, stats</td></tr>
+<tr><td>Wallet ledger</td><td>wallet_transactions / persisted store</td><td>Deposit, withdrawal, stakes, payouts, revenue</td></tr>
+<tr><td>Manual requests</td><td>manual_transaction_requests</td><td>Pending/approved/rejected iyo resolver</td></tr>
+<tr><td>Agent</td><td>agents, agent_transactions, agent_requests</td><td>Float, commission, requests iyo history</td></tr>
+<tr><td>Rooms</td><td>game_rooms</td><td>Escrow, winner payout, rake iyo game state</td></tr>
+<tr><td>Tournaments/bets</td><td>Persistent store/profile transactions</td><td>Entries, brackets, spectator pools iyo settlement</td></tr>
+</table>
+</section>
+
+<section class="chapter">
+<h1>12. Dhammaan Ilaha Dakhliga App-ka</h1>
+<table>
+<tr><th>Revenue category</th><th>Goorta la helo</th><th>Rate/Formula</th></tr>
+<tr><td>game_rake</td><td>Paid Solo normal completion</td><td>Base 10% less winner VIP discount</td></tr>
+<tr><td>team_game_rake</td><td>Paid 2v2 normal completion</td><td>Base 10% less average winner discounts</td></tr>
+<tr><td>forfeit_rake</td><td>Paid game ku dhammaada exit/inactivity</td><td>Isla effective rake</td></tr>
+<tr><td>bot_result</td><td>Bot wins ama real stake retained in mixed bot edge</td><td>Ilaa $0.02 human loser kasta</td></tr>
+<tr><td>betting_margin</td><td>Matched spectator market settles</td><td>10% total market pool</td></tr>
+<tr><td>withdrawal_fee</td><td>User aan paid game dhammayn withdraw sameeyo</td><td>10%, minimum $0.10</td></tr>
+<tr><td>vip_subscription</td><td>VIP purchase/renewal</td><td>Full tier price</td></tr>
+<tr><td>tournament_margin</td><td>Tournament winner/prize settled</td><td>Net entries − prize</td></tr>
+<tr><td>tournament_cancellation_fee</td><td>User voluntarily unregisters</td><td>10% entry fee</td></tr>
+</table>
+<h2>Dakhliga vs cash flow</h2>
+<table>
+<tr><th>Shay</th><th>Dakhli?</th><th>Sabab</th></tr>
+<tr><td>Player deposit</td><td>Maya</td><td>App liability ayuu kordhiyaa; player ayaa leh.</td></tr>
+<tr><td>Player withdrawal</td><td>Maya</td><td>Liability ayuu yareeyaa; fee-ga keliya ayaa dakhli ah.</td></tr>
+<tr><td>Agent float sale</td><td>Cash flow/working capital</td><td>Admin cash iyo agent float; commission discount waa cost.</td></tr>
+<tr><td>Escrow lock</td><td>Weli maya</td><td>Natiijo ayaa la sugayaa.</td></tr>
+<tr><td>Refund</td><td>Maya</td><td>Lacagtii owner-ka ayaa loo celiyey.</td></tr>
+</table>
+</section>
+
+<section class="chapter">
+<h1>13. Qaybaha Aan Hadda Dakhli Toos ah Qorin</h1>
+<ul>
+<li><b>Advertisements:</b> app-ku campaigns/AdSense fields wuu taageeraa, laakiin ad impressions/click earnings uma qoro house revenue ledger. Dakhli ads ah waa in provider report ama integration gaar ah laga keenaa.</li>
+<li><b>Practice/free games:</b> rake ama stake ma leh.</li>
+<li><b>Watching:</b> daawasho caadi ah lacag ma leh; spectator bet kaliya ayaa dhaqaale leh.</li>
+<li><b>Voice chat:</b> user fee ma leh; TURN/hosting wuxuu noqon karaa kharash external ah.</li>
+<li><b>Profile, leaderboard, private code:</b> fee gooni ah ma leh; private paid match wuxuu isticmaalaa stake/rake-ka caadiga ah.</li>
+</ul>
+</section>
+
+<section class="chapter">
+<h1>14. Risk Register iyo Talooyinka</h1>
+<table>
+<tr><th>Priority</th><th>Arrin hadda jirta</th><th>Saameyn</th><th>Talo</th></tr>
+<tr><td>High</td><td>UI “Win $0.60” wuxuu qarinayaa 10% rake.</td><td>User confusion/trust.</td><td>Muuji Gross Pot, Fee, Net Payout iyo Net Profit.</td></tr>
+<tr><td>High</td><td>All players leave → escrow zero, refund/revenue trail ma cadda.</td><td>Ledger imbalance.</td><td>Policy cad: refund ama abandoned-pot revenue transaction.</td></tr>
+<tr><td>High</td><td>Admin room cancel wuxuu delete-gareeyaa room iyadoo spectator open bets laga yaabo inaan la settle/refund.</td><td>Locked bettor funds.</td><td>Room cancelled status → settleSpectatorBets → kadib delete/archive.</td></tr>
+<tr><td>High</td><td>Tournament no-show fee/refund si cad looma magacaabin.</td><td>Complaint iyo terms risk.</td><td>Ku qor no-show forfeiture ama samee refund/fee transaction cad.</td></tr>
+<tr><td>Medium</td><td>$0.01 stake rake wuxuu u round-gareeyaa $0.00.</td><td>Zero revenue micro games.</td><td>Minimum paid stake $0.05/$0.10 ama minimum rake $0.01.</td></tr>
+<tr><td>Medium</td><td>Direct simulated wallet endpoints waxay mudan yihiin production auth review.</td><td>Financial security risk.</td><td>Disable production ama Firebase/admin auth ku xiro.</td></tr>
+<tr><td>Medium</td><td>Net earnings kuma jiraan hosting, provider fees, taxes, TURN iyo unpaid salary liabilities.</td><td>Profit overstated.</td><td>Expense ledger iyo true net P&amp;L ku dar.</td></tr>
+<tr><td>Medium</td><td>Ads income ledger ma jiro.</td><td>Revenue reporting incomplete.</td><td>Provider reconciliation/import.</td></tr>
+</table>
+
+<h2>Recommended player-facing settlement receipt</h2>
+<div class="callout good"><b>Guul — $0.30 Solo</b><br>Stake: $0.30 · Total Pot: $0.60 · App Fee: $0.06 · Payout: $0.54 · Your Profit: $0.24</div>
+<div class="callout"><b>Guuldarro — $0.30 Solo</b><br>Stake Paid: $0.30 · Result: Lost · Additional Charge: $0.00 · Final Match Change: −$0.30</div>
+
+<h2>Gunaanad</h2>
+<p>LudoSom wuxuu leeyahay revenue model isku dhafan: 10% game rake, 10% spectator margin, VIP subscriptions, bot-result charges, tournament margins/cancellation fees iyo conditional withdrawal fee. Agent-ku wuxuu maamulaa float, commission-kiisuna wuxuu ka yimaadaa float purchase discount; admin/cashier-na waxay maamulaan approvals, settings, payroll iyo audit. Nidaamka aasaasiga ahi server-authoritative iyo ledger-based ayuu yahay, balse risk register-ka kore waa in loo qaataa shaqada xigta si financial reporting, refunds iyo user transparency loo adkeeyo.</p>
+<div class="footer-note">Dukumentigan waa sharaxaad code-audit ah, ma aha talo sharci ama xisaabeed. Kahor lacag dhab ah oo ballaaran, terms, licensing, tax, responsible-gaming iyo independent financial/security audit waa in la waafajiyaa dalka/markets-ka app-ku ka shaqeeyo.</div>
+</section>
+</body>
+</html>
