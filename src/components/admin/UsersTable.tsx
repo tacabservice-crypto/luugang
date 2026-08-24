@@ -13,6 +13,16 @@ interface UsersTableProps {
   onViewGames?: (user: UserProfile) => void;
 }
 
+const UserAvatar: React.FC<{ user: UserProfile }> = ({ user }) => {
+  const avatar = String(user.avatar || '').trim();
+  const isImage = /^(https?:\/\/|data:image\/|blob:)/i.test(avatar);
+  return (
+    <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-gray-200 bg-gray-100 text-xl shadow-sm">
+      {isImage ? <img src={avatar} alt={user.username || 'User'} className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : (avatar || '🎮')}
+    </span>
+  );
+};
+
 const UsersTable: React.FC<UsersTableProps> = ({ users, onEdit, onDelete, onImpersonate, onViewGames }) => {
   return (
     <div className="w-full min-w-0 bg-white p-3 sm:p-6 rounded-lg shadow-md">
@@ -34,7 +44,7 @@ const UsersTable: React.FC<UsersTableProps> = ({ users, onEdit, onDelete, onImpe
               return (
               <tr key={user.id}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 flex items-center">
-                  <span className="mr-3 text-2xl">{user.avatar}</span>
+                  <UserAvatar user={user} />
                   <div className="flex items-center gap-2">
                     <span>{user.username}</span>
                     {protectedUser && (
