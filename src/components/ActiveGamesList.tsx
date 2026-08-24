@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, Gamepad2, Loader2, Radio, TrendingUp, Users } from 'lucide-react';
+import { ChevronDown, Eye, Gamepad2, Loader2, Radio, TrendingUp, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AvatarDisplay from './AvatarDisplay';
 import { formatCurrency } from '../utils/number';
@@ -23,6 +23,7 @@ const colorDot: Record<string, string> = { red: 'bg-rose-500', green: 'bg-emeral
 
 const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
   const [loadingRoomId, setLoadingRoomId] = useState<string | null>(null);
+  const [expandedGameIds, setExpandedGameIds] = useState<Set<string>>(() => new Set());
   const navigate = useNavigate();
   const { language } = useLanguage();
   const so = language === 'so';
@@ -43,8 +44,15 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
           const progress = Math.max(0, Math.min(100, Number(game.progress || 0)));
           const hasActiveBets = Number(game.betting?.betCount || 0) > 0;
           const teamMode = game.gameMode === 'team';
+          const expanded = expandedGameIds.has(game.id);
           return (
             <article key={game.id} className="overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-black/20 transition hover:border-purple-400/30">
+              <button type="button" aria-expanded={expanded} onClick={() => setExpandedGameIds(previous => { const next = new Set(previous); if (next.has(game.id)) next.delete(game.id); else next.add(game.id); return next; })} className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left sm:cursor-default sm:border-b sm:border-white/5">
+                <div className="flex min-w-0 items-center gap-1.5"><span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-400" /><span className="truncate font-mono text-[9px] font-black text-slate-300">#{game.id}</span><span className="shrink-0 rounded bg-purple-500/10 px-1.5 py-0.5 text-[7px] font-black uppercase text-purple-300">{teamMode ? 'Team 2v2' : `Solo ${game.capacity || game.players.length}P`}</span></div>
+                <div className="flex shrink-0 items-center gap-2"><span className="font-mono text-[10px] font-black text-emerald-300">{game.betAmount > 0 ? formatCurrency(game.betAmount) : (so ? 'BILAASH' : 'FREE')}</span><ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-300 sm:hidden ${expanded ? 'rotate-180' : ''}`} /></div>
+              </button>
+              <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out sm:grid-rows-[1fr] sm:opacity-100 ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+              <div className="min-h-0 overflow-hidden">
               <div className="p-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -71,6 +79,8 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
                 ) : (
                   <div className={`mt-2 flex items-center justify-between rounded-lg border px-2 py-1.5 ${hasActiveBets ? 'border-emerald-400/20 bg-emerald-500/[0.07]' : 'border-white/5 bg-black/15'}`}><div className="flex items-center gap-1.5"><TrendingUp className={`h-3 w-3 ${hasActiveBets ? 'text-emerald-300' : 'text-slate-600'}`} /><span className={`text-[8px] font-black ${hasActiveBets ? 'text-emerald-200' : 'text-slate-500'}`}>{hasActiveBets ? `${game.betting?.betCount} bet ayaa ku jira` : 'Weli bet laguma jiro'}</span></div><span className="font-mono text-[8px] font-black text-slate-400">Pool {formatCurrency(game.betting?.totalPool || 0)}</span></div>
                 )}
+              </div>
+              </div>
               </div>
 
               <div className="flex items-center justify-between border-t border-white/5 bg-black/15 px-2.5 py-2">
