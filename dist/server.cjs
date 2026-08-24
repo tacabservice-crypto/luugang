@@ -3896,6 +3896,30 @@ app.get("/api/users/:userId", async (req, res) => {
   }
   res.json(user);
 });
+app.post("/api/users/:userId/avatar", import_express.default.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "2mb" }), async (req, res) => {
+  const user = store.users[req.params.userId];
+  if (!user) return res.status(404).json({ error: "User not found" });
+  const mime = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+  const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/jpeg" ? "jpg" : "";
+  if (!extension || !Buffer.isBuffer(req.body) || req.body.length < 32) {
+    return res.status(400).json({ error: "Choose a valid JPEG, PNG or WebP image." });
+  }
+  const avatarDirectory = import_path.default.join(process.cwd(), "public", "uploads", "avatars");
+  await import_fs.default.promises.mkdir(avatarDirectory, { recursive: true });
+  const safeUserId = import_crypto.default.createHash("sha256").update(user.id).digest("hex").slice(0, 20);
+  const filename = `${safeUserId}-${Date.now()}.${extension}`;
+  await import_fs.default.promises.writeFile(import_path.default.join(avatarDirectory, filename), req.body, { flag: "wx" });
+  const previousAvatar = String(user.avatar || "");
+  user.avatar = `/uploads/avatars/${filename}`;
+  await saveStoreAndWait();
+  broadcastUserUpdate(user.id);
+  if (/^\/uploads\/avatars\/[a-f0-9]{20}-\d+\.(?:jpg|png|webp)$/i.test(previousAvatar)) {
+    const previousPath = import_path.default.resolve(process.cwd(), "public", previousAvatar.replace(/^\//, ""));
+    const avatarRoot = import_path.default.resolve(avatarDirectory);
+    if (previousPath.startsWith(`${avatarRoot}${import_path.default.sep}`)) void import_fs.default.promises.unlink(previousPath).catch(() => void 0);
+  }
+  res.json({ avatar: user.avatar, user });
+});
 app.post("/api/users/:userId/update", async (req, res) => {
   const user = store.users[req.params.userId];
   if (!user) {

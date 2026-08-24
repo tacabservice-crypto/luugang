@@ -17,6 +17,7 @@ export default function FirebasePasswordSettings() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   if (!firebaseUser?.email) return null;
@@ -49,6 +50,8 @@ export default function FirebasePasswordSettings() {
     }
   };
 
+  if (hasPassword && !expanded) return <button type="button" onClick={() => setExpanded(true)} className="flex w-full items-center justify-between rounded-2xl border border-blue-400/15 bg-gradient-to-br from-blue-500/[.07] to-purple-500/[.06] p-4 text-left transition hover:border-blue-400/30"><span className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10"><LockKeyhole className="h-4 w-4 text-blue-300" /></span><span><strong className="block text-xs font-black text-white">{so ? 'Beddel Erayga Sirta ah' : 'Change Password'}</strong><span className="mt-1 block text-[9px] font-semibold text-slate-400">{so ? 'Taabo si aad qaybta amniga u furto' : 'Tap to open password security'}</span></span></span><span className="text-lg font-black text-blue-300">›</span></button>;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3 rounded-2xl border border-blue-400/15 bg-gradient-to-br from-blue-500/[.07] to-purple-500/[.06] p-4">
       <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10"><ShieldCheck className="h-4 w-4 text-blue-300" /></span><div>
@@ -61,9 +64,9 @@ export default function FirebasePasswordSettings() {
       <input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} autoComplete="new-password" placeholder={so ? 'Eray sir ah oo cusub' : 'New password'} minLength={6} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs text-white outline-none focus:border-blue-400" required />
       <input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" placeholder={so ? 'Xaqiiji erayga cusub' : 'Confirm new password'} minLength={6} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs text-white outline-none focus:border-blue-400" required />
       {message && <p className={`text-xs ${message.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>{message.text}</p>}
-      <button type="submit" disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-400/20 bg-blue-600 px-4 py-2.5 text-xs font-black text-white transition hover:bg-blue-500 disabled:opacity-50"><LockKeyhole className="h-3.5 w-3.5" />
+      <div className="flex gap-2">{hasPassword && <button type="button" onClick={() => setExpanded(false)} className="rounded-xl border border-white/10 bg-white/5 px-3 text-[10px] font-black text-slate-300">{so ? 'Xir' : 'Close'}</button>}<button type="submit" disabled={saving} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-400/20 bg-blue-600 px-4 py-2.5 text-xs font-black text-white transition hover:bg-blue-500 disabled:opacity-50"><LockKeyhole className="h-3.5 w-3.5" />
         {saving ? (so ? 'Kaydinaya…' : 'Saving…') : hasPassword ? (so ? 'Beddel Erayga Sirta ah' : 'Change Password') : (so ? 'Samee Eray Sir ah' : 'Create Password')}
-      </button>
+      </button></div>
     </form>
   );
 }
