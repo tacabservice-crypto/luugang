@@ -2,8 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { EmailAuthProvider, linkWithCredential, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { auth } from '../firebase-client';
 import { userErrorMessage } from '../utils/userError';
+import { LockKeyhole, ShieldCheck } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 export default function FirebasePasswordSettings() {
+  const { language } = useLanguage();
+  const so = language === 'so';
   const firebaseUser = auth.currentUser;
   const hasPassword = useMemo(
     () => Boolean(firebaseUser?.providerData.some(provider => provider.providerId === 'password')),
@@ -46,19 +50,19 @@ export default function FirebasePasswordSettings() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-white/10 bg-black/20 p-4">
-      <div>
-        <h3 className="text-sm font-bold text-white">{hasPassword ? 'Change Password' : 'Create Password'}</h3>
-        <p className="mt-1 text-xs text-gray-400">
-          {hasPassword ? 'Confirm your current password before choosing a new one.' : `Create a password for ${firebaseUser.email} so you can sign in without Google on another device.`}
+    <form onSubmit={handleSubmit} className="space-y-3 rounded-2xl border border-blue-400/15 bg-gradient-to-br from-blue-500/[.07] to-purple-500/[.06] p-4">
+      <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10"><ShieldCheck className="h-4 w-4 text-blue-300" /></span><div>
+        <h3 className="text-xs font-black text-white">{hasPassword ? (so ? 'Beddel Erayga Sirta ah' : 'Change Password') : (so ? 'Samee Eray Sir ah' : 'Create Password')}</h3>
+        <p className="mt-1 text-[10px] leading-5 text-slate-400">
+          {hasPassword ? (so ? 'Xaqiiji eraygaaga hadda ka hor intaadan mid cusub dooran.' : 'Confirm your current password before choosing a new one.') : (so ? `U samee ${firebaseUser.email} eray sir ah si aad qalab kale uga geli karto.` : `Create a password for ${firebaseUser.email} so you can sign in without Google on another device.`)}
         </p>
-      </div>
-      {hasPassword && <input type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} autoComplete="current-password" placeholder="Current password" className="w-full rounded bg-gray-700 px-3 py-2 text-white" required />}
-      <input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} autoComplete="new-password" placeholder="New password" minLength={6} className="w-full rounded bg-gray-700 px-3 py-2 text-white" required />
-      <input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" placeholder="Confirm new password" minLength={6} className="w-full rounded bg-gray-700 px-3 py-2 text-white" required />
+      </div></div>
+      {hasPassword && <input type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} autoComplete="current-password" placeholder={so ? 'Erayga sirta ah ee hadda' : 'Current password'} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs text-white outline-none focus:border-blue-400" required />}
+      <input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} autoComplete="new-password" placeholder={so ? 'Eray sir ah oo cusub' : 'New password'} minLength={6} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs text-white outline-none focus:border-blue-400" required />
+      <input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" placeholder={so ? 'Xaqiiji erayga cusub' : 'Confirm new password'} minLength={6} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-xs text-white outline-none focus:border-blue-400" required />
       {message && <p className={`text-xs ${message.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>{message.text}</p>}
-      <button type="submit" disabled={saving} className="w-full rounded bg-purple-600 px-4 py-2 font-bold text-white hover:bg-purple-700 disabled:opacity-50">
-        {saving ? 'Saving...' : hasPassword ? 'Change Password' : 'Create Password'}
+      <button type="submit" disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-400/20 bg-blue-600 px-4 py-2.5 text-xs font-black text-white transition hover:bg-blue-500 disabled:opacity-50"><LockKeyhole className="h-3.5 w-3.5" />
+        {saving ? (so ? 'Kaydinaya…' : 'Saving…') : hasPassword ? (so ? 'Beddel Erayga Sirta ah' : 'Change Password') : (so ? 'Samee Eray Sir ah' : 'Create Password')}
       </button>
     </form>
   );
