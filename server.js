@@ -4005,8 +4005,8 @@ app.post("/api/users/:userId/message", verifyFirebaseToken, async (req, res) => 
   const message = { id: `dm_${now2}_${crypto.randomBytes(4).toString("hex")}`, senderId: sender.id, receiverId: receiver.id, senderName: sender.username, senderAvatar: sender.avatar, text, createdAt: now2 };
   store.directMessages.push(message);
   const receiverMessages = store.directMessages.filter((candidate) => candidate.receiverId === receiver.id);
-  if (receiverMessages.length > 30) {
-    const removeIds = new Set(receiverMessages.slice(0, receiverMessages.length - 30).map((candidate) => candidate.id));
+  if (receiverMessages.length > 200) {
+    const removeIds = new Set(receiverMessages.slice(0, receiverMessages.length - 200).map((candidate) => candidate.id));
     store.directMessages = store.directMessages.filter((candidate) => !removeIds.has(candidate.id));
   }
   await saveStoreAndWait();
@@ -4016,7 +4016,7 @@ app.post("/api/users/:userId/message", verifyFirebaseToken, async (req, res) => 
 app.get("/api/users/messages/pending", verifyFirebaseToken, async (req, res) => {
   const receiver = Object.values(store.users).find((candidate) => candidate.firebaseUid === req.user.uid);
   if (!receiver) return res.status(404).json({ error: "Player not found." });
-  const messages = store.directMessages.filter((candidate) => candidate.receiverId === receiver.id).sort((a, b) => b.createdAt - a.createdAt);
+  const messages = store.directMessages.filter((candidate) => candidate.receiverId === receiver.id).sort((a, b) => a.createdAt - b.createdAt);
   const consume = String(req.query.consume || "") === "true";
   if (consume && messages.length) {
     const ids = new Set(messages.map((message) => message.id));

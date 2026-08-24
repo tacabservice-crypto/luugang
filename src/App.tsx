@@ -12,6 +12,7 @@ import { userErrorMessage } from './utils/userError';
 import playGameReminderAudioSrc from './assets/play_the_game.mp3';
 import { NATIVE_BACK_EVENT } from './components/NativeBackHandler';
 import { useBodyScrollLock } from './hooks/useBodyScrollLock';
+import AvatarDisplay from './components/AvatarDisplay';
 
 // Gameplay actions must never wait forever on a slow mobile connection.
 // The server remains authoritative; this only releases the UI and allows a
@@ -873,7 +874,7 @@ export default function App() {
 
     eventSource.addEventListener('direct_message', (e: any) => {
       try {
-        const data = JSON.parse(e.data) as { senderName?: string; text?: string };
+        const data = JSON.parse(e.data) as { id: string; senderName: string; senderAvatar: string; text: string; createdAt: number };
         setErrorToast(`💬 ${data.senderName || 'Player'}: ${data.text || ''}`);
         window.dispatchEvent(new CustomEvent('ludosom_direct_message', { detail: data }));
       } catch { /* Ignore malformed realtime messages. */ }
@@ -1683,21 +1684,21 @@ export default function App() {
           {incomingInvites.map(invite => (
           <div
             key={invite.roomId}
-            className={`relative flex items-center gap-2 overflow-hidden rounded-xl border border-yellow-400/60 bg-[#111827]/95 p-2 shadow-[0_8px_28px_rgba(0,0,0,0.55)] backdrop-blur-md transition-all duration-300 ${exitingInviteIds.has(invite.roomId) ? 'translate-x-[120%] opacity-0' : 'translate-x-0 opacity-100 animate-fade-in'}`}
+            className={`relative flex items-center gap-2 overflow-hidden rounded-xl border border-yellow-300/45 bg-slate-950/75 p-2 shadow-[0_8px_28px_rgba(0,0,0,0.48)] backdrop-blur-lg transition-all duration-300 ${exitingInviteIds.has(invite.roomId) ? 'translate-x-[120%] opacity-0' : 'translate-x-0 opacity-100 animate-fade-in'}`}
           >
+            <AvatarDisplay avatar={invite.senderAvatar} username={invite.senderName} className="pointer-events-none absolute -inset-3 h-[calc(100%+24px)] w-[calc(100%+24px)] scale-110 object-cover opacity-20 blur-xl" textClassName="text-6xl" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-slate-950/80 via-slate-900/60 to-emerald-950/55" />
             <div className="absolute inset-y-0 left-0 w-1 bg-yellow-400" />
             
-            <div className="ml-1 flex min-w-0 flex-1 items-center gap-2">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/35 text-xl">
-                {invite.senderAvatar}
-              </span>
+            <div className="relative ml-1 flex min-w-0 flex-1 items-center gap-2">
+              <AvatarDisplay avatar={invite.senderAvatar} username={invite.senderName} className="h-9 w-9 shrink-0 rounded-lg border border-white/20 bg-black/35 shadow-md" textClassName="text-xl" />
               <div className="min-w-0">
                 <div className="truncate text-[11px] font-black text-white">{invite.senderName}</div>
                 <div className="text-[9px] font-bold text-yellow-300">Challenge · ${invite.betAmount} · {invite.gameMode === 'team' ? '2v2' : '1v1'}</div>
               </div>
             </div>
 
-            <div className="flex shrink-0 gap-1.5">
+            <div className="relative flex shrink-0 gap-1.5">
               <button
                 onClick={() => void handleAcceptInvite(invite)}
                 aria-label="Accept challenge"

@@ -227,6 +227,11 @@ export default function Dashboard({
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [showMessageInbox, setShowMessageInbox] = useState(false);
   const [inboxMessages, setInboxMessages] = useState<Array<{ id: string; senderName: string; senderAvatar: string; text: string; createdAt: number }>>([]);
+  const inboxEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (showMessageInbox) inboxEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [inboxMessages.length, showMessageInbox]);
 
   const authenticatedHeaders = async () => {
     const token = await auth.currentUser?.getIdToken();
@@ -242,11 +247,23 @@ export default function Dashboard({
         if (response.ok) setUnreadMessageCount(Number((await response.json()).count || 0));
       } catch { /* Realtime will retry on the next app visit. */ }
     };
-    const onMessage = () => setUnreadMessageCount(count => Math.min(30, count + 1));
+    const onMessage = (event: Event) => {
+      const message = (event as CustomEvent).detail as { id: string; senderName: string; senderAvatar: string; text: string; createdAt: number };
+      if (showMessageInbox && message?.id) {
+        setInboxMessages(previous => previous.some(item => item.id === message.id) ? previous : [...previous, message]);
+        setUnreadMessageCount(0);
+        void (async () => {
+          try { await fetch(apiUrl('/api/users/messages/pending?consume=true'), { headers: await authenticatedHeaders() }); }
+          catch { /* The next inbox open will consume it. */ }
+        })();
+      } else {
+        setUnreadMessageCount(count => Math.min(200, count + 1));
+      }
+    };
     void refreshCount();
     window.addEventListener('ludosom_direct_message', onMessage);
     return () => window.removeEventListener('ludosom_direct_message', onMessage);
-  }, [isGuest]);
+  }, [isGuest, showMessageInbox]);
 
   const openMessageInbox = async () => {
     setIsSettingsDropdownOpen(false);
@@ -255,7 +272,10 @@ export default function Dashboard({
       const response = await fetch(apiUrl('/api/users/messages/pending?consume=true'), { headers: await authenticatedHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Messages could not be opened.');
-      setInboxMessages(data.messages || []);
+      setInboxMessages(previous => {
+        const merged = [...(data.messages || []), ...previous];
+        return [...new Map(merged.map(message => [message.id, message])).values()].sort((a: any, b: any) => a.createdAt - b.createdAt);
+      });
       setUnreadMessageCount(0);
     } catch (error) {
       setInboxMessages([]);
@@ -283,12 +303,27 @@ export default function Dashboard({
   };
 
   useEffect(() => {
+    if (!showOnlinePlayers) {
+      setExpandedPlayerId(null);
+      setPlayerMessage('');
+      return;
+    }
+    if (!expandedPlayerId) return;
+    const timer = window.setTimeout(() => {
+      setExpandedPlayerId(null);
+      setPlayerMessage('');
+      setMessageState('idle');
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [expandedPlayerId, showOnlinePlayers]);
+
+  useEffect(() => {
     const handleNativeBack = (event: Event) => {
       if (showHelp) setShowHelp(false);
       else if (showAboutUs) setShowAboutUs(false);
       else if (isEditingProfile) setIsEditingProfile(false);
       else if (showMessageInbox) { setShowMessageInbox(false); setInboxMessages([]); }
-      else if (showOnlinePlayers) setShowOnlinePlayers(false);
+      else if (showOnlinePlayers) { setShowOnlinePlayers(false); setExpandedPlayerId(null); }
       else if (isSettingsDropdownOpen) setIsSettingsDropdownOpen(false);
       else if (isStakeDropdownOpen) setIsStakeDropdownOpen(false);
       else return;
@@ -1053,7 +1088,7 @@ export default function Dashboard({
             )}
             {showMessageInbox && <div className="absolute right-0 top-full z-50 mt-2 w-[min(88vw,330px)] overflow-hidden rounded-2xl border border-emerald-400/20 bg-[#07130f]/[.98] shadow-2xl shadow-black/60 backdrop-blur-xl">
               <div className="flex items-center justify-between border-b border-white/10 px-3.5 py-3"><div><h3 className="flex items-center gap-2 text-xs font-black text-white"><MessageCircle className="h-4 w-4 text-emerald-300" />{language === 'so' ? 'Fariimaha Cusub' : 'New Messages'}</h3><p className="mt-0.5 text-[8px] font-semibold text-slate-400">{language === 'so' ? 'Marka card-kan la xiro fariimuhu way tirmayaan.' : 'Messages disappear after this card is closed.'}</p></div><button type="button" onClick={() => { setShowMessageInbox(false); setInboxMessages([]); }} className="rounded-full bg-white/5 p-1.5 text-slate-300"><X className="h-3.5 w-3.5" /></button></div>
-              <div className="max-h-[55vh] space-y-1.5 overflow-y-auto p-2 overscroll-contain">{inboxMessages.length ? inboxMessages.map(message => <div key={message.id} className="flex gap-2.5 rounded-xl border border-white/[.07] bg-white/[.045] p-2.5"><AvatarDisplay avatar={message.senderAvatar} username={message.senderName} className="h-9 w-9 shrink-0 rounded-lg" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><b className="truncate text-[10px] text-white">{message.senderName}</b><span className="flex shrink-0 items-center gap-1 text-[7px] text-slate-500"><Clock3 className="h-2.5 w-2.5" />{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div><p className="mt-1 break-words text-[10px] leading-4 text-slate-200">{message.text}</p></div></div>) : <div className="py-8 text-center text-[10px] font-bold text-slate-500">{language === 'so' ? 'Fariin cusub ma jirto.' : 'No new messages.'}</div>}</div>
+              <div className="max-h-[55vh] space-y-1.5 overflow-y-auto p-2 overscroll-contain">{inboxMessages.length ? inboxMessages.map(message => <div key={message.id} className="flex gap-2.5 rounded-xl border border-white/[.07] bg-white/[.045] p-2.5"><AvatarDisplay avatar={message.senderAvatar} username={message.senderName} className="h-9 w-9 shrink-0 rounded-lg" /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><b className="truncate text-[10px] text-white">{message.senderName}</b><span className="flex shrink-0 items-center gap-1 text-[7px] text-slate-500"><Clock3 className="h-2.5 w-2.5" />{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div><p className="mt-1 break-words text-[10px] leading-4 text-slate-200">{message.text}</p></div></div>) : <div className="py-8 text-center text-[10px] font-bold text-slate-500">{language === 'so' ? 'Fariin cusub ma jirto.' : 'No new messages.'}</div>}<div ref={inboxEndRef} /></div>
             </div>}
           </div>
         </div>
@@ -1142,7 +1177,7 @@ export default function Dashboard({
                   <h3 className="text-xs font-black text-white">Online Players</h3>
                   <p className="text-[9px] font-semibold text-emerald-400">Home · Ready to challenge</p>
                 </div>
-                <button onClick={() => setShowOnlinePlayers(false)} className="rounded-full bg-white/5 p-1.5 text-slate-300"><X className="h-3.5 w-3.5" /></button>
+                <button onClick={() => { setShowOnlinePlayers(false); setExpandedPlayerId(null); }} className="rounded-full bg-white/5 p-1.5 text-slate-300"><X className="h-3.5 w-3.5" /></button>
               </div>
               <div className="max-h-[48vh] space-y-1 overflow-y-auto p-2">
                 {availableHomePlayers.length === 0 ? (
