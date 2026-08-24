@@ -11,6 +11,7 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { initializeApp as initializeApp2, cert as cert2, getApp } from "firebase-admin/app";
 import { getFirestore as getFirestore2 } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 // scripts/migrate-firestore-to-mysql.ts
 import fs from "node:fs";
@@ -1339,7 +1340,8 @@ if (serviceAccount) {
     } catch (error) {
       initializeApp2({
         credential: cert2(serviceAccount),
-        databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+        databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`,
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.firebasestorage.app`
       });
     }
     db = getFirestore2();
@@ -3882,16 +3884,33 @@ app.post("/api/users/:userId/avatar", express.raw({ type: ["image/jpeg", "image/
   if (!extension || !Buffer.isBuffer(req.body) || req.body.length < 32) {
     return res.status(400).json({ error: "Choose a valid JPEG, PNG or WebP image." });
   }
-  const avatarDirectory = path2.join(process.cwd(), "public", "uploads", "avatars");
-  await fs2.promises.mkdir(avatarDirectory, { recursive: true });
   const safeUserId = crypto.createHash("sha256").update(user.id).digest("hex").slice(0, 20);
-  const filename = `${safeUserId}-${Date.now()}.${extension}`;
-  await fs2.promises.writeFile(path2.join(avatarDirectory, filename), req.body, { flag: "wx" });
   const previousAvatar = String(user.avatar || "");
-  user.avatar = `/uploads/avatars/${filename}`;
+  const bucketName = String(process.env.FIREBASE_STORAGE_BUCKET || (serviceAccount?.project_id ? `${serviceAccount.project_id}.firebasestorage.app` : "")).trim();
+  if (!bucketName) {
+    return res.status(503).json({ error: "Permanent profile-photo storage is not configured." });
+  }
+  try {
+    const bucket = getStorage(getApp()).bucket(bucketName);
+    const objectName = `avatars/${safeUserId}/profile.${extension}`;
+    const downloadToken = crypto.randomUUID();
+    await bucket.file(objectName).save(req.body, {
+      resumable: false,
+      contentType: mime,
+      metadata: {
+        cacheControl: "public, max-age=3600",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      }
+    });
+    user.avatar = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectName)}?alt=media&token=${downloadToken}`;
+  } catch (uploadError) {
+    console.error("Permanent avatar upload failed:", uploadError);
+    return res.status(503).json({ error: "The profile photo could not be saved permanently. Please try again." });
+  }
   await saveStoreAndWait();
   broadcastUserUpdate(user.id);
   if (/^\/uploads\/avatars\/[a-f0-9]{20}-\d+\.(?:jpg|png|webp)$/i.test(previousAvatar)) {
+    const avatarDirectory = path2.join(process.cwd(), "public", "uploads", "avatars");
     const previousPath = path2.resolve(process.cwd(), "public", previousAvatar.replace(/^\//, ""));
     const avatarRoot = path2.resolve(avatarDirectory);
     if (previousPath.startsWith(`${avatarRoot}${path2.sep}`)) void fs2.promises.unlink(previousPath).catch(() => void 0);
