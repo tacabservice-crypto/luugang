@@ -13,6 +13,12 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
+    const overlayIsOpen = () => document.body.dataset.ludosomOverlayOpen === 'true';
+    const cancelPull = () => {
+      startYRef.current = null;
+      distanceRef.current = 0;
+      setDistance(0);
+    };
     const finishRefresh = async () => {
       if (refreshingRef.current) return;
       refreshingRef.current = true;
@@ -63,9 +69,17 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
       }
     };
     const onTouchStart = (event: TouchEvent) => {
+      if (overlayIsOpen()) {
+        cancelPull();
+        return;
+      }
       if (!refreshingRef.current && window.scrollY <= 0 && event.touches.length === 1) startYRef.current = event.touches[0].clientY;
     };
     const onTouchMove = (event: TouchEvent) => {
+      if (overlayIsOpen()) {
+        cancelPull();
+        return;
+      }
       if (startYRef.current === null || refreshingRef.current) return;
       const rawDistance = event.touches[0].clientY - startYRef.current;
       if (rawDistance <= 0 || window.scrollY > 0) return;
@@ -76,6 +90,10 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
       setDistance(nextDistance);
     };
     const onTouchEnd = () => {
+      if (overlayIsOpen()) {
+        cancelPull();
+        return;
+      }
       if (startYRef.current === null) return;
       startYRef.current = null;
       if (distanceRef.current >= REFRESH_THRESHOLD) void finishRefresh();
@@ -88,11 +106,13 @@ export default function GlobalPullToRefresh({ children }: { children: ReactNode 
     window.addEventListener('touchmove', onTouchMove, { passive: false });
     window.addEventListener('touchend', onTouchEnd);
     window.addEventListener('touchcancel', onTouchEnd);
+    window.addEventListener('ludosom:overlay-lock', cancelPull);
     return () => {
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
       window.removeEventListener('touchcancel', onTouchEnd);
+      window.removeEventListener('ludosom:overlay-lock', cancelPull);
     };
   }, []);
 

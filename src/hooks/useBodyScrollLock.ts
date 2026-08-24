@@ -11,6 +11,8 @@ export function useBodyScrollLock(active = true) {
     const body = document.body;
     activeLocks += 1;
     if (activeLocks === 1) {
+      body.dataset.ludosomOverlayOpen = 'true';
+      window.dispatchEvent(new Event('ludosom:overlay-lock'));
       lockedScrollY = window.scrollY;
       originalBodyStyles = {
         position: body.style.position,
@@ -33,6 +35,7 @@ export function useBodyScrollLock(active = true) {
       if (activeLocks !== 0 || !originalBodyStyles) return;
       const saved = originalBodyStyles;
       originalBodyStyles = null;
+      delete body.dataset.ludosomOverlayOpen;
       body.style.position = saved.position || '';
       body.style.top = saved.top || '';
       body.style.left = saved.left || '';

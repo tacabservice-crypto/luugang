@@ -347,7 +347,7 @@ export default function WalletModal({ user, onClose, onBalanceUpdated }: WalletM
   };
 
   return (
-    <div className="fixed inset-0 z-50 overscroll-none bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div data-modal-overlay="true" className="fixed inset-0 z-50 overscroll-none bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="w-full sm:max-w-md bg-white/5 backdrop-blur-xl border-t sm:border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden text-white flex flex-col max-h-[92dvh] min-h-0">
         
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-black/10">
