@@ -54,17 +54,11 @@ const ActiveGamesList: React.FC<ActiveGamesListProps> = ({ games }) => {
               <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out sm:grid-rows-[1fr] sm:opacity-100 ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
               <div className="min-h-0 overflow-hidden">
               <div className="p-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1.5 flex items-center gap-1.5"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" /><span className="font-mono text-[9px] font-black text-slate-400">#{game.id}</span><span className="rounded bg-white/5 px-1.5 py-0.5 text-[7px] font-black uppercase text-purple-300">{teamMode ? 'Team 2v2' : `Solo ${game.capacity || game.players.length}P`}</span></div>
-                    <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
                       <div className="flex -space-x-2">
                         {game.players.slice(0, 4).map(player => <div key={player.userId} className="relative"><AvatarDisplay avatar={player.avatar} username={player.username} className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border-2 border-[#17142c] bg-black/40" textClassName="text-sm" /><span className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border border-[#17142c] ${colorDot[player.color || ''] || 'bg-slate-500'}`} /></div>)}
                       </div>
                       <div className="min-w-0"><p className="truncate text-[9px] font-black text-slate-200">{game.players.map(player => player.username).join(teamMode ? ' · ' : ' vs ')}</p><p className="mt-0.5 truncate text-[8px] font-bold text-amber-300">{so ? 'Wareegga' : 'Turn'}: {game.currentTurnUsername || (so ? 'Sugaya…' : 'Loading…')}</p></div>
-                    </div>
-                  </div>
-                  <div className="text-right"><span className="block font-mono text-xs font-black text-emerald-300">{game.betAmount > 0 ? formatCurrency(game.betAmount) : (so ? 'BILAASH' : 'FREE')}</span><span className="text-[7px] font-bold uppercase text-slate-600">{so ? 'Saamiga ciyaarta' : 'Game stake'}</span></div>
                 </div>
 
                 <div className="mt-2.5">
