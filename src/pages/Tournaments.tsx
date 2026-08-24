@@ -34,7 +34,8 @@ import {
 const Tournaments: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const so = language === 'so';
 
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -294,7 +295,7 @@ const Tournaments: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 space-y-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-8 pt-4 sm:pt-6 space-y-4 sm:space-y-8">
         {/* Alerts / Feedback Banner */}
         {error && (
           <div className="bg-red-500/20 border border-red-500/40 text-red-300 p-4 rounded-2xl flex items-center gap-3 text-xs sm:text-sm font-semibold shadow-xl animate-shake">
@@ -314,53 +315,53 @@ const Tournaments: React.FC = () => {
 
         {/* 2. HERO FEATURED CHAMPIONSHIP BANNER */}
         {featuredTournament && (
-          <section className="relative overflow-hidden bg-gradient-to-r from-purple-900/60 via-[#1F0E4D] to-indigo-900/60 border border-purple-500/30 rounded-3xl p-6 sm:p-10 shadow-2xl backdrop-blur-xl">
+          <section className="relative overflow-hidden bg-gradient-to-br from-purple-900/70 via-[#1F0E4D] to-indigo-900/60 border border-purple-500/30 rounded-[1.6rem] p-4 sm:p-10 shadow-2xl backdrop-blur-xl">
             <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
               <Trophy className="w-64 h-64 text-yellow-300" />
             </div>
 
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-3 max-w-xl">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
+              <div className="space-y-2 sm:space-y-3 max-w-xl">
                 <div className="inline-flex items-center gap-2 bg-yellow-500/20 border border-yellow-500/40 text-yellow-300 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider">
                   <Flame className="w-3.5 h-3.5 fill-current text-yellow-400 animate-pulse" />
-                  FEATURED CHAMPIONSHIP
+                  {so ? 'TARTANKA MUUQDA' : 'FEATURED'}
                 </div>
 
-                <h2 className="text-2xl sm:text-4xl font-black text-white leading-tight">
+                <h2 className="text-xl sm:text-4xl font-black text-white leading-tight">
                   {featuredTournament.name}
                 </h2>
 
-                <p className="text-xs sm:text-sm text-purple-200/80 leading-relaxed">
+                <p className="hidden sm:block text-sm text-purple-200/80 leading-relaxed">
                   {t('tournamentsSub')}
                 </p>
 
                 {/* Stat Badges */}
-                <div className="flex flex-wrap items-center gap-4 pt-2">
-                  <div className="bg-black/30 border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-2.5">
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-4 sm:pt-2">
+                  <div className="bg-black/30 border border-white/10 px-2 py-2 sm:px-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5">
                     <Trophy className="w-5 h-5 text-yellow-400" />
                     <div>
                       <span className="text-[10px] text-gray-400 uppercase font-bold block">{t('prizePool')}</span>
-                      <span className="text-lg font-black text-yellow-300 font-mono">
+                      <span className="text-sm sm:text-lg font-black text-yellow-300 font-mono">
                         ${featuredTournament.prizePool.toFixed(2)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="bg-black/30 border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-2.5">
+                  <div className="bg-black/30 border border-white/10 px-2 py-2 sm:px-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5">
                     <DollarSign className="w-5 h-5 text-emerald-400" />
                     <div>
                       <span className="text-[10px] text-gray-400 uppercase font-bold block">{t('entryFee')}</span>
-                      <span className="text-lg font-black text-emerald-300 font-mono">
+                      <span className="text-sm sm:text-lg font-black text-emerald-300 font-mono">
                         {featuredTournament.entryFee > 0 ? `$${featuredTournament.entryFee.toFixed(2)}` : 'FREE'}
                       </span>
                     </div>
                   </div>
 
-                  <div className="bg-black/30 border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-2.5">
+                  <div className="bg-black/30 border border-white/10 px-2 py-2 sm:px-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5">
                     <Users className="w-5 h-5 text-indigo-400" />
                     <div>
                       <span className="text-[10px] text-gray-400 uppercase font-bold block">{t('registeredPlayers')}</span>
-                      <span className="text-lg font-black text-indigo-200 font-mono">
+                      <span className="text-sm sm:text-lg font-black text-indigo-200 font-mono">
                         {featuredTournament.players.length} / {featuredTournament.maxPlayers}
                       </span>
                     </div>
@@ -369,8 +370,8 @@ const Tournaments: React.FC = () => {
               </div>
 
               {/* Action Box */}
-              <div className="flex flex-col items-center justify-center bg-black/40 border border-purple-500/30 p-6 rounded-3xl min-w-[260px] text-center space-y-4 shadow-xl">
-                <div className="space-y-1">
+              <div className="flex flex-col items-center justify-center bg-black/30 border border-purple-500/30 p-2 sm:p-6 rounded-2xl sm:rounded-3xl sm:min-w-[260px] text-center sm:space-y-4 shadow-xl">
+                <div className="hidden sm:block space-y-1">
                   <span className="text-[10px] font-black uppercase tracking-widest text-purple-300">
                     {featuredTournament.status === 'registration_open' ? 'REGISTRATION ENDS IN' : 'STATUS'}
                   </span>
@@ -387,7 +388,7 @@ const Tournaments: React.FC = () => {
                   className="w-full bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-400 text-black font-black py-3 px-6 rounded-2xl shadow-xl shadow-yellow-500/20 transition-all hover:scale-102 cursor-pointer flex items-center justify-center gap-2 text-sm"
                 >
                   <Swords className="w-4 h-4" />
-                  <span>VIEW DETAILS & BRACKET</span>
+                  <span>{so ? 'FUR TARTANKA' : 'OPEN TOURNAMENT'}</span>
                 </button>
               </div>
             </div>
@@ -395,20 +396,20 @@ const Tournaments: React.FC = () => {
         )}
 
         {/* 2.5 MATCHMAKING & PAIRINGS EXPLANATION BANNER */}
-        <section className="bg-gradient-to-r from-purple-950/40 via-[#1A0C40]/60 to-indigo-950/40 border border-purple-500/30 rounded-3xl p-6 shadow-xl backdrop-blur-md">
+        <section className="bg-gradient-to-r from-purple-950/40 via-[#1A0C40]/60 to-indigo-950/40 border border-purple-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
               <ShieldCheck className="w-6 h-6 text-yellow-400" />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
                 {t('matchmakingInfoTitle')}
               </h2>
-              <p className="text-xs text-purple-200/70">{t('matchmakingInfoDesc')}</p>
+              <p className="hidden sm:block text-xs text-purple-200/70">{t('matchmakingInfoDesc')}</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div className="hidden sm:grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             {/* Pairing Rule 1 */}
             <div className="bg-black/30 border border-white/10 p-4 rounded-2xl space-y-1.5">
               <div className="flex items-center gap-2 text-yellow-300 font-black">
@@ -434,7 +435,7 @@ const Tournaments: React.FC = () => {
         </section>
 
         {/* 3. TABS & SEARCH CONTROLS */}
-        <section className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white/5 border border-white/10 p-4 rounded-3xl backdrop-blur-md">
+        <section className="flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4 bg-white/5 border border-white/10 p-2 sm:p-4 rounded-2xl sm:rounded-3xl backdrop-blur-md">
           {/* Tab Filter Buttons */}
           <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 scrollbar-none">
             {[
@@ -450,14 +451,14 @@ const Tournaments: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => setFilterTab(tab.id as any)}
-                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
+                  className={`px-3 sm:px-4 py-2.5 rounded-xl sm:rounded-2xl text-[11px] sm:text-xs font-black transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
                     isActive
                       ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
                       : 'text-gray-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
-                  <span>{tab.label}</span>
+                  <span className="sm:hidden">{tab.id === 'all' ? (so ? 'Dhammaan' : 'All') : tab.id === 'open' ? (so ? 'Furan' : 'Open') : tab.id === 'live' ? (so ? 'Socda' : 'Live') : tab.id === 'completed' ? (so ? 'Dhamaaday' : 'Done') : (so ? 'Kayga' : 'Mine')}</span><span className="hidden sm:inline">{tab.label}</span>
                 </button>
               );
             })}
@@ -504,7 +505,7 @@ const Tournaments: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
               {filteredTournaments.map((tournament) => {
                 const isRegistered = user && tournament.players.some((p) => p.userId === user.id);
                 const isFull = tournament.players.length >= tournament.maxPlayers;
@@ -517,7 +518,7 @@ const Tournaments: React.FC = () => {
                   <div
                     key={tournament.id}
                     onClick={() => setSelectedTournamentId(tournament.id)}
-                    className="group bg-[#1A0C40]/80 hover:bg-[#20104e] border border-purple-500/20 hover:border-purple-500/50 rounded-3xl p-6 shadow-xl hover:shadow-purple-500/10 transition-all duration-300 flex flex-col justify-between space-y-5 cursor-pointer relative overflow-hidden"
+                    className="group bg-[#1A0C40]/80 hover:bg-[#20104e] border border-purple-500/20 hover:border-purple-500/50 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl hover:shadow-purple-500/10 transition-all duration-300 flex flex-col justify-between space-y-3 sm:space-y-5 cursor-pointer relative overflow-hidden"
                   >
                     {/* Top Status Bar */}
                     <div className="flex items-center justify-between">
@@ -551,11 +552,11 @@ const Tournaments: React.FC = () => {
 
                     {/* Title & Grand Prize */}
                     <div className="space-y-2">
-                      <h3 className="text-xl font-black text-white group-hover:text-yellow-300 transition-colors">
+                      <h3 className="text-lg sm:text-xl font-black text-white group-hover:text-yellow-300 transition-colors">
                         {tournament.name}
                       </h3>
 
-                      <div className="bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-transparent border border-yellow-500/20 p-3 rounded-2xl flex items-center justify-between">
+                      <div className="bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-transparent border border-yellow-500/20 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Trophy className="w-5 h-5 text-yellow-400 shrink-0" />
                           <span className="text-xs font-bold text-gray-300 uppercase">{t('prizePool')}</span>
@@ -586,9 +587,9 @@ const Tournaments: React.FC = () => {
                     </div>
 
                     {/* Schedule Date */}
-                    <div className="flex items-center gap-2 text-xs text-gray-400 font-mono border-t border-white/5 pt-3">
+                    <div className="flex items-center gap-2 text-[11px] sm:text-xs text-gray-400 font-mono border-t border-white/5 pt-3">
                       <Calendar className="w-4 h-4 text-purple-400 shrink-0" />
-                      <span>Starts: {new Date(tournament.startDate).toLocaleString()}</span>
+                      <span>{so ? 'Bilaabasho:' : 'Starts:'} {new Date(tournament.startDate).toLocaleString()}</span>
                     </div>
 
                     {/* Action Button */}
